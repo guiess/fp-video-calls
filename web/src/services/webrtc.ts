@@ -48,9 +48,26 @@ export class WebRTCService {
   }
 
   private ensureSocket() {
-    const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
-    const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
-    this.endpoint = `${protocol}//${host}:3000`;
+    const env: any = (import.meta as any)?.env || {};
+    const envUrl = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
+    const envHost = (env.VITE_SIGNALING_HOST as string | undefined)?.trim();
+    const envPort = (env.VITE_SIGNALING_PORT as string | undefined)?.trim();
+    const envSecure = (env.VITE_SIGNALING_SECURE as string | undefined);
+
+    const isBrowser = typeof window !== "undefined";
+    const proto = isBrowser ? window.location.protocol : "http:";
+    const host = isBrowser ? window.location.hostname : "localhost";
+
+    let url = envUrl;
+    if (!url) {
+      const useSecure = envSecure !== undefined ? envSecure.toLowerCase() === "true" : proto === "https:";
+      const h = envHost || host;
+      const p = envPort;
+      // Default to same-origin for Azure (443/80) when no explicit port provided
+      url = p ? `${useSecure ? "https" : "http"}://${h}:${p}` : `${useSecure ? "https" : "http"}://${h}`;
+    }
+
+    this.endpoint = url;
     if (!this.socket || !(this.socket as any).connected) {
       try {
         this.socket?.off(); // remove previous listeners if any
@@ -126,17 +143,26 @@ export class WebRTCService {
     }
   }
  
-  /** Build ICE servers from localStorage and sensible defaults */
+  /** Build ICE servers from env (VITE_TURN_*) + localStorage with sensible defaults */
   private getIceServers(): RTCIceServer[] {
     const defaults: RTCIceServer[] = [
       { urls: "stun:stun.l.google.com:19302" },
-      // Use plain STUN URLs; browsers may reject query params like ?transport=udp
       { urls: "stun:global.stun.twilio.com:3478" }
     ];
-    const raw = (localStorage.getItem("turn.urls") || "").split(",").map(s => s.trim()).filter(Boolean);
-    const turnUser = localStorage.getItem("turn.username") || undefined;
-    const turnPass = localStorage.getItem("turn.password") || undefined;
-    // Validate schemes and normalize
+    const env: any = (import.meta as any)?.env || {};
+    const envUrls = ((env.VITE_TURN_URLS as string | undefined) || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    const lsUrls = ((localStorage.getItem("turn.urls") || "") as string)
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    const raw = [...envUrls, ...lsUrls].filter(Boolean);
+
+    const turnUser = (env.VITE_TURN_USERNAME as string | undefined) || (localStorage.getItem("turn.username") || undefined);
+    const turnPass = (env.VITE_TURN_PASSWORD as string | undefined) || (localStorage.getItem("turn.password") || undefined);
+
     const validUrls = raw.filter(u => /^turns?:/.test(u));
     if (validUrls.length > 0 && turnUser && turnPass) {
       return [...defaults, { urls: validUrls, username: turnUser, credential: turnPass }];

@@ -9,24 +9,51 @@ import crypto from "crypto";
 import cors from "cors";
 
 const app = express();
-// Dev: allow any origin on LAN for quick testing. Lock down for prod.
-// Include OPTIONS for preflight and DELETE for future endpoints.
-const corsOptions = { origin: true, methods: ["GET", "POST", "DELETE", "OPTIONS"], credentials: false };
+app.set("trust proxy", 1);
+// Dev/Prod CORS: allowlist via env, fallback to permissive during dev
+const allowlist = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+const allowCredentials = (process.env.CORS_CREDENTIALS || "false").toLowerCase() === "true";
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowlist.length === 0) return cb(null, true);
+    cb(null, allowlist.includes(origin));
+  },
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  credentials: allowCredentials
+};
 app.use(cors(corsOptions));
-// Explicitly handle preflight for all routes
 app.options("*", cors(corsOptions));
 
 // Additional CORS headers to satisfy strict browsers over HTTPS
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) {
+  const allowed =
+    !origin
+      ? false
+      : allowlist.length === 0
+      ? true
+      : allowlist.includes(origin);
+
+  // Echo allowed origin or fallback to "*"
+  if (allowed && origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   } else {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
+
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  const allowHeaders = process.env.CORS_ALLOW_HEADERS || "Content-Type, Authorization";
+  res.setHeader("Access-Control-Allow-Headers", allowHeaders);
   res.setHeader("Access-Control-Max-Age", "86400");
+
+  if (allowCredentials) {
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -46,7 +73,15 @@ const server = useHttps
   : http.createServer(app);
 
 const io = new SocketIOServer(server, {
-  cors: { origin: true, methods: ["GET", "POST", "DELETE", "OPTIONS"] },
+  cors: {
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (allowlist.length === 0) return cb(null, true);
+      cb(null, allowlist.includes(origin));
+    },
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    credentials: allowCredentials
+  },
   transports: ["websocket", "polling"]
 });
 

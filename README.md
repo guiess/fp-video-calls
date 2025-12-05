@@ -12,6 +12,11 @@ Goal: WebRTC group video calls with persistent room URLs, optional room password
 ## Documentation
 - Architecture and design: docs/architecture.md
 - Video quality (720p/1080p): docs/video-quality.md
+- **Azure Deployment Guides:**
+  - 📋 **Complete Step-by-Step Guide**: [docs/azure-deploy-complete.md](docs/azure-deploy-complete.md)
+  - 🚀 **Automated Deployment Script**: [docs/deployment-automation.md](docs/deployment-automation.md)
+  - 📝 **Quick Reference**: [docs/azure-deploy.md](docs/azure-deploy.md)
+  - ❓ **Why TURN Servers Are Needed**: [docs/webrtc-turn-explanation.md](docs/webrtc-turn-explanation.md)
 
 ## TODO by Service
 
@@ -80,12 +85,15 @@ Goal: WebRTC group video calls with persistent room URLs, optional room password
 
 ### Azure Infrastructure & Ops
 - [x] Document deployment strategy (docs/architecture.md)
-- [ ] Provision VM(s), DNS, SSL (Let’s Encrypt)
-- [ ] NSG configuration and validation
-- [ ] Optional containerization (Docker/Compose)
-- [ ] CI/CD (GitHub Actions) for server deployment
-- [ ] Monitoring (Azure Monitor/App Insights), alerts
-- [ ] Backups (Redis, VM snapshots), runbooks
+- [x] **Azure App Service + Static Web Apps deployment guides** 📋
+- [x] **Azure Key Vault integration for secrets management** 🔐
+- [x] **Environment variables configuration** ⚙️
+- [x] **CI/CD pipeline templates (GitHub Actions)** 🔄
+- [x] **Monitoring setup (Application Insights)** 📊
+- [x] **Automated deployment script** 🚀
+- [ ] Custom domain and CDN setup
+- [ ] Backup and disaster recovery procedures
+- [ ] Performance monitoring and scaling configuration
 
 ### Testing & Launch
 - [x] Local 2-tab P2P test via web/test.html and signaling server
@@ -93,6 +101,38 @@ Goal: WebRTC group video calls with persistent room URLs, optional room password
 - [ ] Performance tuning for 5–10 participants at selected quality
 - [ ] Staging test with real users
 - [ ] Launch and monitor
+
+## 🚀 Quick Start - Deploy to Azure
+
+**Option 1: Automated Deployment (Recommended)**
+```bash
+# Download and run the automated deployment script
+curl -o deploy-azure.sh https://raw.githubusercontent.com/yourusername/voice-video/main/scripts/deploy-azure.sh
+chmod +x deploy-azure.sh
+./deploy-azure.sh
+```
+
+**Option 2: Manual Step-by-Step**
+Follow the comprehensive guide: [docs/azure-deploy-complete.md](docs/azure-deploy-complete.md)
+
+**What gets deployed:**
+- ✅ **Backend**: Node.js signaling server on Azure App Service
+- ✅ **Frontend**: React app on Azure Static Web Apps
+- ✅ **Security**: Azure Key Vault for TURN credentials (optional)
+- ✅ **Monitoring**: Application Insights integration
+- ✅ **CORS**: Properly configured cross-origin policies
+- ✅ **WebSockets**: Enabled for real-time communication
+
+**Connection Success Rates:**
+- 🔄 **STUN-only (testing)**: 70-85% - Some users behind NAT/firewalls cannot connect
+- 🎯 **STUN + TURN (production)**: 99%+ - Universal connectivity, requires paid TURN service
+
+**Environment Variables Managed:**
+- `VITE_SIGNALING_URL` - WebSocket server endpoint
+- `VITE_TURN_*` - TURN server configuration for NAT traversal (optional)
+- `CORS_ORIGINS` - Frontend domain allowlist
+
+**📖 Read:** [Why TURN servers are needed](docs/webrtc-turn-explanation.md) for WebRTC connectivity
 
 ## Notes
 - Start with 720p default; allow 1080p per room if bandwidth/device allows.
