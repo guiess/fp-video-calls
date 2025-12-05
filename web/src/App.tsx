@@ -40,6 +40,10 @@ export default function App() {
   const [micEnabled, setMicEnabled] = useState<boolean>(true);
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
 
+  // Stable identifiers for this page session
+  const fixedUserIdRef = useRef<string>(safeRandomId());
+  const displayNameParamRef = useRef<string | null>(null);
+
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -298,6 +302,13 @@ export default function App() {
     }
   }, [roomId]);
 
+  // Parse display name from URL once: ?name=John or ?username=John
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const nameParam = url.searchParams.get("name") || url.searchParams.get("username");
+    displayNameParamRef.current = nameParam && nameParam.trim() ? nameParam.trim() : null;
+  }, []);
+
   // Auto-join via URL: ?room={id}&pwd={password}&q={720p|1080p}
   useEffect(() => {
     if (autoJoinTriggeredRef.current) return;
@@ -317,8 +328,8 @@ export default function App() {
     (async () => {
       const svc = svcRef.current;
       if (!svc) return;
-      const userId = safeRandomId();
-      const displayName = `Guest_${Math.floor(Math.random() * 10000)}`;
+      const userId = fixedUserIdRef.current;
+      const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
 
       // Parse create-only quality override: ?cq=720p|1080p
       const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
@@ -380,8 +391,8 @@ export default function App() {
       return;
     }
     const svc = svcRef.current!;
-    const userId = safeRandomId();
-    const displayName = `Guest_${Math.floor(Math.random() * 10000)}`;
+    const userId = fixedUserIdRef.current;
+    const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
     await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality });
   }
 
@@ -546,39 +557,43 @@ export default function App() {
         <div style={{ flex: 1 }}>
           <h3>Remotes</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, 320px)", gap: 12 }}>
-            {Object.entries(remoteStreams).map(([uid, stream]) => (
-              <div key={uid}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ fontSize: 12, color: "#888" }}>peer: <code>{uid}</code></div>
-                  <button
-                    style={{ padding: "4px 8px", fontSize: 12 }}
-                    aria-label="Fullscreen"
-                    title="Fullscreen"
-                    onClick={(e) => {
-                      const container = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
-                      requestFullscreen(container);
+            {Object.entries(remoteStreams).map(([uid, stream]) => {
+              const p = participants.find(x => x.userId === uid);
+              const name = p?.displayName ?? uid;
+              return (
+                <div key={uid}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: 12, color: "#888" }}>peer: <strong>{name}</strong></div>
+                    <button
+                      style={{ padding: "4px 8px", fontSize: 12 }}
+                      aria-label="Fullscreen"
+                      title="Fullscreen"
+                      onClick={(e) => {
+                        const container = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
+                        requestFullscreen(container);
+                      }}
+                    >
+                      <FiMaximize size={16} />
+                    </button>
+                  </div>
+                  <video
+                    autoPlay
+                    playsInline
+                    controls={false}
+                    disablePictureInPicture
+                    controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+                    // @ts-ignore vendor attribute
+                    webkit-playsinline={true}
+                    style={{ width: 320, background: "#000" }}
+                    ref={(el) => {
+                      if (el && stream && el.srcObject !== stream) {
+                        el.srcObject = stream;
+                      }
                     }}
-                  >
-                    <FiMaximize size={16} />
-                  </button>
+                  />
                 </div>
-                <video
-                  autoPlay
-                  playsInline
-                  controls={false}
-                  disablePictureInPicture
-                  controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
-                  // @ts-ignore vendor attribute
-                  webkit-playsinline={true}
-                  style={{ width: 320, background: "#000" }}
-                  ref={(el) => {
-                    if (el && stream && el.srcObject !== stream) {
-                      el.srcObject = stream;
-                    }
-                  }}
-                />
-              </div>
-            ))}
+              );
+            })}
             {Object.keys(remoteStreams).length === 0 && (
               <div>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
