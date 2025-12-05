@@ -25,13 +25,10 @@ export class WebRTCService {
   private roomId: string = "";
   private userId: string = "";
   private handlers: SignalingHandlers = {};
+  private endpoint: string = "";
 
-  async init(handlers: SignalingHandlers) {
-    this.handlers = handlers;
-    // Match page scheme to avoid mixed content (https page -> https signaling)
-    const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
-    const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
-    this.socket = io(`${protocol}//${host}:3000`, { transports: ["websocket"] });
+  private bindSocketEvents() {
+    if (!this.socket) return;
     this.socket.on("error", (e: any) => this.handlers.onError?.(e?.code ?? "ERROR", e?.message));
     this.socket.on("room_joined", ({ participants, roomInfo }) => this.handlers.onRoomJoined?.(participants, roomInfo));
     this.socket.on("user_joined", ({ userId, displayName }) => this.handlers.onUserJoined?.(userId, displayName));
@@ -39,6 +36,28 @@ export class WebRTCService {
     this.socket.on("offer_received", async ({ fromId, offer }) => this.handlers.onOffer?.(fromId, offer));
     this.socket.on("answer_received", async ({ fromId, answer }) => this.handlers.onAnswer?.(fromId, answer));
     this.socket.on("ice_candidate_received", async ({ fromId, candidate }) => this.handlers.onIceCandidate?.(fromId, candidate));
+  }
+
+  private ensureSocket() {
+    const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+    const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
+    this.endpoint = `${protocol}//${host}:3000`;
+    if (!this.socket || !(this.socket as any).connected) {
+      try {
+        this.socket?.off(); // remove previous listeners if any
+      } catch {}
+      this.socket = io(this.endpoint, { transports: ["websocket"] });
+      this.bindSocketEvents();
+    }
+  }
+
+  async init(handlers: SignalingHandlers) {
+    this.handlers = handlers;
+    this.ensureSocket();
+    try {
+      // Ensure transport is connected so first join is not lost
+      (this.socket as any)?.connect?.();
+    } catch {}
   }
 
   async getCaptureStream(quality: "720p" | "1080p") {
@@ -103,6 +122,8 @@ export class WebRTCService {
   }
 
   async join({ roomId, userId, displayName, password, quality }: JoinOptions) {
+    // Reconnect socket if it was disconnected after leave()
+    this.ensureSocket();
     if (!this.socket) throw new Error("Socket not initialized");
     this.roomId = roomId;
     this.userId = userId;
@@ -114,21 +135,39 @@ export class WebRTCService {
     }
     // Include desired room videoQuality on first join; server uses it only when auto-creating a room
     this.socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
+    // Debug to verify join after re-connect
+    try {
+      console.log("[join] emitted", { roomId, userId, quality });
+    } catch {}
   }
 
   // Signaling helpers
   sendOffer(targetId: string, offer: RTCSessionDescriptionInit) {
+    // Skip if target mapping is stale/closed; caller should recreate PC first
+    const pc = this.getPeerConnection(targetId);
+    if (pc && pc.signalingState === "closed") return;
     this.socket?.emit("offer", { roomId: this.roomId, targetId, offer });
   }
   sendAnswer(targetId: string, answer: RTCSessionDescriptionInit) {
+    const pc = this.getPeerConnection(targetId);
+    if (pc && pc.signalingState === "closed") return;
     this.socket?.emit("answer", { roomId: this.roomId, targetId, answer });
   }
   sendIceCandidate(targetId: string, candidate: RTCIceCandidateInit) {
+    const pc = this.getPeerConnection(targetId);
+    if (pc && pc.signalingState === "closed") return;
     this.socket?.emit("ice_candidate", { roomId: this.roomId, targetId, candidate });
   }
 
   getPeerConnection(targetId: string) {
-    return this.pcs.get(targetId) || null;
+    const pc = this.pcs.get(targetId) || null;
+    if (pc && pc.signalingState === "closed") {
+      try {
+        this.pcs.delete(targetId);
+      } catch {}
+      return null;
+    }
+    return pc;
   }
   getLocalStream() {
     return this.localStream;
@@ -137,15 +176,23 @@ export class WebRTCService {
     return this.userId;
   }
   leave() {
-    this.socket?.emit("leave_room", { roomId: this.roomId, userId: this.userId });
-    this.socket?.disconnect();
+    // Notify server and tear down connections
+    try { this.socket?.emit("leave_room", { roomId: this.roomId, userId: this.userId }); } catch {}
+    try { this.socket?.off(); } catch {}
+    try { this.socket?.disconnect(); } catch {}
+    this.socket = null; // force new socket instance on next init/join
+
+    // Stop local media and close peer connections
     try {
       this.localStream?.getTracks()?.forEach((t) => t.stop());
       for (const pc of this.pcs.values()) {
+        try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
         try { pc.close(); } catch {}
       }
     } catch {}
     this.pcs.clear();
     this.localStream = null;
+    // Reset room id; userId persists externally in App for stable identity
+    this.roomId = "";
   }
 }

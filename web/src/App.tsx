@@ -156,6 +156,8 @@ export default function App() {
           others.forEach(({ userId: uid }) => {
             const pc = svc.getPeerConnection(uid);
             if (pc && pc.signalingState === "stable") {
+              // Set target for onnegotiationneeded so candidates/offers route properly
+              peerIdRef.current = uid;
               console.log("[offer] newcomer -> creating offer to", uid);
               pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
                 .then(async (offer) => {
@@ -181,22 +183,71 @@ export default function App() {
         wirePeerHandlers(pc, svc, uid);
       },
       onUserLeft: (uid) => {
+        // Remove participant entry
         setParticipants((prev) => prev.filter((p) => p.userId !== uid));
         if (peerId === uid) {
           setPeerId(null);
           peerIdRef.current = null;
         }
+
+        // Close and remove the peer connection (if any)
+        try {
+          const svc = svcRef.current!;
+          const pc = svc.getPeerConnection(uid);
+          if (pc) {
+            try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
+            try { pc.close(); } catch {}
+          }
+        } catch {}
+
+        // Remove the remote stream tile and clear single preview if it matches
+        setRemoteStreams((prev) => {
+          const next = { ...prev };
+          const removed = next[uid] as MediaStream | undefined;
+          delete next[uid];
+
+          // If single remote preview shows the removed stream, clear it
+          const current = remoteVideoRef.current?.srcObject as MediaStream | null;
+          if (current && removed && current.id === removed.id && remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = null;
+          }
+          return next;
+        });
       },
       onOffer: async (fromId, offer) => {
         const svc = svcRef.current!;
-        const pc = svc.getPeerConnection(fromId) ?? svc.createPeerConnection(fromId);
-        wirePeerHandlers(pc, svc, fromId);
+        let pc = svc.getPeerConnection(fromId);
+
+        // Recreate PC if missing or closed (e.g., after leave/teardown)
+        if (!pc || pc.signalingState === "closed") {
+          pc = svc.createPeerConnection(fromId);
+          wirePeerHandlers(pc, svc, fromId);
+        } else {
+          wirePeerHandlers(pc, svc, fromId);
+        }
+
+        // Glare-safe rollback if not stable
         if (pc.signalingState !== "stable") {
           try {
             await pc.setLocalDescription({ type: "rollback" } as any);
           } catch {}
         }
-        await pc.setRemoteDescription(offer);
+
+        try {
+          await pc.setRemoteDescription(offer);
+        } catch (err) {
+          console.warn("[onOffer] setRemoteDescription failed; recreating PC", err);
+          try {
+            // Hard recreate on SRD failure
+            pc = svc.createPeerConnection(fromId);
+            wirePeerHandlers(pc, svc, fromId);
+            await pc.setRemoteDescription(offer);
+          } catch (err2) {
+            console.error("[onOffer] SRD failed after recreate", err2);
+            return;
+          }
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         svc.sendAnswer(fromId, answer);
@@ -396,11 +447,111 @@ export default function App() {
   }
 
   function leave() {
-    svcRef.current?.leave();
+    // Gracefully leave and tear down
+    try { svcRef.current?.leave(); } catch {}
+
+    // Reset app state
     setParticipants([]);
     setPeerId(null);
     peerIdRef.current = null;
     setRemoteStreams({});
+    autoJoinTriggeredRef.current = false;
+
+    // Recreate service and rebind handlers so subsequent joins have fresh signaling + PCs
+    const svc = new WebRTCService();
+    svcRef.current = svc;
+    svc.init({
+      onRoomJoined: (existing, roomInfo) => {
+        if (roomInfo?.settings) {
+          setMeta({
+            roomId: roomInfo.roomId ?? roomId,
+            exists: true,
+            settings: {
+              videoQuality: roomInfo.settings.videoQuality,
+              passwordEnabled: !!roomInfo.settings.passwordEnabled,
+              passwordHint: roomInfo.settings.passwordHint
+            }
+          });
+        }
+        setParticipants(existing);
+        const others = existing.filter((p) => p.userId !== svc.getUserId());
+        others.forEach(({ userId: uid }) => {
+          const pc = svc.createPeerConnection(uid);
+          wirePeerHandlers(pc, svc, uid);
+        });
+        if (others.length > 0) {
+          others.forEach(({ userId: uid }) => {
+            const pc = svc.getPeerConnection(uid);
+            if (pc && pc.signalingState === "stable") {
+              pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+                .then(async (offer) => {
+                  await pc.setLocalDescription(offer);
+                  svc.sendOffer(uid, offer);
+                })
+                .catch((err) => console.warn("[offer] createOffer failed", err));
+            }
+          });
+        }
+        const ls = svc.getLocalStream();
+        if (localVideoRef.current && ls) localVideoRef.current.srcObject = ls;
+      },
+      onUserJoined: (uid, _name) => {
+        setParticipants((prev) => {
+          const exists = prev.some(p => p.userId === uid);
+          return exists ? prev : [...prev, { userId: uid, displayName: _name }];
+        });
+        const pc = svc.createPeerConnection(uid);
+        wirePeerHandlers(pc, svc, uid);
+      },
+      onUserLeft: (uid) => {
+        setParticipants((prev) => prev.filter((p) => p.userId !== uid));
+        if (peerId === uid) {
+          setPeerId(null);
+          peerIdRef.current = null;
+        }
+        try {
+          const pc = svc.getPeerConnection(uid);
+          if (pc) {
+            try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
+            try { pc.close(); } catch {}
+          }
+        } catch {}
+        setRemoteStreams((prev) => {
+          const next = { ...prev };
+          const removed = next[uid] as MediaStream | undefined;
+          delete next[uid];
+          const current = remoteVideoRef.current?.srcObject as MediaStream | null;
+          if (current && removed && current.id === removed.id && remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = null;
+          }
+          return next;
+        });
+      },
+      onOffer: async (fromId, offer) => {
+        const pc = svc.getPeerConnection(fromId) ?? svc.createPeerConnection(fromId);
+        wirePeerHandlers(pc, svc, fromId);
+        if (pc.signalingState !== "stable") {
+          try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {}
+        }
+        await pc.setRemoteDescription(offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        svc.sendAnswer(fromId, answer);
+      },
+      onAnswer: async (fromId, answer) => {
+        const pc = svc.getPeerConnection(fromId);
+        if (!pc) return;
+        await pc.setRemoteDescription(answer);
+      },
+      onIceCandidate: async (fromId, candidate) => {
+        const pc = svc.getPeerConnection(fromId);
+        if (!pc) return;
+        try { await pc.addIceCandidate(candidate); } catch {}
+      },
+      onError: (code, message) => {
+        alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
+      }
+    });
   }
 
   function toggleMute() {
