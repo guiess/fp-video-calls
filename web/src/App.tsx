@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
 import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize } from "react-icons/fi";
+import VideoGrid from "./components/VideoGrid";
 
 function safeRandomId() {
   const c: any = (typeof window !== "undefined" && (window as any).crypto) || undefined;
@@ -348,6 +349,17 @@ export default function App() {
       video::-webkit-media-controls-timeline { display: none !important; }
       video::-webkit-media-controls-fullscreen-button { display: none !important; }
       video::-moz-media-controls { display: none !important; }
+
+      /* Ensure fullscreen media fills the viewport across browsers, preserving full frame */
+      :fullscreen video,
+      video:fullscreen,
+      :-webkit-full-screen video,
+      video:-webkit-full-screen {
+        width: 100vw !important;
+        height: 100vh !important;
+        object-fit: contain !important;
+        background: #000 !important;
+      }
     `;
     document.head.appendChild(style);
     return () => {
@@ -676,12 +688,15 @@ export default function App() {
     setCamEnabled(next);
   }
 
-  function requestFullscreen(el?: HTMLVideoElement | null) {
-    // Request fullscreen on the tile/container so overlay (child) is visible in fullscreen
-    const video = el ?? localVideoRef.current;
-    const container = (video?.parentElement as HTMLElement | null) ?? null;
-    const target: any = container || video;
-    if (!target) return;
+  function requestFullscreen(el?: HTMLElement | null) {
+    // Prefer the provided element. If it's a <video>, use its parent so overlay stays visible.
+    const baseEl = el ?? localVideoRef.current ?? null;
+    if (!baseEl) return;
+    let target: any = baseEl;
+    const tag = (target.tagName || "").toLowerCase();
+    if (tag === "video" && target.parentElement) {
+      target = target.parentElement;
+    }
     const fn =
       target.requestFullscreen ||
       target.webkitRequestFullscreen ||
@@ -953,107 +968,44 @@ export default function App() {
         </div>
         <div style={{ flex: 1 }}>
           <h3>Remotes</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, 320px)", gap: 12 }}>
-            {Object.entries(remoteStreams).map(([uid, stream]) => {
+          <VideoGrid
+            tiles={Object.entries(remoteStreams).map(([uid, stream]) => {
               const p = participants.find(x => x.userId === uid);
-              const name = p?.displayName ?? uid;
-              return (
-                <div
-                  key={uid}
-                  ref={(el) => { remoteTileRefs.current[uid] = el; }}
-                  style={{ position: "relative" }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span>peer: <strong>{name}</strong></span>
-                      {(remoteAudioMuted[uid] || p?.micMuted) ? <FiMicOff size={14} title="Muted" aria-label="Muted" /> : <FiMic size={14} title="Unmuted" aria-label="Unmuted" />}
-                    </div>
-                    <button
-                      style={{ padding: "4px 8px", fontSize: 12 }}
-                      aria-label="Fullscreen"
-                      title="Fullscreen"
-                      onClick={(e) => {
-                        const videoEl = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
-                        const tileEl = remoteTileRefs.current[uid] || videoEl?.parentElement;
-                        const isFs = document.fullscreenElement === tileEl;
-                        if (isFs) {
-                          exitFullscreen();
-                        } else {
-                          requestFullscreen(videoEl);
-                        }
-                      }}
-                    >
-                      {document.fullscreenElement === remoteTileRefs.current[uid] ? <FiMinimize size={16} /> : <FiMaximize size={16} />}
-                    </button>
-                  </div>
-                  <video
-                    autoPlay
-                    playsInline
-                    controls={false}
-                    disablePictureInPicture
-                    controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
-                    // @ts-ignore vendor attribute
-                    webkit-playsinline="true"
-                    style={{
-                      width: isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] ? "100%" : 320,
-                      height: isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] ? "100%" : "auto",
-                      background: "#000",
-                      objectFit: "contain"
-                    }}
-                    ref={(el) => {
-                      if (el && stream && el.srcObject !== stream) {
-                        el.srcObject = stream;
-                      }
-                    }}
-                  />
-                  {isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        zIndex: 1000,
-                        background: "rgba(0,0,0,0.6)",
-                        color: "#fff",
-                        borderRadius: 8,
-                        padding: "6px 10px",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8
-                      }}
-                    >
-                      {/* Local controls visible while remote tile is fullscreen */}
-                      <button
-                        onClick={toggleMute}
-                        aria-label={micEnabled ? "Mute" : "Unmute"}
-                        title={micEnabled ? "Mute" : "Unmute"}
-                        style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff" }}
-                      >
-                        {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
-                      </button>
-                      <button
-                        onClick={toggleVideo}
-                        aria-label={camEnabled ? "Disable Video" : "Enable Video"}
-                        title={camEnabled ? "Disable Video" : "Enable Video"}
-                        style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff" }}
-                      >
-                        {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
-                      </button>
-                      <button
-                        onClick={exitFullscreen}
-                        aria-label="Exit Fullscreen"
-                        title="Exit Fullscreen"
-                        style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
-                      >
-                        Exit
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
+              const container = remoteTileRefs.current[uid] || null;
+              const fsEl = document.fullscreenElement;
+              const isTileFs = !!(isFullscreen && container && fsEl && (fsEl === container || container.contains(fsEl)));
+              return {
+                userId: uid,
+                displayName: p?.displayName ?? uid,
+                stream,
+                muted: !!(remoteAudioMuted[uid] || p?.micMuted),
+                // Consider fullscreen active if the tile container OR a descendant (e.g., video) is fullscreen
+                fullscreen: isTileFs
+              };
             })}
-          </div>
+            isFullscreen={isFullscreen}
+            getTileEl={(uid) => {
+              return remoteTileRefs.current[uid] || null;
+            }}
+            setTileEl={(uid, el) => {
+              remoteTileRefs.current[uid] = el;
+            }}
+            onToggleFullscreen={(uid, tileEl, _videoEl) => {
+              const container = tileEl;
+              const isFs = document.fullscreenElement === container;
+              if (isFs) {
+                exitFullscreen();
+              } else {
+                // Always request fullscreen on the tile container to keep overlay controls visible
+                requestFullscreen(container || undefined);
+              }
+            }}
+            onLocalMuteToggle={toggleMute}
+            onLocalVideoToggle={toggleVideo}
+            onExitFullscreen={exitFullscreen}
+            micEnabled={micEnabled}
+            camEnabled={camEnabled}
+          />
         </div>
       </div>
 

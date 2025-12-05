@@ -26,6 +26,7 @@ export class WebRTCService {
   private localStream: MediaStream | null = null;
   private roomId: string = "";
   private userId: string = "";
+  private displayName: string = "";
   private handlers: SignalingHandlers = {};
   private endpoint: string = "";
 
@@ -124,30 +125,34 @@ export class WebRTCService {
       }
     }
   }
-
+ 
+  /** Build ICE servers from localStorage and sensible defaults */
+  private getIceServers(): RTCIceServer[] {
+    const defaults: RTCIceServer[] = [
+      { urls: "stun:stun.l.google.com:19302" },
+      // Use plain STUN URLs; browsers may reject query params like ?transport=udp
+      { urls: "stun:global.stun.twilio.com:3478" }
+    ];
+    const raw = (localStorage.getItem("turn.urls") || "").split(",").map(s => s.trim()).filter(Boolean);
+    const turnUser = localStorage.getItem("turn.username") || undefined;
+    const turnPass = localStorage.getItem("turn.password") || undefined;
+    // Validate schemes and normalize
+    const validUrls = raw.filter(u => /^turns?:/.test(u));
+    if (validUrls.length > 0 && turnUser && turnPass) {
+      return [...defaults, { urls: validUrls, username: turnUser, credential: turnPass }];
+    }
+    return defaults;
+  }
+ 
   createPeerConnection(targetId: string) {
     const existing = this.pcs.get(targetId);
     if (existing) return existing;
-    // ICE servers: STUN + optional TURN from localStorage configuration
-    // Configure TURN by setting in the browser console or app init:
-    // localStorage.setItem("turn.urls", "turn:your-turn-host:3478,turns:your-turn-host:5349");
-    // localStorage.setItem("turn.username", "user");
-    // localStorage.setItem("turn.password", "pass");
-    const turnUrls = (localStorage.getItem("turn.urls") || "").split(",").map(s => s.trim()).filter(Boolean);
-    const turnUser = localStorage.getItem("turn.username") || undefined;
-    const turnPass = localStorage.getItem("turn.password") || undefined;
-    const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
-    if (turnUrls.length > 0 && turnUser && turnPass) {
-      iceServers.push({ urls: turnUrls, username: turnUser, credential: turnPass });
-    }
-    const pc = new RTCPeerConnection({ iceServers });
-    // Do not pre-create recvonly transceivers; let addTrack create sendrecv m-lines
-    // and let offers include receive via offerToReceive* or remote transceivers.
+ 
+    const pc = new RTCPeerConnection({ iceServers: this.getIceServers() });
     // Let App bind per-peer handlers and onicecandidate routing
     pc.onicecandidate = null;
     if (this.localStream) {
       this.localStream.getTracks().forEach((t) => {
-        // Always addTrack for a clean single m-line per kind; avoid duplicate transceivers
         pc.addTrack(t, this.localStream!);
       });
     }
@@ -160,6 +165,7 @@ export class WebRTCService {
     if (!this.socket) throw new Error("Socket not initialized");
     this.roomId = roomId;
     this.userId = userId;
+    this.displayName = displayName;
 
     const initial = await this.getCaptureStream(quality, "user");
     if (!initial || initial.getTracks().length === 0) {
@@ -200,7 +206,7 @@ export class WebRTCService {
 
   // Chat helper
   sendChat(text: string) {
-    const payload = { roomId: this.roomId, userId: this.userId, displayName: "", text, ts: Date.now() };
+    const payload = { roomId: this.roomId, userId: this.userId, displayName: this.displayName, text, ts: Date.now() };
     this.socket?.emit("chat_message", payload);
   }
 
@@ -351,7 +357,26 @@ export class WebRTCService {
   async stopScreenShare(quality: "720p" | "1080p" = "720p", facing: "user" | "environment" = "user"): Promise<void> {
     await this.switchCamera(quality, facing);
   }
-
+ 
+  /** Recreate peer connections to apply updated TURN settings from localStorage */
+  applyUpdatedTurnSettings() {
+    for (const [targetId, oldPc] of this.pcs.entries()) {
+      try {
+        // Preserve senders and local tracks by creating a new PC and re-attaching
+        const newPc = new RTCPeerConnection({ iceServers: this.getIceServers() });
+        // Move handlers to be bound by App
+        newPc.onicecandidate = oldPc.onicecandidate;
+        // Re-add local tracks
+        this.localStream?.getTracks().forEach(t => { try { newPc.addTrack(t, this.localStream!); } catch {} });
+        // Replace map entry and close old
+        this.pcs.set(targetId, newPc);
+        try { oldPc.close(); } catch {}
+      } catch (e) {
+        console.warn("[turn] apply settings failed", e);
+      }
+    }
+  }
+ 
   leave() {
     // Notify server and tear down connections
     try { this.socket?.emit("leave_room", { roomId: this.roomId, userId: this.userId }); } catch {}
