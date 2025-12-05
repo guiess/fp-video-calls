@@ -53,6 +53,7 @@ const io = new SocketIOServer(server, {
 // In-memory rooms for local testing (no persistence)
 // roomId -> { participants: Map(userId -> { socketId, displayName }), settings: { videoQuality, passwordEnabled, passwordHash?, passwordHint? } }
 const rooms = new Map();
+// participants info extended: { socketId, displayName, micMuted?: boolean }
 
 // Health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -119,18 +120,19 @@ io.on("connection", (socket) => {
       }
     }
 
-    room.participants.set(userId, { socketId: socket.id, displayName });
+    room.participants.set(userId, { socketId: socket.id, displayName, micMuted: false });
     socket.join(roomId);
-
-    // Notify caller with existing participants
+ 
+    // Notify caller with existing participants (include micMuted for initial badges)
     const participants = Array.from(room.participants.entries()).map(([id, p]) => ({
       userId: id,
-      displayName: p.displayName
+      displayName: p.displayName,
+      micMuted: !!p.micMuted
     }));
     socket.emit("room_joined", { participants, roomInfo: { roomId, settings: room.settings } });
-
+ 
     // Notify others
-    socket.to(roomId).emit("user_joined", { userId, displayName });
+    socket.to(roomId).emit("user_joined", { userId, displayName, micMuted: false });
   });
 
   socket.on("leave_room", ({ roomId, userId }) => {
@@ -152,6 +154,31 @@ io.on("connection", (socket) => {
   });
   socket.on("ice_candidate", ({ roomId, targetId, candidate }) => {
     relayToUser(roomId, targetId, "ice_candidate_received", { fromId: getUserIdBySocket(roomId, socket.id), candidate });
+  });
+
+  // Broadcast mic mute/unmute state to room participants
+  socket.on("mic_state_changed", ({ roomId, userId, muted }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const p = room.participants.get(userId);
+    if (p) {
+      p.micMuted = !!muted;
+      room.participants.set(userId, p);
+    }
+    io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
+  });
+
+  // Broadcast mic mute/unmute state to room participants
+  socket.on("mic_state_changed", ({ roomId, userId, muted }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const p = room.participants.get(userId);
+    if (p) {
+      p.micMuted = !!muted;
+      room.participants.set(userId, p);
+    }
+    // Notify everyone in the room (including sender) to keep UI consistent
+    io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
   });
 
   socket.on("disconnect", () => {

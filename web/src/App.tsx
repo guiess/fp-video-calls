@@ -32,13 +32,15 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [passwordOnCreate, setPasswordOnCreate] = useState("");
   const [passwordHintOnCreate, setPasswordHintOnCreate] = useState("");
-  const [participants, setParticipants] = useState<Array<{ userId: string; displayName: string }>>([]);
+  const [participants, setParticipants] = useState<Array<{ userId: string; displayName: string; micMuted?: boolean }>>([]);
   const [peerId, setPeerId] = useState<string | null>(null);
   const peerIdRef = useRef<string | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const autoJoinTriggeredRef = useRef<boolean>(false);
   const [micEnabled, setMicEnabled] = useState<boolean>(true);
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
+  // Track remote peers' audio mute state (best-effort based on track events)
+  const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
   // If the page is opened with ?room=... we should NOT auto-join; show a simplified UI
   const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
   // Track fullscreen state globally so we can show a custom exit control
@@ -72,6 +74,25 @@ export default function App() {
           next[targetId] = stream as MediaStream;
           return next;
         });
+        // Attach audio mute listeners to reflect remote mute state
+        const audioTrack = (stream as MediaStream).getAudioTracks()[0] || (e.track.kind === "audio" ? e.track : null);
+        if (audioTrack) {
+          // Initialize based on current muted value
+          setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !!(audioTrack as any).muted || audioTrack.enabled === false }));
+          audioTrack.onmute = () => {
+            setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
+          };
+          audioTrack.onunmute = () => {
+            setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
+          };
+          audioTrack.onended = () => {
+            setRemoteAudioMuted((prev) => {
+              const next = { ...prev };
+              delete next[targetId];
+              return next;
+            });
+          };
+        }
         // Maintain single remote preview for backward-compat
         if (remoteVideoRef.current) {
           const current = remoteVideoRef.current.srcObject as MediaStream | null;
@@ -149,7 +170,7 @@ export default function App() {
           });
         }
 
-        setParticipants(existing);
+        setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
         const others = existing.filter((p) => p.userId !== svc.getUserId());
         // Create per-peer PCs for all existing participants
         others.forEach(({ userId: uid }) => {
@@ -177,15 +198,18 @@ export default function App() {
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls) localVideoRef.current.srcObject = ls;
       },
-      onUserJoined: (uid, _name) => {
+      onUserJoined: (uid, _name, micMuted) => {
         setParticipants((prev) => {
           const exists = prev.some(p => p.userId === uid);
-          return exists ? prev : [...prev, { userId: uid, displayName: _name }];
+          return exists ? prev : [...prev, { userId: uid, displayName: _name, micMuted: !!micMuted }];
         });
         // Prepare a PC for the newcomer so we can answer their offer
         const svc = svcRef.current!;
         const pc = svc.createPeerConnection(uid);
         wirePeerHandlers(pc, svc, uid);
+      },
+      onPeerMicState: (uid, muted) => {
+        setParticipants((prev) => prev.map(p => p.userId === uid ? { ...p, micMuted: !!muted } : p));
       },
       onUserLeft: (uid) => {
         // Remove participant entry
@@ -588,6 +612,8 @@ export default function App() {
     const next = !micEnabled;
     aud.forEach((t) => (t.enabled = next));
     setMicEnabled(next);
+    // Broadcast mic state so others can show your mute badge (muted = !next)
+    try { svcRef.current?.sendMicState(!next); } catch {}
   }
 
   function toggleVideo() {
@@ -837,7 +863,10 @@ export default function App() {
                   style={{ position: "relative" }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: 12, color: "#888" }}>peer: <strong>{name}</strong></div>
+                    <div style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>peer: <strong>{name}</strong></span>
+                      {(remoteAudioMuted[uid] || p?.micMuted) ? <FiMicOff size={14} title="Muted" aria-label="Muted" /> : <FiMic size={14} title="Unmuted" aria-label="Unmuted" />}
+                    </div>
                     <button
                       style={{ padding: "4px 8px", fontSize: 12 }}
                       aria-label="Fullscreen"

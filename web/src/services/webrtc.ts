@@ -9,12 +9,13 @@ export type JoinOptions = {
 };
 
 export type SignalingHandlers = {
-  onRoomJoined?: (participants: Array<{ userId: string; displayName: string }>, roomInfo: any) => void;
-  onUserJoined?: (userId: string, displayName: string) => void;
+  onRoomJoined?: (participants: Array<{ userId: string; displayName: string; micMuted?: boolean }>, roomInfo: any) => void;
+  onUserJoined?: (userId: string, displayName: string, micMuted?: boolean) => void;
   onUserLeft?: (userId: string) => void;
   onOffer?: (fromId: string, offer: RTCSessionDescriptionInit) => void;
   onAnswer?: (fromId: string, answer: RTCSessionDescriptionInit) => void;
   onIceCandidate?: (fromId: string, candidate: RTCIceCandidateInit) => void;
+  onPeerMicState?: (userId: string, muted: boolean) => void;
   onError?: (code: string, message?: string) => void;
 };
 
@@ -31,11 +32,13 @@ export class WebRTCService {
     if (!this.socket) return;
     this.socket.on("error", (e: any) => this.handlers.onError?.(e?.code ?? "ERROR", e?.message));
     this.socket.on("room_joined", ({ participants, roomInfo }) => this.handlers.onRoomJoined?.(participants, roomInfo));
-    this.socket.on("user_joined", ({ userId, displayName }) => this.handlers.onUserJoined?.(userId, displayName));
+    this.socket.on("user_joined", ({ userId, displayName, micMuted }) => this.handlers.onUserJoined?.(userId, displayName, micMuted));
     this.socket.on("user_left", ({ userId }) => this.handlers.onUserLeft?.(userId));
     this.socket.on("offer_received", async ({ fromId, offer }) => this.handlers.onOffer?.(fromId, offer));
     this.socket.on("answer_received", async ({ fromId, answer }) => this.handlers.onAnswer?.(fromId, answer));
     this.socket.on("ice_candidate_received", async ({ fromId, candidate }) => this.handlers.onIceCandidate?.(fromId, candidate));
+    // Mic mute/unmute broadcast
+    this.socket.on("peer_mic_state", ({ userId, muted }) => this.handlers.onPeerMicState?.(userId, !!muted));
   }
 
   private ensureSocket() {
@@ -157,6 +160,10 @@ export class WebRTCService {
     const pc = this.getPeerConnection(targetId);
     if (pc && pc.signalingState === "closed") return;
     this.socket?.emit("ice_candidate", { roomId: this.roomId, targetId, candidate });
+  }
+  // Mic state helper
+  sendMicState(muted: boolean) {
+    this.socket?.emit("mic_state_changed", { roomId: this.roomId, userId: this.userId, muted });
   }
 
   getPeerConnection(targetId: string) {
