@@ -41,6 +41,8 @@ export default function App() {
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
   // Track remote peers' audio mute state (best-effort based on track events)
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
+  // Camera facing mode toggle (user = front, environment = back)
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   // If the page is opened with ?room=... we should NOT auto-join; show a simplified UI
   const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
   // Track fullscreen state globally so we can show a custom exit control
@@ -92,13 +94,6 @@ export default function App() {
               return next;
             });
           };
-        }
-        // Maintain single remote preview for backward-compat
-        if (remoteVideoRef.current) {
-          const current = remoteVideoRef.current.srcObject as MediaStream | null;
-          if (!current || current.id !== (stream as MediaStream).id) {
-            remoteVideoRef.current.srcObject = stream as MediaStream;
-          }
         }
       } else {
         console.warn("[ontrack] no remote stream or targetId missing");
@@ -639,6 +634,37 @@ export default function App() {
     if (fn) fn.call(target);
   }
 
+  async function switchFacing() {
+    const svc = svcRef.current;
+    if (!svc) return;
+    const next = facingMode === "user" ? "environment" : "user";
+    try {
+      await svc.switchCamera((meta?.settings?.videoQuality ?? quality) as "720p" | "1080p", next);
+      setFacingMode(next);
+      const ls = svc.getLocalStream();
+      const el = localVideoRef.current;
+      if (el && ls) {
+        // Force a clean rebind and playback on mobile to avoid black frames
+        try { el.pause?.(); } catch {}
+        try { el.srcObject = null; } catch {}
+        el.srcObject = ls;
+        // Ensure track is enabled
+        try { ls.getVideoTracks().forEach(t => t.enabled = true); } catch {}
+        // Wait for metadata then play; fallback to immediate play
+        const playSafe = async () => {
+          try { await el.play(); } catch {}
+        };
+        if (el.readyState < 2) {
+          el.onloadedmetadata = () => { playSafe(); };
+          // Also try a delayed play in case onloadedmetadata doesn't fire
+          setTimeout(playSafe, 100);
+        } else {
+          await playSafe();
+        }
+      }
+    } catch {}
+  }
+
   function exitFullscreen() {
     const doc: any = document;
     const fn =
@@ -795,6 +821,14 @@ export default function App() {
             >
               {document.fullscreenElement === localContainerRef.current ? <FiMinimize size={18} /> : <FiMaximize size={18} />}
             </button>
+            <button
+              onClick={switchFacing}
+              aria-label="Switch Camera"
+              title="Switch Camera"
+              style={{ padding: "6px 12px" }}
+            >
+              {facingMode === "user" ? "Back Camera" : "Front Camera"}
+            </button>
           </div>
           <video
             ref={localVideoRef}
@@ -813,42 +847,6 @@ export default function App() {
               objectFit: "contain"
             }}
           />
-          {isFullscreen && document.fullscreenElement === localContainerRef.current && (
-            <div
-              style={{
-                position: "absolute",
-                top: 12,
-                right: 12,
-                zIndex: 1000,
-                background: "rgba(0,0,0,0.6)",
-                color: "#fff",
-                borderRadius: 8,
-                padding: "6px 10px",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8
-              }}
-            >
-              <span style={{ fontSize: 12 }}>Fullscreen</span>
-              <button
-                onClick={exitFullscreen}
-                aria-label="Exit Fullscreen"
-                title="Exit Fullscreen"
-                style={{
-                  padding: "6px 10px",
-                  background: "#e74c3c",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 12
-                }}
-              >
-                Exit
-              </button>
-            </div>
-          )}
         </div>
         <div style={{ flex: 1 }}>
           <h3>Remotes</h3>

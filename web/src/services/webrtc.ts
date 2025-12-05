@@ -63,9 +63,8 @@ export class WebRTCService {
     } catch {}
   }
 
-  async getCaptureStream(quality: "720p" | "1080p") {
-    // WebRTC media capture requires a secure context (https) or localhost.
-    // On mobile browsers (iOS Safari/Chrome Android), navigator.mediaDevices is undefined on http over LAN.
+  // Capture stream without mutating localStream (callers decide assignment)
+  async getCaptureStream(quality: "720p" | "1080p", facing: "user" | "environment" = "user") {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) {
       const host = typeof window !== "undefined" ? window.location.hostname : "unknown-host";
       const msg =
@@ -75,30 +74,47 @@ export class WebRTCService {
       throw new Error("INSECURE_CONTEXT");
     }
 
-    // Strategy: try preferred constraints, then progressively relax to default {video:true, audio:true}.
     const preferred =
       quality === "1080p"
-        ? { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: "user" }
-        : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: "user" };
+        ? { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: facing }
+        : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: facing };
+
     const attempt = async (video: MediaTrackConstraints) => {
       return navigator.mediaDevices.getUserMedia({ video, audio: { echoCancellation: true, noiseSuppression: true } });
     };
+
+    const attemptWithDeviceId = async () => {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === "videoinput");
+      let target: MediaDeviceInfo | undefined;
+      if (facing === "environment") {
+        target = cams.find(d => /back|rear/i.test(d.label)) || cams[cams.length - 1];
+      } else {
+        target = cams.find(d => /front/i.test(d.label)) || cams[0];
+      }
+      if (!target) throw new Error("NO_CAMERA_DEVICE");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: target.deviceId } },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      });
+      return stream;
+    };
+
     try {
-      this.localStream = await attempt(preferred);
-      return this.localStream;
-    } catch (e1: any) {
-      // Over-constrained or device busy; fall back to minimal constraints
+      return await attempt({ ...preferred, facingMode: { exact: facing } as any });
+    } catch {
       try {
-        this.localStream = await attempt({ facingMode: "user" });
-        return this.localStream;
-      } catch (e2: any) {
-        // Last resort plain getUserMedia
+        return await attempt(preferred);
+      } catch {
         try {
-          this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          return this.localStream;
+          return await attemptWithDeviceId();
         } catch (e3: any) {
-          this.handlers.onError?.("CAPTURE_FAILED", e3?.message ?? "Unable to access camera/microphone");
-          throw e3;
+          try {
+            return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          } catch (e4: any) {
+            this.handlers.onError?.("CAPTURE_FAILED", e4?.message ?? e3?.message ?? "Unable to access camera/microphone");
+            throw e4;
+          }
         }
       }
     }
@@ -125,23 +141,24 @@ export class WebRTCService {
   }
 
   async join({ roomId, userId, displayName, password, quality }: JoinOptions) {
-    // Reconnect socket if it was disconnected after leave()
     this.ensureSocket();
     if (!this.socket) throw new Error("Socket not initialized");
     this.roomId = roomId;
     this.userId = userId;
-    await this.getCaptureStream(quality);
-    // Defer peer connection creation to App per target peer
-    if (!this.localStream || this.localStream.getTracks().length === 0) {
+
+    const initial = await this.getCaptureStream(quality, "user");
+    if (!initial || initial.getTracks().length === 0) {
       this.handlers.onError?.("NO_LOCAL_MEDIA", "Local media not available");
       return;
     }
-    // Include desired room videoQuality on first join; server uses it only when auto-creating a room
-    this.socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
-    // Debug to verify join after re-connect
+    // Assign localStream and ensure audio+video are enabled
+    this.localStream = initial;
     try {
-      console.log("[join] emitted", { roomId, userId, quality });
+      this.localStream.getTracks().forEach(t => (t.enabled = true));
     } catch {}
+
+    this.socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
+    try { console.log("[join] emitted", { roomId, userId, quality }); } catch {}
   }
 
   // Signaling helpers
@@ -182,6 +199,76 @@ export class WebRTCService {
   getUserId() {
     return this.userId;
   }
+
+  // Switch camera between front(user) and back(environment) and replace tracks on all peer connections
+  async switchCamera(quality: "720p" | "1080p", facing: "user" | "environment"): Promise<void> {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
+
+    // Stop old video tracks BEFORE opening new camera (prevents device lock leading to black screen)
+    try {
+      (this.localStream?.getVideoTracks() ?? []).forEach(t => { try { t.stop(); } catch {} });
+    } catch {}
+
+    // Preserve current live audio
+    const currentAudio = (this.localStream?.getAudioTracks() ?? []).filter(t => t.readyState === "live");
+
+    // Acquire new video stream for desired facing
+    const tmpStream = await this.getCaptureStream(quality, facing);
+    const newVideo = tmpStream.getVideoTracks()[0];
+    if (!newVideo) throw new Error("NO_VIDEO_TRACK");
+    // Stop tmp audio to avoid duplicates
+    try { tmpStream.getAudioTracks().forEach(t => { try { t.stop(); } catch {} }); } catch {}
+
+    // Ensure the new track is enabled
+    try { newVideo.enabled = true; } catch {}
+
+    // Merged local stream: keep audio, add new video
+    const merged = new MediaStream();
+    try {
+      currentAudio.forEach(t => merged.addTrack(t));
+      merged.addTrack(newVideo);
+    } catch {}
+
+    // Replace or create video senders; ensure transceiver direction supports sendrecv
+    for (const [targetId, pc] of this.pcs.entries()) {
+      try {
+        const sender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (sender) {
+          await sender.replaceTrack(newVideo);
+          // Align transceiver direction
+          const tx = pc.getTransceivers().find(tr => tr.sender === sender);
+          try { tx && tx.direction !== "sendrecv" && (tx.direction = "sendrecv"); } catch {}
+        } else {
+          // Create a dedicated video transceiver/sendrecv
+          try {
+            const tx = pc.addTransceiver(newVideo, { direction: "sendrecv" });
+            await tx.sender.replaceTrack(newVideo);
+          } catch {
+            pc.addTrack(newVideo, merged);
+          }
+        }
+      } catch (e) {
+        console.warn("[camera] replace/add track failed", e);
+      }
+
+      // Proactive renegotiation
+      try {
+        if (pc.connectionState !== "closed") {
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          this.sendOffer(targetId, offer);
+        }
+      } catch (e) {
+        console.warn("[camera] renegotiation offer failed", e);
+      }
+    }
+
+    // Update localStream reference so UI can bind it
+    this.localStream = merged;
+
+    console.log("[camera] switched to", facing);
+  }
+
   leave() {
     // Notify server and tear down connections
     try { this.socket?.emit("leave_room", { roomId: this.roomId, userId: this.userId }); } catch {}
