@@ -122,7 +122,7 @@ io.on("connection", (socket) => {
 
     room.participants.set(userId, { socketId: socket.id, displayName, micMuted: false });
     socket.join(roomId);
- 
+   
     // Notify caller with existing participants (include micMuted for initial badges)
     const participants = Array.from(room.participants.entries()).map(([id, p]) => ({
       userId: id,
@@ -130,7 +130,7 @@ io.on("connection", (socket) => {
       micMuted: !!p.micMuted
     }));
     socket.emit("room_joined", { participants, roomInfo: { roomId, settings: room.settings } });
- 
+   
     // Notify others
     socket.to(roomId).emit("user_joined", { userId, displayName, micMuted: false });
   });
@@ -143,6 +143,20 @@ io.on("connection", (socket) => {
       socket.to(roomId).emit("user_left", { userId });
       if (room.participants.size === 0) rooms.delete(roomId);
     }
+  });
+
+  // Admin: close room for everybody
+  socket.on("close_room", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    // Inform all clients and remove them
+    io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
+    for (const [uid, info] of room.participants.entries()) {
+      try { io.sockets.sockets.get(info.socketId)?.leave(roomId); } catch {}
+      socket.to(roomId).emit("user_left", { userId: uid });
+    }
+    rooms.delete(roomId);
+    console.log(`[room:close] ${roomId}`);
   });
 
   // WebRTC signaling relay
@@ -193,6 +207,21 @@ io.on("connection", (socket) => {
     }
   });
 });
+
+// REST API: close room endpoint
+app.post("/room/:roomId/close", (req, res) => {
+  const { roomId } = req.params;
+  const room = rooms.get(roomId);
+  if (!room) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
+  for (const [uid, info] of room.participants.entries()) {
+    try { io.sockets.sockets.get(info.socketId)?.leave(roomId); } catch {}
+  }
+  rooms.delete(roomId);
+  console.log(`[room:close] ${roomId} via REST`);
+  return res.json({ ok: true });
+}
+);
 
 function getUserIdBySocket(roomId, socketId) {
   const room = rooms.get(roomId);

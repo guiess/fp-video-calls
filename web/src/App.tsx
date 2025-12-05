@@ -302,14 +302,17 @@ export default function App() {
       },
       onError: (code, message) => {
         alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
-        if (code === "AUTH_FAILED" || code === "AUTH_REQUIRED") {
-          // hard stop any local state indicating joined
-          svcRef.current?.leave();
+        if (code === "AUTH_FAILED" || code === "AUTH_REQUIRED" || code === "ROOM_CLOSED") {
+          // stop local media and tear down
+          try { svcRef.current?.leave(); } catch {}
+          // clear UI state
           setParticipants([]);
           setPeerId(null);
+          peerIdRef.current = null;
+          setRemoteStreams({});
           // clear local/remote video elements
-          if (localVideoRef.current) localVideoRef.current.srcObject = null;
-          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+          try { if (localVideoRef.current) localVideoRef.current.srcObject = null; } catch {}
+          try { if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null; } catch {}
         }
       }
     });
@@ -610,6 +613,27 @@ export default function App() {
     });
   }
 
+  async function closeRoomForEveryone() {
+    if (!roomId.trim()) { alert("Enter room id"); return; }
+    try {
+      const host = window.location.hostname;
+      const protocol = window.location.protocol;
+      const resp = await fetch(`${protocol}//${host}:3000/room/${encodeURIComponent(roomId.trim())}/close`, {
+        method: "POST",
+        mode: "cors"
+      });
+      if (!resp.ok) {
+        alert("Failed to close room");
+        return;
+      }
+      // Locally leave and reset UI
+      leave();
+      alert("Room closed for everyone");
+    } catch (e) {
+      alert("Close room request failed");
+    }
+  }
+
   function toggleMute() {
     const ls = svcRef.current?.getLocalStream();
     if (!ls) return;
@@ -698,6 +722,11 @@ export default function App() {
             <button onClick={leave} style={{ padding: "6px 12px" }}>
               Leave
             </button>
+            {participants.length > 0 && (
+              <button onClick={closeRoomForEveryone} style={{ padding: "6px 12px", background: "#e74c3c", color: "#fff" }}>
+                Close Room For Everybody
+              </button>
+            )}
           </div>
           <div>
             <button
@@ -763,6 +792,11 @@ export default function App() {
           <button onClick={leave} style={{ padding: "6px 12px" }}>
             Leave
           </button>
+          {participants.length > 0 && (
+            <button onClick={closeRoomForEveryone} style={{ padding: "6px 12px", background: "#e74c3c", color: "#fff" }}>
+              Close Room For Everybody
+            </button>
+          )}
           {createdRoom && (
             <span>
               Created: <code>{createdRoom}</code>
@@ -998,6 +1032,44 @@ export default function App() {
               );
             })}
           </div>
+        </div>
+      </div>
+
+      {/* TURN configuration (for NAT traversal) */}
+      <div style={{ marginTop: 16, padding: 12, border: "1px dashed #ccc", borderRadius: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>TURN Settings (optional)</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            placeholder="turn:host:3478,turns:host:5349"
+            style={{ padding: 6, minWidth: 280 }}
+            defaultValue={localStorage.getItem("turn.urls") || ""}
+            onChange={(e) => localStorage.setItem("turn.urls", e.target.value)}
+          />
+          <input
+            placeholder="TURN username"
+            style={{ padding: 6 }}
+            defaultValue={localStorage.getItem("turn.username") || ""}
+            onChange={(e) => localStorage.setItem("turn.username", e.target.value)}
+          />
+          <input
+            placeholder="TURN password"
+            style={{ padding: 6 }}
+            type="password"
+            defaultValue={localStorage.getItem("turn.password") || ""}
+            onChange={(e) => localStorage.setItem("turn.password", e.target.value)}
+          />
+          <button
+            style={{ padding: "6px 12px" }}
+            onClick={() => {
+              alert("TURN settings applied. New peer connections will use the configured iceServers.");
+            }}
+          >
+            Apply
+          </button>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: "#555" }}>
+          Client reads TURN from localStorage in{" "}
+          <a href="/web/src/services/webrtc.ts">web/src/services/webrtc.ts</a>. Existing connections remain unchanged; new PCs will use the updated servers.
         </div>
       </div>
 
