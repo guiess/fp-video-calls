@@ -123,9 +123,19 @@ export class WebRTCService {
   createPeerConnection(targetId: string) {
     const existing = this.pcs.get(targetId);
     if (existing) return existing;
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
+    // ICE servers: STUN + optional TURN from localStorage configuration
+    // Configure TURN by setting in the browser console or app init:
+    // localStorage.setItem("turn.urls", "turn:your-turn-host:3478,turns:your-turn-host:5349");
+    // localStorage.setItem("turn.username", "user");
+    // localStorage.setItem("turn.password", "pass");
+    const turnUrls = (localStorage.getItem("turn.urls") || "").split(",").map(s => s.trim()).filter(Boolean);
+    const turnUser = localStorage.getItem("turn.username") || undefined;
+    const turnPass = localStorage.getItem("turn.password") || undefined;
+    const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+    if (turnUrls.length > 0 && turnUser && turnPass) {
+      iceServers.push({ urls: turnUrls, username: turnUser, credential: turnPass });
+    }
+    const pc = new RTCPeerConnection({ iceServers });
     // Do not pre-create recvonly transceivers; let addTrack create sendrecv m-lines
     // and let offers include receive via offerToReceive* or remote transceivers.
     // Let App bind per-peer handlers and onicecandidate routing
@@ -267,6 +277,68 @@ export class WebRTCService {
     this.localStream = merged;
 
     console.log("[camera] switched to", facing);
+  }
+
+  // Start screen sharing: replace current video with display media and renegotiate
+  async startScreenShare(): Promise<void> {
+    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("DISPLAY_MEDIA_UNSUPPORTED");
+    // Stop old video before switching to avoid black frames
+    try { (this.localStream?.getVideoTracks() ?? []).forEach(t => { try { t.stop(); } catch {} }); } catch {}
+
+    const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    const screenTrack = display.getVideoTracks()[0];
+    if (!screenTrack) throw new Error("NO_SCREEN_TRACK");
+    try { screenTrack.enabled = true; } catch {}
+
+    // Merge with existing audio
+    const merged = new MediaStream();
+    try { (this.localStream?.getAudioTracks() ?? []).filter(t => t.readyState === "live").forEach(t => merged.addTrack(t)); } catch {}
+    merged.addTrack(screenTrack);
+
+    // Replace across PCs, ensure sendrecv, renegotiate
+    for (const [targetId, pc] of this.pcs.entries()) {
+      try {
+        const sender = pc.getSenders().find(s => s.track?.kind === "video");
+        if (sender) {
+          await sender.replaceTrack(screenTrack);
+          const tx = pc.getTransceivers().find(tr => tr.sender === sender);
+          try { tx && tx.direction !== "sendrecv" && (tx.direction = "sendrecv"); } catch {}
+        } else {
+          try {
+            const tx = pc.addTransceiver(screenTrack, { direction: "sendrecv" });
+            await tx.sender.replaceTrack(screenTrack);
+          } catch {
+            pc.addTrack(screenTrack, merged);
+          }
+        }
+      } catch (e) { console.warn("[share] replace/add failed", e); }
+
+      try {
+        if (pc.connectionState !== "closed") {
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          this.sendOffer(targetId, offer);
+        }
+      } catch (e) { console.warn("[share] renegotiation failed", e); }
+    }
+
+    this.localStream = merged;
+
+    // Auto-stop when user ends sharing in the browser UI
+    try {
+      screenTrack.onended = async () => {
+        try {
+          await this.stopScreenShare();
+        } catch (e) {
+          console.warn("[share] stop failed", e);
+        }
+      };
+    } catch {}
+  }
+
+  // Stop screen sharing by switching back to camera (front by default)
+  async stopScreenShare(quality: "720p" | "1080p" = "720p", facing: "user" | "environment" = "user"): Promise<void> {
+    await this.switchCamera(quality, facing);
   }
 
   leave() {

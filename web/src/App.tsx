@@ -43,6 +43,8 @@ export default function App() {
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
   // Camera facing mode toggle (user = front, environment = back)
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  // Screen sharing state
+  const [isSharing, setIsSharing] = useState<boolean>(false);
   // If the page is opened with ?room=... we should NOT auto-join; show a simplified UI
   const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
   // Track fullscreen state globally so we can show a custom exit control
@@ -134,7 +136,7 @@ export default function App() {
       try {
         const target = peerIdRef.current;
         console.log("[negotiationneeded]", { target, signalingState: pc.signalingState });
-        // Only the newcomer (who has existing participants) should have set target in onRoomJoined
+        // Only send if stable; late-joiner path sets target
         if (!target) return;
         if (pc.signalingState !== "stable") return;
         const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
@@ -143,6 +145,14 @@ export default function App() {
         console.log("[offer] onnegotiationneeded -> sent");
       } catch (err) {
         console.warn("[negotiationneeded] failed", err);
+      }
+    };
+    // ICE restart on failures (helps recover connectivity when switching tracks or networks)
+    pc.oniceconnectionstatechange = () => {
+      const st = pc.iceConnectionState;
+      console.log("[iceConnectionState]", st);
+      if (st === "failed" || st === "disconnected") {
+        try { pc.restartIce(); } catch (err) { console.warn("[ice] restartIce failed", err); }
       }
     };
   }
@@ -805,6 +815,43 @@ export default function App() {
             </button>
             <button onClick={toggleVideo} aria-label={camEnabled ? "Disable Video" : "Enable Video"} title={camEnabled ? "Disable Video" : "Enable Video"} style={{ padding: "6px 12px" }}>
               {camEnabled ? <FiVideo size={18} /> : <FiVideoOff size={18} />}
+            </button>
+            <button
+              onClick={async () => {
+                const svc = svcRef.current;
+                if (!svc) return;
+                try {
+                  if (!isSharing) {
+                    await svc.startScreenShare();
+                    setIsSharing(true);
+                    // Rebind local preview to shared stream
+                    const ls = svc.getLocalStream();
+                    if (localVideoRef.current && ls) {
+                      try { localVideoRef.current.pause?.(); } catch {}
+                      try { localVideoRef.current.srcObject = null; } catch {}
+                      localVideoRef.current.srcObject = ls;
+                      try { await localVideoRef.current.play?.(); } catch {}
+                    }
+                  } else {
+                    await svc.stopScreenShare((meta?.settings?.videoQuality ?? quality) as "720p" | "1080p", facingMode);
+                    setIsSharing(false);
+                    const ls = svc.getLocalStream();
+                    if (localVideoRef.current && ls) {
+                      try { localVideoRef.current.pause?.(); } catch {}
+                      try { localVideoRef.current.srcObject = null; } catch {}
+                      localVideoRef.current.srcObject = ls;
+                      try { await localVideoRef.current.play?.(); } catch {}
+                    }
+                  }
+                } catch (e) {
+                  console.warn("[share] toggle failed", e);
+                }
+              }}
+              aria-label={isSharing ? "Stop Share" : "Start Share"}
+              title={isSharing ? "Stop Share" : "Start Share"}
+              style={{ padding: "6px 12px" }}
+            >
+              {isSharing ? "Stop Share" : "Share Screen"}
             </button>
             <button
               onClick={() => {
