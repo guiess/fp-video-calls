@@ -50,6 +50,11 @@ export default function App() {
   // Track fullscreen state globally so we can show a custom exit control
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
+
+
+  const [chatMessages, setChatMessages] = useState<Array<{ fromId: string; displayName: string; text: string; ts: number }>>([]);
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
+
   // Stable identifiers for this page session
   const fixedUserIdRef = useRef<string>(safeRandomId());
   const displayNameParamRef = useRef<string | null>(null);
@@ -316,6 +321,9 @@ export default function App() {
         } else {
           alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
         }
+      },
+      onChatMessage: (roomId, fromId, displayName, text, ts) => {
+        setChatMessages((prev) => [...prev, { fromId, displayName, text, ts }]);
       }
     });
     return () => {
@@ -401,7 +409,19 @@ export default function App() {
     setRoomId(data.roomId);
     setMeta(null);
     setPassword("");
-    fetchMeta(data.roomId);
+    // Navigate to /room/:roomId using location to work without router hooks
+    try {
+      const loc = window.location;
+      const base = `${loc.protocol}//${loc.host}`;
+      // Preserve optional intended quality in query (?q=) for UI reflect
+      const q = createQuality;
+      const query = q ? `?q=${encodeURIComponent(q)}` : "";
+      window.location.href = `${base}/room/${encodeURIComponent(data.roomId)}${query}`;
+      return;
+    } catch {
+      // Fallback: still fetch meta if navigation failed
+      fetchMeta(data.roomId);
+    }
   }
 
   async function fetchMeta(id: string): Promise<RoomMeta | null> {
@@ -922,7 +942,7 @@ export default function App() {
             disablePictureInPicture
             controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
             // @ts-ignore vendor attribute
-            webkit-playsinline={true}
+            webkit-playsinline="true"
             style={{
               width: isFullscreen && document.fullscreenElement === localContainerRef.current ? "100%" : 320,
               height: isFullscreen && document.fullscreenElement === localContainerRef.current ? "100%" : "auto",
@@ -973,7 +993,7 @@ export default function App() {
                     disablePictureInPicture
                     controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
                     // @ts-ignore vendor attribute
-                    webkit-playsinline={true}
+                    webkit-playsinline="true"
                     style={{
                       width: isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] ? "100%" : 320,
                       height: isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] ? "100%" : "auto",
@@ -1075,7 +1095,77 @@ export default function App() {
         </div>
       </div>
 
-      <p style={{ marginTop: 16 }}>
+      {/* Simple in-room chat panel */}
+      <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Chat</div>
+        <div
+          style={{
+            maxHeight: 200,
+            overflowY: "auto",
+            background: "#fafafa",
+            border: "1px solid #eee",
+            borderRadius: 6,
+            padding: 8,
+            fontSize: 13
+          }}
+        >
+          {chatMessages.length === 0 && <div style={{ color: "#888" }}>No messages yet</div>}
+          {chatMessages.map((m, idx) => {
+            const isSelf = m.fromId === svcRef.current?.getUserId();
+            const ts = new Date(m.ts).toLocaleTimeString();
+            return (
+              <div key={`${m.fromId}-${m.ts}-${idx}`} style={{ marginBottom: 6 }}>
+                <span style={{ color: isSelf ? "#2c3e50" : "#555", fontWeight: 600 }}>
+                  {m.displayName || m.fromId}
+                </span>
+                <span style={{ color: "#999", marginLeft: 6, fontSize: 12 }}>{ts}</span>
+                <div style={{ marginTop: 2 }}>{m.text}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            ref={chatInputRef}
+            placeholder="Type a message"
+            style={{ flex: 1, padding: 6 }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const text = chatInputRef.current?.value?.trim() || "";
+                if (!text) return;
+                try {
+                  const svc = svcRef.current!;
+                  const uid = svc.getUserId();
+                  const name = displayNameParamRef.current ?? `Guest_${uid?.slice(0, 5)}`;
+                  svc.sendChat(text);
+                  // Optimistic local echo
+                  setChatMessages((prev) => [...prev, { fromId: uid, displayName: name, text, ts: Date.now() }]);
+                  if (chatInputRef.current) chatInputRef.current.value = "";
+                } catch {}
+              }
+            }}
+          />
+          <button
+            style={{ padding: "6px 12px" }}
+            onClick={() => {
+              const text = chatInputRef.current?.value?.trim() || "";
+              if (!text) return;
+              try {
+                const svc = svcRef.current!;
+                const uid = svc.getUserId();
+                const name = displayNameParamRef.current ?? `Guest_${uid?.slice(0, 5)}`;
+                svc.sendChat(text);
+                setChatMessages((prev) => [...prev, { fromId: uid, displayName: name, text, ts: Date.now() }]);
+                if (chatInputRef.current) chatInputRef.current.value = "";
+              } catch {}
+            }}
+          >
+            Send
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
         Server health:{" "}
         <a href={`http://${window.location.hostname}:3000/health`} target="_blank" rel="noreferrer">
           {`http://${window.location.hostname}:3000/health`}
@@ -1083,7 +1173,7 @@ export default function App() {
         <div style={{ marginTop: 12, fontSize: 12, color: "#555" }}>
           Debug: peerId target = <code>{peerIdRef.current ?? "null"}</code>; participants = <code>{participants.length}</code>
         </div>
-      </p>
+      </div>
 
       <p>
         For quick local P2P test use: <a href="/web/test.html">web/test.html</a>

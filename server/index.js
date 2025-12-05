@@ -170,6 +170,15 @@ io.on("connection", (socket) => {
     relayToUser(roomId, targetId, "ice_candidate_received", { fromId: getUserIdBySocket(roomId, socket.id), candidate });
   });
 
+  // Simple room chat channel
+  socket.on("chat_message", ({ roomId, userId, displayName, text, ts }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const safeText = typeof text === "string" ? text.slice(0, 2000) : "";
+    const name = displayName || (room.participants.get(userId)?.displayName ?? "Guest");
+    io.to(roomId).emit("chat_message", { roomId, fromId: userId, displayName: name, text: safeText, ts: ts || Date.now() });
+  });
+
   // Broadcast mic mute/unmute state to room participants
   socket.on("mic_state_changed", ({ roomId, userId, muted }) => {
     const room = rooms.get(roomId);

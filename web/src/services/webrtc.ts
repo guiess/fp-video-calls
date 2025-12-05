@@ -16,6 +16,7 @@ export type SignalingHandlers = {
   onAnswer?: (fromId: string, answer: RTCSessionDescriptionInit) => void;
   onIceCandidate?: (fromId: string, candidate: RTCIceCandidateInit) => void;
   onPeerMicState?: (userId: string, muted: boolean) => void;
+  onChatMessage?: (roomId: string, fromId: string, displayName: string, text: string, ts: number) => void;
   onError?: (code: string, message?: string) => void;
 };
 
@@ -39,6 +40,10 @@ export class WebRTCService {
     this.socket.on("ice_candidate_received", async ({ fromId, candidate }) => this.handlers.onIceCandidate?.(fromId, candidate));
     // Mic mute/unmute broadcast
     this.socket.on("peer_mic_state", ({ userId, muted }) => this.handlers.onPeerMicState?.(userId, !!muted));
+    // Simple chat channel
+    this.socket.on("chat_message", ({ roomId, fromId, displayName, text, ts }) =>
+      this.handlers.onChatMessage?.(roomId, fromId, displayName, text, ts)
+    );
   }
 
   private ensureSocket() {
@@ -191,6 +196,12 @@ export class WebRTCService {
   // Mic state helper
   sendMicState(muted: boolean) {
     this.socket?.emit("mic_state_changed", { roomId: this.roomId, userId: this.userId, muted });
+  }
+
+  // Chat helper
+  sendChat(text: string) {
+    const payload = { roomId: this.roomId, userId: this.userId, displayName: "", text, ts: Date.now() };
+    this.socket?.emit("chat_message", payload);
   }
 
   getPeerConnection(targetId: string) {
