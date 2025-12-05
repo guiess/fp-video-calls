@@ -301,18 +301,20 @@ export default function App() {
         } catch {}
       },
       onError: (code, message) => {
-        alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
+        // Disconnect and stop media first, then notify
         if (code === "AUTH_FAILED" || code === "AUTH_REQUIRED" || code === "ROOM_CLOSED") {
-          // stop local media and tear down
           try { svcRef.current?.leave(); } catch {}
-          // clear UI state
           setParticipants([]);
           setPeerId(null);
           peerIdRef.current = null;
           setRemoteStreams({});
-          // clear local/remote video elements
           try { if (localVideoRef.current) localVideoRef.current.srcObject = null; } catch {}
           try { if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null; } catch {}
+          setTimeout(() => {
+            alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
+          }, 0);
+        } else {
+          alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
         }
       }
     });
