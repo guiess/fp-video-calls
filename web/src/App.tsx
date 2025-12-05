@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize } from "react-icons/fi";
 
 function safeRandomId() {
   const c: any = (typeof window !== "undefined" && (window as any).crypto) || undefined;
@@ -36,6 +37,8 @@ export default function App() {
   const peerIdRef = useRef<string | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const autoJoinTriggeredRef = useRef<boolean>(false);
+  const [micEnabled, setMicEnabled] = useState<boolean>(true);
+  const [camEnabled, setCamEnabled] = useState<boolean>(true);
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -210,44 +213,40 @@ export default function App() {
       svcRef.current?.leave();
     };
   }, []);
-  // Auto-join via URL: ?room={id}&pwd={password}&q={720p|1080p}
+  // Hide native media controls (including in fullscreen) via global CSS injection
   useEffect(() => {
-    if (autoJoinTriggeredRef.current) return;
-    const url = new URL(window.location.href);
-    const room = url.searchParams.get("room") || undefined;
-    const pwd = url.searchParams.get("pwd") || undefined;
-    const q = url.searchParams.get("q") as "720p" | "1080p" | null;
-    if (q && (q === "720p" || q === "1080p")) {
-      setQuality(q);
-    }
-    if (room) {
-      setRoomId(room);
-      if (pwd) setPassword(pwd);
-      // fetch meta then join automatically
-      (async () => {
-        try {
-          await fetchMeta(room);
-          autoJoinTriggeredRef.current = true;
-          // If password required and not provided, still attempt join (server will reject)
-          const svc = svcRef.current!;
-          const userId = safeRandomId();
-          const displayName = `Guest_${Math.floor(Math.random() * 10000)}`;
-          await svc.join({
-            roomId: room.trim(),
-            userId,
-            displayName,
-            password: (pwd || "").trim() || undefined,
-            quality: q && (q === "720p" || q === "1080p") ? q : quality
-          });
-        } catch {
-          // noop; user can join manually
-        }
-      })();
-    }
+    const style = document.createElement("style");
+    style.setAttribute("data-hide-media-controls", "true");
+    style.textContent = `
+      video::-webkit-media-controls { display: none !important; }
+      video::-webkit-media-controls-enclosure { display: none !important; }
+      video::-webkit-media-controls-panel { display: none !important; }
+      video::-webkit-media-controls-play-button { display: none !important; }
+      video::-webkit-media-controls-start-playback-button { display: none !important; }
+      video::-webkit-media-controls-toggle-closed-captions-button { display: none !important; }
+      video::-webkit-media-controls-volume-slider { display: none !important; }
+      video::-webkit-media-controls-mute-button { display: none !important; }
+      video::-webkit-media-controls-time-remaining-display { display: none !important; }
+      video::-webkit-media-controls-current-time-display { display: none !important; }
+      video::-webkit-media-controls-timeline { display: none !important; }
+      video::-webkit-media-controls-fullscreen-button { display: none !important; }
+      video::-moz-media-controls { display: none !important; }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      try {
+        document.head.removeChild(style);
+      } catch {}
+    };
   }, []);
 
   async function createRoom() {
-    const payload: any = { videoQuality: quality };
+    // Allow overriding quality for creation via URL param ?cq=720p|1080p (create-quality)
+    const url = new URL(window.location.href);
+    const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
+    const createQuality = cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam : quality;
+
+    const payload: any = { videoQuality: createQuality };
     if (passwordOnCreate.trim()) {
       payload.passwordEnabled = true;
       payload.password = passwordOnCreate.trim();
@@ -274,7 +273,7 @@ export default function App() {
     fetchMeta(data.roomId);
   }
 
-  async function fetchMeta(id: string) {
+  async function fetchMeta(id: string): Promise<RoomMeta | null> {
     const host = window.location.hostname;
     const protocol = window.location.protocol;
     const resp = await fetch(`${protocol}//${host}:3000/room/${encodeURIComponent(id)}/meta`, {
@@ -284,10 +283,11 @@ export default function App() {
     });
     if (!resp.ok) {
       setMeta(null);
-      return;
+      return null;
     }
     const data = await resp.json();
     setMeta(data);
+    return data as RoomMeta;
   }
 
   useEffect(() => {
@@ -297,6 +297,78 @@ export default function App() {
       setMeta(null);
     }
   }, [roomId]);
+
+  // Auto-join via URL: ?room={id}&pwd={password}&q={720p|1080p}
+  useEffect(() => {
+    if (autoJoinTriggeredRef.current) return;
+    const url = new URL(window.location.href);
+    const roomParam = url.searchParams.get("room") || undefined;
+    const pwdParam = url.searchParams.get("pwd") || undefined;
+    const qParam = url.searchParams.get("q") as "720p" | "1080p" | null;
+
+    if (!roomParam) return;
+
+    if (qParam && (qParam === "720p" || qParam === "1080p")) {
+      setQuality(qParam);
+    }
+    setRoomId(roomParam);
+    if (pwdParam) setPassword(pwdParam);
+
+    (async () => {
+      const svc = svcRef.current;
+      if (!svc) return;
+      const userId = safeRandomId();
+      const displayName = `Guest_${Math.floor(Math.random() * 10000)}`;
+
+      // Parse create-only quality override: ?cq=720p|1080p
+      const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
+      const createOnlyQuality = cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam : undefined;
+
+      let metaData: RoomMeta | null = null;
+      try {
+        console.log("[auto-join] fetching meta for", roomParam);
+        metaData = await fetchMeta(roomParam);
+      } catch (err) {
+        console.warn("[auto-join] meta fetch failed, proceeding to join", err);
+      }
+
+      if (autoJoinTriggeredRef.current) return;
+      autoJoinTriggeredRef.current = true;
+
+      // Compute existence from fresh meta response, not stale state
+      const roomExists = !!metaData?.exists;
+
+      // Determine quality to use for this join:
+      // - If room does NOT exist, use create-only quality if provided, else fallback to qParam, else UI state
+      // - If room exists, ignore cq and use qParam if present, else UI state
+      const chosenQuality: "720p" | "1080p" =
+        !roomExists
+          ? (createOnlyQuality ?? (qParam && (qParam === "720p" || qParam === "1080p") ? qParam : quality))
+          : (qParam && (qParam === "720p" || qParam === "1080p") ? qParam : quality);
+
+      console.log("[auto-join] joining", {
+        room: roomParam,
+        hasPwd: !!pwdParam,
+        roomExists,
+        qParam,
+        cqParam,
+        chosenQuality
+      });
+
+      try {
+        await svc.join({
+          roomId: roomParam.trim(),
+          userId,
+          displayName,
+          password: (pwdParam || "").trim() || undefined,
+          quality: chosenQuality
+        });
+      } catch (err) {
+        console.error("[auto-join] join failed", err);
+        autoJoinTriggeredRef.current = false; // allow retry via UI
+      }
+    })();
+  }, []);
 
   async function join() {
     if (!roomId.trim()) {
@@ -319,6 +391,35 @@ export default function App() {
     setPeerId(null);
     peerIdRef.current = null;
     setRemoteStreams({});
+  }
+
+  function toggleMute() {
+    const ls = svcRef.current?.getLocalStream();
+    if (!ls) return;
+    const aud = ls.getAudioTracks();
+    const next = !micEnabled;
+    aud.forEach((t) => (t.enabled = next));
+    setMicEnabled(next);
+  }
+
+  function toggleVideo() {
+    const ls = svcRef.current?.getLocalStream();
+    if (!ls) return;
+    const vid = ls.getVideoTracks();
+    const next = !camEnabled;
+    vid.forEach((t) => (t.enabled = next));
+    setCamEnabled(next);
+  }
+
+  function requestFullscreen(el?: HTMLVideoElement | null) {
+    const target = el ?? localVideoRef.current;
+    if (!target) return;
+    const fn =
+      target.requestFullscreen ||
+      (target as any).webkitRequestFullscreen ||
+      (target as any).mozRequestFullScreen ||
+      (target as any).msRequestFullscreen;
+    if (fn) fn.call(target);
   }
 
   return (
@@ -418,17 +519,57 @@ export default function App() {
       <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
         <div>
           <h3>Local</h3>
-          <video ref={localVideoRef} autoPlay muted playsInline style={{ width: 320, background: "#000" }} />
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button onClick={toggleMute} aria-label={micEnabled ? "Mute" : "Unmute"} title={micEnabled ? "Mute" : "Unmute"} style={{ padding: "6px 12px" }}>
+              {micEnabled ? <FiMic size={18} /> : <FiMicOff size={18} />}
+            </button>
+            <button onClick={toggleVideo} aria-label={camEnabled ? "Disable Video" : "Enable Video"} title={camEnabled ? "Disable Video" : "Enable Video"} style={{ padding: "6px 12px" }}>
+              {camEnabled ? <FiVideo size={18} /> : <FiVideoOff size={18} />}
+            </button>
+            <button onClick={() => requestFullscreen(localVideoRef.current)} aria-label="Fullscreen" title="Fullscreen" style={{ padding: "6px 12px" }}>
+              <FiMaximize size={18} />
+            </button>
+          </div>
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            controls={false}
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+            // @ts-ignore vendor attribute
+            webkit-playsinline={true}
+            style={{ width: 320, background: "#000" }}
+          />
         </div>
         <div style={{ flex: 1 }}>
           <h3>Remotes</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, 320px)", gap: 12 }}>
             {Object.entries(remoteStreams).map(([uid, stream]) => (
               <div key={uid}>
-                <div style={{ fontSize: 12, color: "#888" }}>peer: <code>{uid}</code></div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 12, color: "#888" }}>peer: <code>{uid}</code></div>
+                  <button
+                    style={{ padding: "4px 8px", fontSize: 12 }}
+                    aria-label="Fullscreen"
+                    title="Fullscreen"
+                    onClick={(e) => {
+                      const container = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
+                      requestFullscreen(container);
+                    }}
+                  >
+                    <FiMaximize size={16} />
+                  </button>
+                </div>
                 <video
                   autoPlay
                   playsInline
+                  controls={false}
+                  disablePictureInPicture
+                  controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+                  // @ts-ignore vendor attribute
+                  webkit-playsinline={true}
                   style={{ width: 320, background: "#000" }}
                   ref={(el) => {
                     if (el && stream && el.srcObject !== stream) {
@@ -439,12 +580,27 @@ export default function App() {
               </div>
             ))}
             {Object.keys(remoteStreams).length === 0 && (
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                style={{ width: 320, background: "#000" }}
-              />
+              <div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    style={{ padding: "4px 8px", fontSize: 12 }}
+                    aria-label="Fullscreen"
+                    title="Fullscreen"
+                    onClick={() => requestFullscreen(remoteVideoRef.current)}
+                  >
+                    <FiMaximize size={16} />
+                  </button>
+                </div>
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  controls={false}
+                  disablePictureInPicture
+                  controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+                  style={{ width: 320, background: "#000" }}
+                />
+              </div>
             )}
           </div>
         </div>
