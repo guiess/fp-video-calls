@@ -49,23 +49,43 @@ export class WebRTCService {
 
   private ensureSocket() {
     const env: any = (import.meta as any)?.env || {};
-    const envUrl = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
+    const runtimeUrl =
+      typeof window !== "undefined"
+        ? ((window as any).APP_CONFIG?.SIGNALING_URL as string | undefined)?.trim()
+        : undefined;
+    const urlFromEnv = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
     const envHost = (env.VITE_SIGNALING_HOST as string | undefined)?.trim();
     const envPort = (env.VITE_SIGNALING_PORT as string | undefined)?.trim();
     const envSecure = (env.VITE_SIGNALING_SECURE as string | undefined);
 
     const isBrowser = typeof window !== "undefined";
-    const proto = isBrowser ? window.location.protocol : "http:";
-    const host = isBrowser ? window.location.hostname : "localhost";
+    const proto = isBrowser ? (window.location?.protocol || "https:") : "http:";
 
-    let url = envUrl;
+    // Prefer runtime config first, then env, then host/port, then localhost dev
+    let url = runtimeUrl || urlFromEnv;
     if (!url) {
       const useSecure = envSecure !== undefined ? envSecure.toLowerCase() === "true" : proto === "https:";
-      const h = envHost || host;
-      const p = envPort;
-      // Default to same-origin for Azure (443/80) when no explicit port provided
-      url = p ? `${useSecure ? "https" : "http"}://${h}:${p}` : `${useSecure ? "https" : "http"}://${h}`;
+      if (envHost) {
+        const p = envPort;
+        url = p ? `${useSecure ? "https" : "http"}://${envHost}:${p}` : `${useSecure ? "https" : "http"}://${envHost}`;
+      } else {
+        // Dev-only fallback; avoids tying production to window hostname
+        url = `${useSecure ? "https" : "http"}://${isBrowser ? "localhost" : "localhost"}:3000`;
+      }
     }
+
+    try {
+      const cfg = typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined;
+      console.log("[signaling] resolved", {
+        runtimeUrl,
+        urlFromEnv,
+        envHost,
+        envPort,
+        envSecure,
+        endpoint: url,
+        appConfig: cfg
+      });
+    } catch {}
 
     this.endpoint = url;
     if (!this.socket || !(this.socket as any).connected) {

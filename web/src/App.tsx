@@ -403,9 +403,12 @@ export default function App() {
       payload.password = passwordOnCreate.trim();
       if (passwordHintOnCreate.trim()) payload.passwordHint = passwordHintOnCreate.trim();
     }
-    const host = window.location.hostname;
-    const protocol = window.location.protocol; // match page scheme to avoid mixed content
-    const resp = await fetch(`${protocol}//${host}:3000/room`, {
+    const cfg: any = (typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined) || {};
+    const runtimeBase = (cfg.SIGNALING_URL as string | undefined)?.trim();
+    const env: any = (import.meta as any)?.env || {};
+    const envBase = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
+    const base = runtimeBase || envBase || `${window.location.protocol}//${window.location.hostname}:3000`;
+    const resp = await fetch(`${base}/room`, {
       method: "POST",
       mode: "cors",
       cache: "no-cache",
@@ -437,9 +440,12 @@ export default function App() {
   }
 
   async function fetchMeta(id: string): Promise<RoomMeta | null> {
-    const host = window.location.hostname;
-    const protocol = window.location.protocol;
-    const resp = await fetch(`${protocol}//${host}:3000/room/${encodeURIComponent(id)}/meta`, {
+    const cfg: any = (typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined) || {};
+    const runtimeBase = (cfg.SIGNALING_URL as string | undefined)?.trim();
+    const env: any = (import.meta as any)?.env || {};
+    const envBase = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
+    const base = runtimeBase || envBase || `${window.location.protocol}//${window.location.hostname}:3000`;
+    const resp = await fetch(`${base}/room/${encodeURIComponent(id)}/meta`, {
       method: "GET",
       mode: "cors",
       cache: "no-cache"
@@ -650,9 +656,12 @@ export default function App() {
   async function closeRoomForEveryone() {
     if (!roomId.trim()) { alert("Enter room id"); return; }
     try {
-      const host = window.location.hostname;
-      const protocol = window.location.protocol;
-      const resp = await fetch(`${protocol}//${host}:3000/room/${encodeURIComponent(roomId.trim())}/close`, {
+      const cfg: any = (typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined) || {};
+      const runtimeBase = (cfg.SIGNALING_URL as string | undefined)?.trim();
+      const env: any = (import.meta as any)?.env || {};
+      const envBase = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
+      const base = runtimeBase || envBase || `${window.location.protocol}//${window.location.hostname}:3000`;
+      const resp = await fetch(`${base}/room/${encodeURIComponent(roomId.trim())}/close`, {
         method: "POST",
         mode: "cors"
       });
@@ -1119,8 +1128,11 @@ export default function App() {
 
       <div style={{ marginTop: 16 }}>
         Server health:{" "}
-        <a href={`http://${window.location.hostname}:3000/health`} target="_blank" rel="noreferrer">
-          {`http://${window.location.hostname}:3000/health`}
+        <a
+          href={`${(((typeof window !== "undefined" ? (window as any).APP_CONFIG?.SIGNALING_URL : undefined) as string | undefined)?.trim()) || (((import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined)?.trim()) || `${window.location.protocol}//${window.location.hostname}:3000`}/health`}
+          target="_blank" rel="noreferrer"
+        >
+          {`${(((typeof window !== "undefined" ? (window as any).APP_CONFIG?.SIGNALING_URL : undefined) as string | undefined)?.trim()) || (((import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined)?.trim()) || `${window.location.protocol}//${window.location.hostname}:3000`}/health`}
         </a>
         <div style={{ marginTop: 12, fontSize: 12, color: "#555" }}>
           Debug: peerId target = <code>{peerIdRef.current ?? "null"}</code>; participants = <code>{participants.length}</code>
