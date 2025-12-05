@@ -257,8 +257,7 @@ deploy_frontend() {
         --location "East US2" \
         --branch "main" \
         --app-location "web" \
-        --output-location "dist" \
-        --build-location "web"
+        --output-location "dist"
     
     # Get Static Web App URL
     SWA_URL=$(az staticwebapp show \
@@ -490,11 +489,76 @@ The script automatically configures these environment variables:
 
 ## Troubleshooting
 
-If the script fails:
+### Common Script Issues:
 
-1. **Check Azure CLI login:** `az account show`
-2. **Verify permissions:** Ensure you have Contributor access
-3. **Review logs:** Check the script output for specific errors
-4. **Manual fallback:** Use the detailed guide for manual deployment
+**1. Azure CLI Login Issues:**
+```bash
+# Check current login
+az account show
+
+# Re-login if needed
+az login
+az account set --subscription "Your-Subscription-Name"
+```
+
+**2. Permission Errors:**
+- Ensure you have `Contributor` role on the subscription or resource group
+- Check if you can create resources: `az group create --name test-rg --location "East US" --dry-run`
+
+**3. WebSocket Connection Issues After Deployment:**
+If the frontend shows connection errors like:
+```
+WebSocket connection to 'wss://your-static-app.azurestaticapps.net/socket.io/' failed:
+```
+
+**Root Cause:** Environment variables not set correctly in Static Web App.
+
+**Solution:**
+```bash
+# Check environment variables
+az staticwebapp appsettings list --name "$SWA_NAME" --resource-group "$RESOURCE_GROUP"
+
+# Fix the signaling URL
+az staticwebapp appsettings set \
+  --name "$SWA_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --setting-names \
+    VITE_SIGNALING_URL="https://$SERVER_APP_NAME.azurewebsites.net"
+
+# Trigger a new build by pushing to GitHub or manually in Azure Portal
+```
+
+**4. GitHub Integration Issues:**
+- Ensure the GitHub repository URL is accessible and you have permissions
+- Check if the repository has the correct folder structure (`web/` directory)
+- Verify the repository is not private or has appropriate access tokens
+
+**5. Resource Naming Conflicts:**
+If you get errors about resources already existing:
+```bash
+# Use different resource names
+export SERVER_APP_NAME="app-voice-video-$(date +%s)"
+export SWA_NAME="swa-voice-video-$(date +%s)"
+```
+
+### Manual Fallback:
+
+If the script fails, follow the detailed step-by-step guide in [`azure-deploy-complete.md`](./azure-deploy-complete.md).
+
+### Debugging Commands:
+
+```bash
+# Check resource group contents
+az resource list --resource-group "$RESOURCE_GROUP" --output table
+
+# Check Static Web App status
+az staticwebapp show --name "$SWA_NAME" --resource-group "$RESOURCE_GROUP"
+
+# Check App Service status
+az webapp show --name "$SERVER_APP_NAME" --resource-group "$RESOURCE_GROUP"
+
+# View App Service logs
+az webapp log tail --name "$SERVER_APP_NAME" --resource-group "$RESOURCE_GROUP"
+```
 
 The automation script provides a complete, production-ready deployment with security best practices and monitoring included!

@@ -200,7 +200,7 @@ az staticwebapp create \
   --branch "main" \
   --app-location "web" \
   --output-location "dist" \
-  --build-location "web"
+  --login-with-github
 
 # Get the Static Web App URL
 export SWA_URL=$(az staticwebapp show --name "swa-voice-video" --resource-group "rg-voice-video" --query "defaultHostname" -o tsv)
@@ -445,6 +445,139 @@ curl -H "Origin: https://$SWA_URL" "https://$SERVER_APP_NAME.azurewebsites.net/c
 4. Open in incognito/another device to test peer connection
 
 ## Part 9: Troubleshooting
+
+### Azure CLI Command Issues
+
+**Static Web App Creation Error:**
+```
+unrecognized arguments: --build-location web
+```
+**Solution:** The `--build-location` parameter is not valid for `az staticwebapp create`. Use only:
+```bash
+az staticwebapp create \
+  --name "swa-voice-video" \
+  --resource-group "rg-voice-video" \
+  --source "$GITHUB_REPO_URL" \
+  --location "East US2" \
+  --branch "main" \
+  --app-location "web" \
+  --output-location "dist"
+```
+
+### WebSocket Connection Issues
+
+**Client connecting to wrong URL:**
+```
+WebSocket connection to 'wss://thankful-moss-0611ddf0f.3.azurestaticapps.net/socket.io/?EIO=4&transport=websocket' failed:
+```
+
+**Root Cause:** Either the `VITE_SIGNALING_URL` environment variable is not set, or it's set but the Static Web App hasn't been rebuilt since the variable was added.
+
+**Key Point:** Azure Static Web Apps inject environment variables at **build time**, not runtime. If you add/change environment variables, you must trigger a rebuild.
+
+**Solutions:**
+
+**Step 1: Verify Environment Variable Is Set**
+```bash
+# Check current environment variables in Azure Portal
+az staticwebapp appsettings list \
+  --name "swa-voice-video" \
+  --resource-group "rg-voice-video"
+
+# If not set, add it:
+az staticwebapp appsettings set \
+  --name "swa-voice-video" \
+  --resource-group "rg-voice-video" \
+  --setting-names \
+    VITE_SIGNALING_URL="https://app-voice-video-server.azurewebsites.net"
+```
+
+**Step 2: Force Rebuild (Critical Step)**
+Even if the environment variable shows in Azure Portal, you MUST rebuild:
+
+```bash
+# Method A: Trigger rebuild via Git (Recommended)
+git commit --allow-empty -m "Rebuild for environment variables"
+git push origin main
+
+# Method B: In Azure Portal
+# Go to: Static Web App > Overview > "Browse to GitHub Action" > Re-run latest workflow
+```
+
+**Step 3: Monitor Build and Verify**
+
+**Option A: GitHub Actions (Recommended)**
+```bash
+# Open GitHub repository Actions tab
+echo "Monitor at: https://github.com/YOUR-USERNAME/YOUR-REPO/actions"
+
+# Look for "Azure Static Web Apps CI/CD" workflow
+# Status should change from 🟡 In Progress → ✅ Success
+```
+
+**Option B: Azure CLI Monitoring**
+```bash
+# Check deployment timestamp (should be recent after build completes)
+az staticwebapp show --name "swa-voice-video" --resource-group "rg-voice-video" --query "lastUpdatedOn" -o tsv
+
+# Compare with current time
+date
+
+# Check overall status (should be "Ready")
+az staticwebapp show --name "swa-voice-video" --resource-group "rg-voice-video" --query "{status:status,lastUpdated:lastUpdatedOn}"
+```
+
+**Option C: Azure Portal Check**
+1. Go to Azure Portal > Your Static Web App
+2. Check **Status**: Should show "Ready"
+3. Check **Last deployment**: Should show recent timestamp
+4. Click **"Browse to GitHub Action"** to see workflow status
+
+**Step 4: Test After Deployment Completes**
+```bash
+# Deployment typically takes 3-5 minutes total
+# Then test WebSocket connection:
+
+echo "1. Force refresh browser (Ctrl+Shift+R / Cmd+Shift+R)"
+echo "2. Open DevTools > Network tab"
+echo "3. Try connecting to a room"
+echo "4. Verify WebSocket URL goes to your App Service, not Static Web App"
+```
+
+**Expected Results:**
+- ✅ WebSocket connects to: `wss://app-voice-video-server.azurewebsites.net/socket.io/`
+- ❌ Should NOT connect to: `wss://your-static-app.azurestaticapps.net/socket.io/`
+
+**Option 3: Debug Environment Variables**
+
+**In Browser DevTools Network Tab:**
+1. Open DevTools (F12) > Network tab
+2. Try to connect to a room
+3. Look for WebSocket connection attempts
+4. Verify they go to your App Service URL, not Static Web App URL
+
+**Add Debug Code to Your React App:**
+```typescript
+// Add temporarily to your App.tsx
+useEffect(() => {
+  const signalingUrl = import.meta.env.VITE_SIGNALING_URL;
+  console.log('🔧 VITE_SIGNALING_URL:', signalingUrl);
+  
+  if (!signalingUrl) {
+    console.error('❌ Environment variable not set!');
+  }
+}, []);
+```
+
+**Check Built Code:**
+- Open DevTools > Sources > Search for "VITE_SIGNALING_URL" in built files
+- Should find your server URL, not `undefined`
+
+**Important Notes:**
+- Static Web Apps build environment variables at build time, not runtime
+- You must trigger a new build after changing environment variables
+- Variables must be prefixed with `VITE_` to be available in the client
+- Check Azure Portal > Static Web App > Configuration > Application settings
 
 ### Azure CLI Warnings (Safe to Ignore)
 

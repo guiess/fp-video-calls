@@ -17,6 +17,8 @@ Goal: WebRTC group video calls with persistent room URLs, optional room password
   - 🚀 **Automated Deployment Script**: [docs/deployment-automation.md](docs/deployment-automation.md)
   - 📝 **Quick Reference**: [docs/azure-deploy.md](docs/azure-deploy.md)
   - ❓ **Why TURN Servers Are Needed**: [docs/webrtc-turn-explanation.md](docs/webrtc-turn-explanation.md)
+  - 🐛 **Environment Variables Debugging**: [docs/debugging-swa-env-vars.md](docs/debugging-swa-env-vars.md)
+  - 🔧 **Advanced: Env Vars Not Working**: [docs/azure-swa-env-vars-not-working.md](docs/azure-swa-env-vars-not-working.md)
 
 ## TODO by Service
 
