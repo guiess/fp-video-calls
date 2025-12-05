@@ -112,7 +112,8 @@ export class WebRTCService {
       this.handlers.onError?.("NO_LOCAL_MEDIA", "Local media not available");
       return;
     }
-    this.socket.emit("join_room", { roomId, userId, displayName, password });
+    // Include desired room videoQuality on first join; server uses it only when auto-creating a room
+    this.socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
   }
 
   // Signaling helpers

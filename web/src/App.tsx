@@ -39,6 +39,8 @@ export default function App() {
   const autoJoinTriggeredRef = useRef<boolean>(false);
   const [micEnabled, setMicEnabled] = useState<boolean>(true);
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
+  // If the page is opened with ?room=... we should NOT auto-join; show a simplified UI
+  const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
 
   // Stable identifiers for this page session
   const fixedUserIdRef = useRef<string>(safeRandomId());
@@ -128,7 +130,20 @@ export default function App() {
     const svc = new WebRTCService();
     svcRef.current = svc;
     svc.init({
-      onRoomJoined: (existing, _roomInfo) => {
+      onRoomJoined: (existing, roomInfo) => {
+        // Update meta from authoritative server settings so late joiners see the correct quality
+        if (roomInfo?.settings) {
+          setMeta({
+            roomId: roomInfo.roomId ?? roomId,
+            exists: true,
+            settings: {
+              videoQuality: roomInfo.settings.videoQuality,
+              passwordEnabled: !!roomInfo.settings.passwordEnabled,
+              passwordHint: roomInfo.settings.passwordHint
+            }
+          });
+        }
+
         setParticipants(existing);
         const others = existing.filter((p) => p.userId !== svc.getUserId());
         // Create per-peer PCs for all existing participants
@@ -289,9 +304,21 @@ export default function App() {
       setMeta(null);
       return null;
     }
-    const data = await resp.json();
+    const data: RoomMeta = await resp.json();
+
+    // If room doesn't exist yet, reflect intended create-only quality from URL so UI shows the plan
+    if (!data.exists) {
+      const url = new URL(window.location.href);
+      const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
+      const qParam = url.searchParams.get("q") as "720p" | "1080p" | null;
+      const cqValid = cqParam === "720p" || cqParam === "1080p";
+      const qValid = qParam === "720p" || qParam === "1080p";
+      const intended = (cqValid ? cqParam : (qValid ? qParam : data.settings.videoQuality)) as "720p" | "1080p";
+      data.settings.videoQuality = intended;
+    }
+
     setMeta(data);
-    return data as RoomMeta;
+    return data;
   }
 
   useEffect(() => {
@@ -309,15 +336,19 @@ export default function App() {
     displayNameParamRef.current = nameParam && nameParam.trim() ? nameParam.trim() : null;
   }, []);
 
-  // Auto-join via URL: ?room={id}&pwd={password}&q={720p|1080p}
+  // URL mode: if ?room= is present, DO NOT auto-join; just set state and fetch meta
   useEffect(() => {
-    if (autoJoinTriggeredRef.current) return;
     const url = new URL(window.location.href);
     const roomParam = url.searchParams.get("room") || undefined;
     const pwdParam = url.searchParams.get("pwd") || undefined;
     const qParam = url.searchParams.get("q") as "720p" | "1080p" | null;
+    const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
 
-    if (!roomParam) return;
+    if (!roomParam) {
+      setHasRoomParam(false);
+      return;
+    }
+    setHasRoomParam(true);
 
     if (qParam && (qParam === "720p" || qParam === "1080p")) {
       setQuality(qParam);
@@ -325,59 +356,25 @@ export default function App() {
     setRoomId(roomParam);
     if (pwdParam) setPassword(pwdParam);
 
+    // Reflect intended quality in meta for non-existent rooms so the UI shows the plan
     (async () => {
-      const svc = svcRef.current;
-      if (!svc) return;
-      const userId = fixedUserIdRef.current;
-      const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
-
-      // Parse create-only quality override: ?cq=720p|1080p
-      const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
-      const createOnlyQuality = cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam : undefined;
-
-      let metaData: RoomMeta | null = null;
       try {
-        console.log("[auto-join] fetching meta for", roomParam);
-        metaData = await fetchMeta(roomParam);
-      } catch (err) {
-        console.warn("[auto-join] meta fetch failed, proceeding to join", err);
-      }
-
-      if (autoJoinTriggeredRef.current) return;
-      autoJoinTriggeredRef.current = true;
-
-      // Compute existence from fresh meta response, not stale state
-      const roomExists = !!metaData?.exists;
-
-      // Determine quality to use for this join:
-      // - If room does NOT exist, use create-only quality if provided, else fallback to qParam, else UI state
-      // - If room exists, ignore cq and use qParam if present, else UI state
-      const chosenQuality: "720p" | "1080p" =
-        !roomExists
-          ? (createOnlyQuality ?? (qParam && (qParam === "720p" || qParam === "1080p") ? qParam : quality))
-          : (qParam && (qParam === "720p" || qParam === "1080p") ? qParam : quality);
-
-      console.log("[auto-join] joining", {
-        room: roomParam,
-        hasPwd: !!pwdParam,
-        roomExists,
-        qParam,
-        cqParam,
-        chosenQuality
-      });
-
-      try {
-        await svc.join({
-          roomId: roomParam.trim(),
-          userId,
-          displayName,
-          password: (pwdParam || "").trim() || undefined,
-          quality: chosenQuality
-        });
-      } catch (err) {
-        console.error("[auto-join] join failed", err);
-        autoJoinTriggeredRef.current = false; // allow retry via UI
-      }
+        const data = await fetchMeta(roomParam);
+        if (!data?.exists) {
+          const intended =
+            (cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam :
+             qParam && (qParam === "720p" || qParam === "1080p") ? qParam :
+             data?.settings?.videoQuality) as "720p" | "1080p";
+          setMeta({
+            roomId: roomParam,
+            exists: false,
+            settings: {
+              videoQuality: intended,
+              passwordEnabled: false
+            }
+          });
+        }
+      } catch {}
     })();
   }, []);
 
@@ -393,7 +390,9 @@ export default function App() {
     const svc = svcRef.current!;
     const userId = fixedUserIdRef.current;
     const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
-    await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality });
+    // Honor server-declared room quality if available; otherwise use UI-selected quality
+    const chosenQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
+    await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality: chosenQuality });
   }
 
   function leave() {
@@ -436,61 +435,88 @@ export default function App() {
   return (
     <div style={{ fontFamily: "system-ui", padding: 16 }}>
       <h1>WebRTC Web Client</h1>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <label>
-          Room:
-          <input
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            placeholder="room id"
-            style={{ marginLeft: 8, padding: 6 }}
-          />
-        </label>
-        <label>
-          Quality:
-          <select
-            value={quality}
-            onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
-            style={{ marginLeft: 8, padding: 6 }}
-          >
-            <option value="720p">720p</option>
-            <option value="1080p">1080p</option>
-          </select>
-        </label>
-        <label>
-          Password (on creation):
-          <input
-            type="password"
-            value={passwordOnCreate}
-            onChange={(e) => setPasswordOnCreate(e.target.value)}
-            placeholder="optional"
-            style={{ marginLeft: 8, padding: 6 }}
-          />
-        </label>
-        <label>
-          Hint:
-          <input
-            value={passwordHintOnCreate}
-            onChange={(e) => setPasswordHintOnCreate(e.target.value)}
-            placeholder="optional"
-            style={{ marginLeft: 8, padding: 6 }}
-          />
-        </label>
-        <button onClick={createRoom} style={{ padding: "6px 12px" }}>
-          Create Room
-        </button>
-        <button onClick={join} style={{ padding: "6px 12px" }}>
-          Join
-        </button>
-        <button onClick={leave} style={{ padding: "6px 12px" }}>
-          Leave
-        </button>
-        {createdRoom && (
-          <span>
-            Created: <code>{createdRoom}</code>
-          </span>
-        )}
-      </div>
+      {/* Top controls: show simplified mode when URL has ?room=... */}
+      {hasRoomParam ? (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={join} style={{ padding: "6px 12px" }}>
+              Join
+            </button>
+            <button onClick={leave} style={{ padding: "6px 12px" }}>
+              Leave
+            </button>
+          </div>
+          <div>
+            <button
+              onClick={() => {
+                // Navigate to home (clear query) while preserving origin/path
+                const loc = window.location;
+                const base = `${loc.protocol}//${loc.host}${loc.pathname}`;
+                window.location.href = base;
+              }}
+              style={{ padding: "6px 12px" }}
+            >
+              Home
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label>
+            Room:
+            <input
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value)}
+              placeholder="room id"
+              style={{ marginLeft: 8, padding: 6 }}
+            />
+          </label>
+          <label>
+            Quality:
+            <select
+              value={quality}
+              onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
+              style={{ marginLeft: 8, padding: 6 }}
+            >
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select>
+          </label>
+          <label>
+            Password (on creation):
+            <input
+              type="password"
+              value={passwordOnCreate}
+              onChange={(e) => setPasswordOnCreate(e.target.value)}
+              placeholder="optional"
+              style={{ marginLeft: 8, padding: 6 }}
+            />
+          </label>
+          <label>
+            Hint:
+            <input
+              value={passwordHintOnCreate}
+              onChange={(e) => setPasswordHintOnCreate(e.target.value)}
+              placeholder="optional"
+              style={{ marginLeft: 8, padding: 6 }}
+            />
+          </label>
+          <button onClick={createRoom} style={{ padding: "6px 12px" }}>
+            Create Room
+          </button>
+          <button onClick={join} style={{ padding: "6px 12px" }}>
+            Join
+          </button>
+          <button onClick={leave} style={{ padding: "6px 12px" }}>
+            Leave
+          </button>
+          {createdRoom && (
+            <span>
+              Created: <code>{createdRoom}</code>
+            </span>
+          )}
+        </div>
+      )}
 
       {meta && (
         <div style={{ marginTop: 12, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>

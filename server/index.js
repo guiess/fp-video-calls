@@ -90,16 +90,22 @@ app.get("/room/:roomId/meta", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  // join_room { roomId, userId, displayName, password? }
-  socket.on("join_room", ({ roomId, userId, displayName, password }) => {
+  // join_room { roomId, userId, displayName, password?, videoQuality? }
+  socket.on("join_room", ({ roomId, userId, displayName, password, videoQuality }) => {
     if (!roomId || !userId) return socket.emit("error", { code: "BAD_REQUEST" });
+
+    // Normalize requested quality defensively
+    const reqQ = typeof videoQuality === "string" ? videoQuality.trim().toLowerCase() : "";
+    const normalizedQ = reqQ === "1080p" ? "1080p" : reqQ === "720p" ? "720p" : null;
 
     // Auto-create room on first join if not present (no password by default)
     if (!rooms.has(roomId)) {
+      const q = normalizedQ ?? "720p";
       rooms.set(roomId, {
         participants: new Map(),
-        settings: { videoQuality: "720p", passwordEnabled: false }
+        settings: { videoQuality: q, passwordEnabled: false }
       });
+      console.log(`[room:create] ${roomId} quality=${q} (requested=${videoQuality})`);
     }
 
     const room = rooms.get(roomId);
