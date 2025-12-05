@@ -35,6 +35,7 @@ export default function App() {
   const [peerId, setPeerId] = useState<string | null>(null);
   const peerIdRef = useRef<string | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const autoJoinTriggeredRef = useRef<boolean>(false);
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -209,6 +210,41 @@ export default function App() {
       svcRef.current?.leave();
     };
   }, []);
+  // Auto-join via URL: ?room={id}&pwd={password}&q={720p|1080p}
+  useEffect(() => {
+    if (autoJoinTriggeredRef.current) return;
+    const url = new URL(window.location.href);
+    const room = url.searchParams.get("room") || undefined;
+    const pwd = url.searchParams.get("pwd") || undefined;
+    const q = url.searchParams.get("q") as "720p" | "1080p" | null;
+    if (q && (q === "720p" || q === "1080p")) {
+      setQuality(q);
+    }
+    if (room) {
+      setRoomId(room);
+      if (pwd) setPassword(pwd);
+      // fetch meta then join automatically
+      (async () => {
+        try {
+          await fetchMeta(room);
+          autoJoinTriggeredRef.current = true;
+          // If password required and not provided, still attempt join (server will reject)
+          const svc = svcRef.current!;
+          const userId = safeRandomId();
+          const displayName = `Guest_${Math.floor(Math.random() * 10000)}`;
+          await svc.join({
+            roomId: room.trim(),
+            userId,
+            displayName,
+            password: (pwd || "").trim() || undefined,
+            quality: q && (q === "720p" || q === "1080p") ? q : quality
+          });
+        } catch {
+          // noop; user can join manually
+        }
+      })();
+    }
+  }, []);
 
   async function createRoom() {
     const payload: any = { videoQuality: quality };
@@ -274,7 +310,6 @@ export default function App() {
     const svc = svcRef.current!;
     const userId = safeRandomId();
     const displayName = `Guest_${Math.floor(Math.random() * 10000)}`;
-    // Do not wire handlers or set local stream here; wait for onRoomJoined.
     await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality });
   }
 
