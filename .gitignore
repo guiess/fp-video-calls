@@ -1,0 +1,12 @@
+# Node
+node_modules/
+*.log
+.DS_Store
+# Vite/React
+web/node_modules/
+web/dist/
+# Server
+server/node_modules/
+# Env/secrets
+.env
+*.local

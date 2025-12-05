@@ -1,0 +1,185 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Local WebRTC Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    video { width: 45%; background: #000; margin: 8px; }
+    #grid { display: flex; gap: 8px; flex-wrap: wrap; }
+    input, button, select { padding: 8px; margin-right: 8px; }
+    #log { font-size: 12px; white-space: pre-wrap; background: #f5f5f5; padding: 8px; border: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <h1>Local WebRTC Test (P2P via Socket.IO)</h1>
+  <div>
+    <input id="room" placeholder="room id (e.g., test-room)" />
+    <input id="name" placeholder="display name" />
+    <select id="quality">
+      <option value="720p" selected>720p</option>
+      <option value="1080p">1080p</option>
+    </select>
+    <button id="create">Create Room (POST /room)</button>
+    <button id="join">Join</button>
+    <button id="leave" disabled>Leave</button>
+  </div>
+  <div id="grid">
+    <div>
+      <h3>Local</h3>
+      <video id="local" autoplay muted playsinline></video>
+    </div>
+    <div>
+      <h3>Remote</h3>
+      <video id="remote" autoplay playsinline></video>
+    </div>
+  </div>
+  <div id="log"></div>
+
+  <!-- Socket.IO from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"></script>
+  <script>
+    const logEl = document.getElementById('log');
+    function log(...args) { console.log(...args); logEl.textContent += args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ') + '\n'; }
+
+    const localVideo = document.getElementById('local');
+    const remoteVideo = document.getElementById('remote');
+    const roomInput = document.getElementById('room');
+    const nameInput = document.getElementById('name');
+    const qualitySel = document.getElementById('quality');
+    const createBtn = document.getElementById('create');
+    const joinBtn = document.getElementById('join');
+    const leaveBtn = document.getElementById('leave');
+
+    let socket, pc, localStream, userId, roomId;
+
+    async function getMedia(videoQuality) {
+      const constraints = videoQuality === "1080p"
+        ? { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } }
+        : { width: { ideal: 1280, max: 1280 }, height: { ideal: 720,  max: 720  }, frameRate: { ideal: 30, max: 30 } };
+      localStream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: true });
+      localVideo.srcObject = localStream;
+    }
+
+    function createPeerConnection() {
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }
+          // TURN can be added later when needed
+        ]
+      });
+
+      pc.ontrack = (e) => {
+        log('ontrack', e.streams[0]);
+        remoteVideo.srcObject = e.streams[0];
+      };
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit('ice_candidate', { roomId, targetId: targetPeerId(), candidate: e.candidate });
+        }
+      };
+
+      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+    }
+
+    // For a simple two-peer test, target is "the other participant" in the room
+    let participants = [];
+    function targetPeerId() {
+      const others = participants.filter(p => p.userId !== userId);
+      return others[0]?.userId;
+    }
+
+    // Create room via POST /room
+    async function createRoom() {
+      const videoQuality = qualitySel.value;
+      const resp = await fetch('http://localhost:3000/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoQuality })
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        log('Create failed', txt);
+        return;
+      }
+      const data = await resp.json();
+      roomInput.value = data.roomId;
+      log('Room created', data);
+    }
+
+    async function start() {
+      roomId = roomInput.value.trim() || 'test-room';
+      const displayName = nameInput.value.trim() || ('Guest_' + Math.floor(Math.random() * 10000));
+      const videoQuality = qualitySel.value;
+      userId = crypto.randomUUID();
+
+      socket = io('http://localhost:3000', { transports: ['websocket'] });
+      await getMedia(videoQuality);
+      createPeerConnection();
+
+      socket.on('connect', () => log('socket connected', socket.id));
+      socket.on('room_joined', async ({ participants: existing }) => {
+        log('room_joined', existing);
+        participants = existing;
+        // If another participant exists, start offer
+        if (targetPeerId()) {
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          socket.emit('offer', { roomId, targetId: targetPeerId(), offer });
+        }
+      });
+
+      socket.on('user_joined', ({ userId: peerId, displayName }) => {
+        log('user_joined', peerId, displayName);
+        participants.push({ userId: peerId, displayName });
+      });
+
+      socket.on('user_left', ({ userId: peerId }) => {
+        log('user_left', peerId);
+        participants = participants.filter(p => p.userId !== peerId);
+      });
+
+      socket.on('offer_received', async ({ fromId, offer }) => {
+        log('offer_received from', fromId);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('answer', { roomId, targetId: fromId, answer });
+      });
+
+      socket.on('answer_received', async ({ fromId, answer }) => {
+        log('answer_received from', fromId);
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      });
+
+      socket.on('ice_candidate_received', async ({ fromId, candidate }) => {
+        log('ice_candidate_received from', fromId);
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { log('addIceCandidate error', e); }
+      });
+
+      socket.emit('join_room', { roomId, userId, displayName });
+      joinBtn.disabled = true;
+      leaveBtn.disabled = false;
+    }
+
+    async function leave() {
+      try {
+        socket?.emit('leave_room', { roomId, userId });
+        socket?.disconnect();
+      } catch {}
+      try {
+        pc?.getSenders()?.forEach(s => s.track?.stop());
+        localStream?.getTracks()?.forEach(t => t.stop());
+        pc?.close();
+      } catch {}
+      joinBtn.disabled = false;
+      leaveBtn.disabled = true;
+    }
+
+    createBtn.onclick = createRoom;
+    joinBtn.onclick = start;
+    leaveBtn.onclick = leave;
+  </script>
+</body>
+</html>
