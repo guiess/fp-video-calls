@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
-import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize } from "react-icons/fi";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize } from "react-icons/fi";
 
 function safeRandomId() {
   const c: any = (typeof window !== "undefined" && (window as any).crypto) || undefined;
@@ -41,6 +41,8 @@ export default function App() {
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
   // If the page is opened with ?room=... we should NOT auto-join; show a simplified UI
   const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
+  // Track fullscreen state globally so we can show a custom exit control
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Stable identifiers for this page session
   const fixedUserIdRef = useRef<string>(safeRandomId());
@@ -49,6 +51,9 @@ export default function App() {
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Container refs to enable overlay within fullscreen scope
+  const localContainerRef = useRef<HTMLDivElement | null>(null);
+  const remoteTileRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string | null) {
     pc.ontrack = (e) => {
@@ -307,6 +312,28 @@ export default function App() {
       try {
         document.head.removeChild(style);
       } catch {}
+    };
+  }, []);
+
+  // Listen for fullscreen changes to toggle our custom exit button
+  useEffect(() => {
+    const onFsChange = () => {
+      const anyFs =
+        !!document.fullscreenElement ||
+        !!(document as any).webkitFullscreenElement ||
+        !!(document as any).mozFullScreenElement ||
+        !!(document as any).msFullscreenElement;
+      setIsFullscreen(anyFs);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange as any);
+    document.addEventListener("mozfullscreenchange", onFsChange as any);
+    document.addEventListener("MSFullscreenChange", onFsChange as any);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange as any);
+      document.removeEventListener("mozfullscreenchange", onFsChange as any);
+      document.removeEventListener("MSFullscreenChange", onFsChange as any);
     };
   }, []);
 
@@ -573,14 +600,27 @@ export default function App() {
   }
 
   function requestFullscreen(el?: HTMLVideoElement | null) {
-    const target = el ?? localVideoRef.current;
+    // Request fullscreen on the tile/container so overlay (child) is visible in fullscreen
+    const video = el ?? localVideoRef.current;
+    const container = (video?.parentElement as HTMLElement | null) ?? null;
+    const target: any = container || video;
     if (!target) return;
     const fn =
       target.requestFullscreen ||
-      (target as any).webkitRequestFullscreen ||
-      (target as any).mozRequestFullScreen ||
-      (target as any).msRequestFullscreen;
+      target.webkitRequestFullscreen ||
+      target.mozRequestFullScreen ||
+      target.msRequestFullscreen;
     if (fn) fn.call(target);
+  }
+
+  function exitFullscreen() {
+    const doc: any = document;
+    const fn =
+      document.exitFullscreen ||
+      doc.webkitExitFullscreen ||
+      doc.mozCancelFullScreen ||
+      doc.msExitFullscreen;
+    if (fn) fn.call(document);
   }
 
   return (
@@ -705,7 +745,7 @@ export default function App() {
       )}
 
       <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
-        <div>
+        <div ref={localContainerRef} style={{ position: "relative" }}>
           <h3>Local</h3>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <button onClick={toggleMute} aria-label={micEnabled ? "Mute" : "Unmute"} title={micEnabled ? "Mute" : "Unmute"} style={{ padding: "6px 12px" }}>
@@ -714,8 +754,20 @@ export default function App() {
             <button onClick={toggleVideo} aria-label={camEnabled ? "Disable Video" : "Enable Video"} title={camEnabled ? "Disable Video" : "Enable Video"} style={{ padding: "6px 12px" }}>
               {camEnabled ? <FiVideo size={18} /> : <FiVideoOff size={18} />}
             </button>
-            <button onClick={() => requestFullscreen(localVideoRef.current)} aria-label="Fullscreen" title="Fullscreen" style={{ padding: "6px 12px" }}>
-              <FiMaximize size={18} />
+            <button
+              onClick={() => {
+                const isFs = document.fullscreenElement === localContainerRef.current;
+                if (isFs) {
+                  exitFullscreen();
+                } else {
+                  requestFullscreen(localVideoRef.current);
+                }
+              }}
+              aria-label="Fullscreen"
+              title="Fullscreen"
+              style={{ padding: "6px 12px" }}
+            >
+              {document.fullscreenElement === localContainerRef.current ? <FiMinimize size={18} /> : <FiMaximize size={18} />}
             </button>
           </div>
           <video
@@ -728,8 +780,49 @@ export default function App() {
             controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
             // @ts-ignore vendor attribute
             webkit-playsinline={true}
-            style={{ width: 320, background: "#000" }}
+            style={{
+              width: isFullscreen && document.fullscreenElement === localContainerRef.current ? "100%" : 320,
+              height: isFullscreen && document.fullscreenElement === localContainerRef.current ? "100%" : "auto",
+              background: "#000",
+              objectFit: "contain"
+            }}
           />
+          {isFullscreen && document.fullscreenElement === localContainerRef.current && (
+            <div
+              style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+                zIndex: 1000,
+                background: "rgba(0,0,0,0.6)",
+                color: "#fff",
+                borderRadius: 8,
+                padding: "6px 10px",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8
+              }}
+            >
+              <span style={{ fontSize: 12 }}>Fullscreen</span>
+              <button
+                onClick={exitFullscreen}
+                aria-label="Exit Fullscreen"
+                title="Exit Fullscreen"
+                style={{
+                  padding: "6px 10px",
+                  background: "#e74c3c",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 12
+                }}
+              >
+                Exit
+              </button>
+            </div>
+          )}
         </div>
         <div style={{ flex: 1 }}>
           <h3>Remotes</h3>
@@ -738,7 +831,11 @@ export default function App() {
               const p = participants.find(x => x.userId === uid);
               const name = p?.displayName ?? uid;
               return (
-                <div key={uid}>
+                <div
+                  key={uid}
+                  ref={(el) => { remoteTileRefs.current[uid] = el; }}
+                  style={{ position: "relative" }}
+                >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ fontSize: 12, color: "#888" }}>peer: <strong>{name}</strong></div>
                     <button
@@ -746,11 +843,17 @@ export default function App() {
                       aria-label="Fullscreen"
                       title="Fullscreen"
                       onClick={(e) => {
-                        const container = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
-                        requestFullscreen(container);
+                        const videoEl = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
+                        const tileEl = remoteTileRefs.current[uid] || videoEl?.parentElement;
+                        const isFs = document.fullscreenElement === tileEl;
+                        if (isFs) {
+                          exitFullscreen();
+                        } else {
+                          requestFullscreen(videoEl);
+                        }
                       }}
                     >
-                      <FiMaximize size={16} />
+                      {document.fullscreenElement === remoteTileRefs.current[uid] ? <FiMinimize size={16} /> : <FiMaximize size={16} />}
                     </button>
                   </div>
                   <video
@@ -761,39 +864,65 @@ export default function App() {
                     controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
                     // @ts-ignore vendor attribute
                     webkit-playsinline={true}
-                    style={{ width: 320, background: "#000" }}
+                    style={{
+                      width: isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] ? "100%" : 320,
+                      height: isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] ? "100%" : "auto",
+                      background: "#000",
+                      objectFit: "contain"
+                    }}
                     ref={(el) => {
                       if (el && stream && el.srcObject !== stream) {
                         el.srcObject = stream;
                       }
                     }}
                   />
+                  {isFullscreen && document.fullscreenElement === remoteTileRefs.current[uid] && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        zIndex: 1000,
+                        background: "rgba(0,0,0,0.6)",
+                        color: "#fff",
+                        borderRadius: 8,
+                        padding: "6px 10px",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8
+                      }}
+                    >
+                      {/* Local controls visible while remote tile is fullscreen */}
+                      <button
+                        onClick={toggleMute}
+                        aria-label={micEnabled ? "Mute" : "Unmute"}
+                        title={micEnabled ? "Mute" : "Unmute"}
+                        style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff" }}
+                      >
+                        {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
+                      </button>
+                      <button
+                        onClick={toggleVideo}
+                        aria-label={camEnabled ? "Disable Video" : "Enable Video"}
+                        title={camEnabled ? "Disable Video" : "Enable Video"}
+                        style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff" }}
+                      >
+                        {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
+                      </button>
+                      <button
+                        onClick={exitFullscreen}
+                        aria-label="Exit Fullscreen"
+                        title="Exit Fullscreen"
+                        style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
+                      >
+                        Exit
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
-            {Object.keys(remoteStreams).length === 0 && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button
-                    style={{ padding: "4px 8px", fontSize: 12 }}
-                    aria-label="Fullscreen"
-                    title="Fullscreen"
-                    onClick={() => requestFullscreen(remoteVideoRef.current)}
-                  >
-                    <FiMaximize size={16} />
-                  </button>
-                </div>
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  controls={false}
-                  disablePictureInPicture
-                  controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
-                  style={{ width: 320, background: "#000" }}
-                />
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -811,6 +940,7 @@ export default function App() {
       <p>
         For quick local P2P test use: <a href="/web/test.html">web/test.html</a>
       </p>
+
     </div>
   );
 }
