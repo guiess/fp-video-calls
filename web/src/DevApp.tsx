@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
-import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize, FiMonitor, FiUsers, FiSettings, FiLogOut, FiCopy, FiCheck } from "react-icons/fi";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize } from "react-icons/fi";
 import VideoGrid from "./components/VideoGrid";
 
 function safeRandomId() {
@@ -9,11 +9,13 @@ function safeRandomId() {
   if (c?.getRandomValues) {
     const buf = new Uint8Array(16);
     c.getRandomValues(buf);
+    // RFC4122 v4
     buf[6] = (buf[6] & 0x0f) | 0x40;
     buf[8] = (buf[8] & 0x3f) | 0x80;
     const hex = [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
+  // Fallback
   return `guest-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 }
 
@@ -38,27 +40,32 @@ export default function App() {
   const autoJoinTriggeredRef = useRef<boolean>(false);
   const [micEnabled, setMicEnabled] = useState<boolean>(true);
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
+  // Track remote peers' audio mute state (best-effort based on track events)
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
+  // Camera facing mode toggle (user = front, environment = back)
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  // Screen sharing state
   const [isSharing, setIsSharing] = useState<boolean>(false);
+  // If the page is opened with ?room=... we should NOT auto-join; show a simplified UI
   const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
+  // Track fullscreen state globally so we can show a custom exit control
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [showSettings, setShowSettings] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
+
+
 
   const [chatMessages, setChatMessages] = useState<Array<{ fromId: string; displayName: string; text: string; ts: number }>>([]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Stable identifiers for this page session
   const fixedUserIdRef = useRef<string>(safeRandomId());
   const displayNameParamRef = useRef<string | null>(null);
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Container refs to enable overlay within fullscreen scope
   const localContainerRef = useRef<HTMLDivElement | null>(null);
   const remoteTileRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  const inRoom = participants.length > 0;
 
   function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string | null) {
     pc.ontrack = (e) => {
@@ -77,8 +84,10 @@ export default function App() {
           next[targetId] = stream as MediaStream;
           return next;
         });
+        // Attach audio mute listeners to reflect remote mute state
         const audioTrack = (stream as MediaStream).getAudioTracks()[0] || (e.track.kind === "audio" ? e.track : null);
         if (audioTrack) {
+          // Initialize based on current muted value
           setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !!(audioTrack as any).muted || audioTrack.enabled === false }));
           audioTrack.onmute = () => {
             setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
@@ -128,10 +137,12 @@ export default function App() {
         }
       }
     };
+    // Ensure the late joiner kicks off negotiation once local tracks/transceivers exist
     pc.onnegotiationneeded = async () => {
       try {
         const target = peerIdRef.current;
         console.log("[negotiationneeded]", { target, signalingState: pc.signalingState });
+        // Only send if stable; late-joiner path sets target
         if (!target) return;
         if (pc.signalingState !== "stable") return;
         const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
@@ -142,6 +153,7 @@ export default function App() {
         console.warn("[negotiationneeded] failed", err);
       }
     };
+    // ICE restart on failures (helps recover connectivity when switching tracks or networks)
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
       console.log("[iceConnectionState]", st);
@@ -156,6 +168,7 @@ export default function App() {
     svcRef.current = svc;
     svc.init({
       onRoomJoined: (existing, roomInfo) => {
+        // Update meta from authoritative server settings so late joiners see the correct quality
         if (roomInfo?.settings) {
           setMeta({
             roomId: roomInfo.roomId ?? roomId,
@@ -170,14 +183,17 @@ export default function App() {
 
         setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
         const others = existing.filter((p) => p.userId !== svc.getUserId());
+        // Create per-peer PCs for all existing participants
         others.forEach(({ userId: uid }) => {
           const pc = svc.createPeerConnection(uid);
           wirePeerHandlers(pc, svc, uid);
         });
+        // Newcomer initiates offers to all existing peers
         if (others.length > 0) {
           others.forEach(({ userId: uid }) => {
             const pc = svc.getPeerConnection(uid);
             if (pc && pc.signalingState === "stable") {
+              // Set target for onnegotiationneeded so candidates/offers route properly
               peerIdRef.current = uid;
               console.log("[offer] newcomer -> creating offer to", uid);
               pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
@@ -189,6 +205,7 @@ export default function App() {
             }
           });
         }
+        // Always re-bind local stream to video element (some mobile browsers unset it on focus changes)
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls) localVideoRef.current.srcObject = ls;
       },
@@ -197,6 +214,7 @@ export default function App() {
           const exists = prev.some(p => p.userId === uid);
           return exists ? prev : [...prev, { userId: uid, displayName: _name, micMuted: !!micMuted }];
         });
+        // Prepare a PC for the newcomer so we can answer their offer
         const svc = svcRef.current!;
         const pc = svc.createPeerConnection(uid);
         wirePeerHandlers(pc, svc, uid);
@@ -205,12 +223,14 @@ export default function App() {
         setParticipants((prev) => prev.map(p => p.userId === uid ? { ...p, micMuted: !!muted } : p));
       },
       onUserLeft: (uid) => {
+        // Remove participant entry
         setParticipants((prev) => prev.filter((p) => p.userId !== uid));
         if (peerId === uid) {
           setPeerId(null);
           peerIdRef.current = null;
         }
 
+        // Close and remove the peer connection (if any)
         try {
           const svc = svcRef.current!;
           const pc = svc.getPeerConnection(uid);
@@ -220,11 +240,13 @@ export default function App() {
           }
         } catch {}
 
+        // Remove the remote stream tile and clear single preview if it matches
         setRemoteStreams((prev) => {
           const next = { ...prev };
           const removed = next[uid] as MediaStream | undefined;
           delete next[uid];
 
+          // If single remote preview shows the removed stream, clear it
           const current = remoteVideoRef.current?.srcObject as MediaStream | null;
           if (current && removed && current.id === removed.id && remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = null;
@@ -236,6 +258,7 @@ export default function App() {
         const svc = svcRef.current!;
         let pc = svc.getPeerConnection(fromId);
 
+        // Recreate PC if missing or closed (e.g., after leave/teardown)
         if (!pc || pc.signalingState === "closed") {
           pc = svc.createPeerConnection(fromId);
           wirePeerHandlers(pc, svc, fromId);
@@ -243,6 +266,7 @@ export default function App() {
           wirePeerHandlers(pc, svc, fromId);
         }
 
+        // Glare-safe rollback if not stable
         if (pc.signalingState !== "stable") {
           try {
             await pc.setLocalDescription({ type: "rollback" } as any);
@@ -254,6 +278,7 @@ export default function App() {
         } catch (err) {
           console.warn("[onOffer] setRemoteDescription failed; recreating PC", err);
           try {
+            // Hard recreate on SRD failure
             pc = svc.createPeerConnection(fromId);
             wirePeerHandlers(pc, svc, fromId);
             await pc.setRemoteDescription(offer);
@@ -282,6 +307,7 @@ export default function App() {
         } catch {}
       },
       onError: (code, message) => {
+        // Disconnect and stop media first, then notify
         if (code === "AUTH_FAILED" || code === "AUTH_REQUIRED" || code === "ROOM_CLOSED") {
           try { svcRef.current?.leave(); } catch {}
           setParticipants([]);
@@ -305,7 +331,7 @@ export default function App() {
       svcRef.current?.leave();
     };
   }, []);
-
+  // Hide native media controls (including in fullscreen) via global CSS injection
   useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-hide-media-controls", "true");
@@ -324,6 +350,7 @@ export default function App() {
       video::-webkit-media-controls-fullscreen-button { display: none !important; }
       video::-moz-media-controls { display: none !important; }
 
+      /* Ensure fullscreen media fills the viewport across browsers, preserving full frame */
       :fullscreen video,
       video:fullscreen,
       :-webkit-full-screen video,
@@ -342,6 +369,7 @@ export default function App() {
     };
   }, []);
 
+  // Listen for fullscreen changes to toggle our custom exit button
   useEffect(() => {
     const onFsChange = () => {
       const anyFs =
@@ -364,6 +392,7 @@ export default function App() {
   }, []);
 
   async function createRoom() {
+    // Allow overriding quality for creation via URL param ?cq=720p|1080p (create-quality)
     const url = new URL(window.location.href);
     const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
     const createQuality = cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam : quality;
@@ -395,14 +424,17 @@ export default function App() {
     setRoomId(data.roomId);
     setMeta(null);
     setPassword("");
+    // Navigate to /room/:roomId using location to work without router hooks
     try {
       const loc = window.location;
       const base = `${loc.protocol}//${loc.host}`;
+      // Preserve optional intended quality in query (?q=) for UI reflect
       const q = createQuality;
       const query = q ? `?q=${encodeURIComponent(q)}` : "";
       window.location.href = `${base}/room/${encodeURIComponent(data.roomId)}${query}`;
       return;
     } catch {
+      // Fallback: still fetch meta if navigation failed
       fetchMeta(data.roomId);
     }
   }
@@ -424,6 +456,7 @@ export default function App() {
     }
     const data: RoomMeta = await resp.json();
 
+    // If room doesn't exist yet, reflect intended create-only quality from URL so UI shows the plan
     if (!data.exists) {
       const url = new URL(window.location.href);
       const cqParam = url.searchParams.get("cq") as "720p" | "1080p" | null;
@@ -446,12 +479,14 @@ export default function App() {
     }
   }, [roomId]);
 
+  // Parse display name from URL once: ?name=John or ?username=John
   useEffect(() => {
     const url = new URL(window.location.href);
     const nameParam = url.searchParams.get("name") || url.searchParams.get("username");
     displayNameParamRef.current = nameParam && nameParam.trim() ? nameParam.trim() : null;
   }, []);
 
+  // URL mode: if ?room= is present, DO NOT auto-join; just set state and fetch meta
   useEffect(() => {
     const url = new URL(window.location.href);
     const roomParam = url.searchParams.get("room") || undefined;
@@ -471,6 +506,7 @@ export default function App() {
     setRoomId(roomParam);
     if (pwdParam) setPassword(pwdParam);
 
+    // Reflect intended quality in meta for non-existent rooms so the UI shows the plan
     (async () => {
       try {
         const data = await fetchMeta(roomParam);
@@ -504,19 +540,23 @@ export default function App() {
     const svc = svcRef.current!;
     const userId = fixedUserIdRef.current;
     const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
+    // Honor server-declared room quality if available; otherwise use UI-selected quality
     const chosenQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
     await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality: chosenQuality });
   }
 
   function leave() {
+    // Gracefully leave and tear down
     try { svcRef.current?.leave(); } catch {}
 
+    // Reset app state
     setParticipants([]);
     setPeerId(null);
     peerIdRef.current = null;
     setRemoteStreams({});
     autoJoinTriggeredRef.current = false;
 
+    // Recreate service and rebind handlers so subsequent joins have fresh signaling + PCs
     const svc = new WebRTCService();
     svcRef.current = svc;
     svc.init({
@@ -629,6 +669,7 @@ export default function App() {
         alert("Failed to close room");
         return;
       }
+      // Locally leave and reset UI
       leave();
       alert("Room closed for everyone");
     } catch (e) {
@@ -643,6 +684,7 @@ export default function App() {
     const next = !micEnabled;
     aud.forEach((t) => (t.enabled = next));
     setMicEnabled(next);
+    // Broadcast mic state so others can show your mute badge (muted = !next)
     try { svcRef.current?.sendMicState(!next); } catch {}
   }
 
@@ -656,6 +698,7 @@ export default function App() {
   }
 
   function requestFullscreen(el?: HTMLElement | null) {
+    // Prefer the provided element. If it's a <video>, use its parent so overlay stays visible.
     const baseEl = el ?? localVideoRef.current ?? null;
     if (!baseEl) return;
     let target: any = baseEl;
@@ -681,15 +724,19 @@ export default function App() {
       const ls = svc.getLocalStream();
       const el = localVideoRef.current;
       if (el && ls) {
+        // Force a clean rebind and playback on mobile to avoid black frames
         try { el.pause?.(); } catch {}
         try { el.srcObject = null; } catch {}
         el.srcObject = ls;
+        // Ensure track is enabled
         try { ls.getVideoTracks().forEach(t => t.enabled = true); } catch {}
+        // Wait for metadata then play; fallback to immediate play
         const playSafe = async () => {
           try { await el.play(); } catch {}
         };
         if (el.readyState < 2) {
           el.onloadedmetadata = () => { playSafe(); };
+          // Also try a delayed play in case onloadedmetadata doesn't fire
           setTimeout(playSafe, 100);
         } else {
           await playSafe();
@@ -708,474 +755,147 @@ export default function App() {
     if (fn) fn.call(document);
   }
 
-  function copyRoomLink() {
-    const link = `${window.location.origin}/room/${roomId}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  // Render logic split into pre-join and in-room views
-  if (!inRoom) {
-    return (
-      <div style={{
-        minHeight: "100vh",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px"
-      }}>
-        <div style={{
-          maxWidth: "480px",
-          width: "100%",
-          background: "rgba(255, 255, 255, 0.95)",
-          backdropFilter: "blur(10px)",
-          borderRadius: "24px",
-          padding: "40px",
-          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)"
-        }}>
-          <div style={{ textAlign: "center", marginBottom: "32px" }}>
-            <div style={{
-              fontSize: "48px",
-              marginBottom: "16px"
-            }}>🎥</div>
-            <h1 style={{
-              margin: 0,
-              fontSize: "28px",
-              fontWeight: "700",
-              color: "#1a202c",
-              marginBottom: "8px"
-            }}>Video Conference</h1>
-            <p style={{
-              margin: 0,
-              color: "#718096",
-              fontSize: "14px"
-            }}>Start or join a secure video call</p>
+  return (
+    <div style={{ fontFamily: "system-ui", padding: 16 }}>
+      <h1>WebRTC Web Client</h1>
+      {/* Top controls: show simplified mode when URL has ?room=... */}
+      {hasRoomParam ? (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={join} style={{ padding: "6px 12px" }}>
+              Join
+            </button>
+            <button onClick={leave} style={{ padding: "6px 12px" }}>
+              Leave
+            </button>
+            {participants.length > 0 && (
+              <button onClick={closeRoomForEveryone} style={{ padding: "6px 12px", background: "#e74c3c", color: "#fff" }}>
+                Close Room For Everybody
+              </button>
+            )}
           </div>
-
-          <div style={{ marginBottom: "24px" }}>
-            <label style={{
-              display: "block",
-              fontSize: "14px",
-              fontWeight: "600",
-              color: "#4a5568",
-              marginBottom: "8px"
-            }}>Room ID</label>
+          <div>
+            <button
+              onClick={() => {
+                // Navigate to home (clear query) while preserving origin/path
+                const loc = window.location;
+                const base = `${loc.protocol}//${loc.host}${loc.pathname}`;
+                window.location.href = base;
+              }}
+              style={{ padding: "6px 12px" }}
+            >
+              Home
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label>
+            Room:
             <input
               value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
-              placeholder="Enter room ID or leave blank to create"
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                fontSize: "15px",
-                border: "2px solid #e2e8f0",
-                borderRadius: "12px",
-                outline: "none",
-                transition: "all 0.2s",
-                boxSizing: "border-box"
-              }}
-              onFocus={(e) => e.target.style.borderColor = "#667eea"}
-              onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
+              placeholder="room id"
+              style={{ marginLeft: 8, padding: 6 }}
             />
-          </div>
-
-          {meta?.settings?.passwordEnabled && (
-            <div style={{ marginBottom: "24px" }}>
-              <label style={{
-                display: "block",
-                fontSize: "14px",
-                fontWeight: "600",
-                color: "#4a5568",
-                marginBottom: "8px"
-              }}>
-                Password {meta.settings.passwordHint && <span style={{ fontWeight: "400", color: "#718096" }}>({meta.settings.passwordHint})</span>}
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                style={{
-                  width: "100%",
-                  padding: "12px 16px",
-                  fontSize: "15px",
-                  border: "2px solid #e2e8f0",
-                  borderRadius: "12px",
-                  outline: "none",
-                  transition: "all 0.2s",
-                  boxSizing: "border-box"
-                }}
-                onFocus={(e) => e.target.style.borderColor = "#667eea"}
-                onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
-              />
-            </div>
-          )}
-
-          <details style={{ marginBottom: "24px" }}>
-            <summary style={{
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: "600",
-              color: "#4a5568",
-              padding: "12px 0",
-              userSelect: "none"
-            }}>Advanced Settings</summary>
-            <div style={{ paddingTop: "16px", paddingLeft: "8px" }}>
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{
-                  display: "block",
-                  fontSize: "14px",
-                  fontWeight: "600",
-                  color: "#4a5568",
-                  marginBottom: "8px"
-                }}>Video Quality</label>
-                <select
-                  value={quality}
-                  onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
-                  style={{
-                    width: "100%",
-                    padding: "12px 16px",
-                    fontSize: "15px",
-                    border: "2px solid #e2e8f0",
-                    borderRadius: "12px",
-                    outline: "none",
-                    cursor: "pointer",
-                    backgroundColor: "white",
-                    boxSizing: "border-box"
-                  }}
-                >
-                  <option value="720p">720p (HD)</option>
-                  <option value="1080p">1080p (Full HD)</option>
-                </select>
-              </div>
-
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{
-                  display: "block",
-                  fontSize: "14px",
-                  fontWeight: "600",
-                  color: "#4a5568",
-                  marginBottom: "8px"
-                }}>Room Password (optional)</label>
-                <input
-                  type="password"
-                  value={passwordOnCreate}
-                  onChange={(e) => setPasswordOnCreate(e.target.value)}
-                  placeholder="Set password for new room"
-                  style={{
-                    width: "100%",
-                    padding: "12px 16px",
-                    fontSize: "15px",
-                    border: "2px solid #e2e8f0",
-                    borderRadius: "12px",
-                    outline: "none",
-                    boxSizing: "border-box"
-                  }}
-                />
-              </div>
-
-              {passwordOnCreate && (
-                <div>
-                  <label style={{
-                    display: "block",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                    color: "#4a5568",
-                    marginBottom: "8px"
-                  }}>Password Hint (optional)</label>
-                  <input
-                    value={passwordHintOnCreate}
-                    onChange={(e) => setPasswordHintOnCreate(e.target.value)}
-                    placeholder="Hint for password"
-                    style={{
-                      width: "100%",
-                      padding: "12px 16px",
-                      fontSize: "15px",
-                      border: "2px solid #e2e8f0",
-                      borderRadius: "12px",
-                      outline: "none",
-                      boxSizing: "border-box"
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          </details>
-
-          <div style={{ display: "flex", gap: "12px", marginBottom: "16px" }}>
-            <button
-              onClick={roomId.trim() ? join : createRoom}
-              style={{
-                flex: 1,
-                padding: "14px 24px",
-                fontSize: "16px",
-                fontWeight: "600",
-                color: "white",
-                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                border: "none",
-                borderRadius: "12px",
-                cursor: "pointer",
-                transition: "transform 0.2s, box-shadow 0.2s",
-                boxShadow: "0 4px 12px rgba(102, 126, 234, 0.4)"
-              }}
-              onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.98)"}
-              onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
-              onMouseEnter={(e) => e.currentTarget.style.boxShadow = "0 6px 16px rgba(102, 126, 234, 0.5)"}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.4)";
-                e.currentTarget.style.transform = "scale(1)";
-              }}
+          </label>
+          <label>
+            Quality:
+            <select
+              value={quality}
+              onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
+              style={{ marginLeft: 8, padding: 6 }}
             >
-              {roomId.trim() ? "Join Room" : "Create New Room"}
-            </button>
-          </div>
-
-          {meta && (
-            <div style={{
-              padding: "16px",
-              background: "#f7fafc",
-              borderRadius: "12px",
-              fontSize: "13px",
-              color: "#4a5568"
-            }}>
-              <div style={{ marginBottom: "6px" }}>
-                <strong>Room:</strong> <code style={{ background: "#e2e8f0", padding: "2px 6px", borderRadius: "4px" }}>{meta.roomId}</code>
-              </div>
-              <div style={{ marginBottom: "6px" }}>
-                <strong>Status:</strong> {meta.exists ? "Active" : "Will be created"}
-              </div>
-              <div>
-                <strong>Quality:</strong> {meta.settings.videoQuality}
-              </div>
-            </div>
-          )}
-
-          <div style={{
-            marginTop: "24px",
-            paddingTop: "24px",
-            borderTop: "1px solid #e2e8f0",
-            textAlign: "center"
-          }}>
-            <a
-              href="/dev"
-              style={{
-                color: "#667eea",
-                textDecoration: "none",
-                fontSize: "14px",
-                fontWeight: "500"
-              }}
-            >
-              Switch to Classic View
-            </a>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // In-room view
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#0f172a",
-      color: "white",
-      fontFamily: "system-ui, -apple-system, sans-serif",
-      display: "flex",
-      flexDirection: "column"
-    }}>
-      {/* Top Bar */}
-      <div style={{
-        background: "rgba(15, 23, 42, 0.95)",
-        backdropFilter: "blur(10px)",
-        borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-        padding: "12px 24px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "16px",
-        flexWrap: "wrap"
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <div style={{ fontSize: "24px" }}>🎥</div>
-          <div>
-            <div style={{ fontSize: "14px", fontWeight: "600", marginBottom: "2px" }}>
-              Room: <code style={{ background: "rgba(255, 255, 255, 0.1)", padding: "2px 8px", borderRadius: "6px", fontSize: "13px" }}>{roomId}</code>
-            </div>
-            <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "8px" }}>
-              <FiUsers size={14} />
-              {participants.length} participant{participants.length !== 1 ? "s" : ""}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            onClick={copyRoomLink}
-            style={{
-              padding: "8px 16px",
-              background: copied ? "#10b981" : "rgba(255, 255, 255, 0.1)",
-              border: "none",
-              borderRadius: "8px",
-              color: "white",
-              fontSize: "14px",
-              fontWeight: "500",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              transition: "background 0.2s"
-            }}
-            onMouseEnter={(e) => !copied && (e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)")}
-            onMouseLeave={(e) => !copied && (e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)")}
-          >
-            {copied ? <FiCheck size={16} /> : <FiCopy size={16} />}
-            {copied ? "Copied!" : "Copy Link"}
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select>
+          </label>
+          <label>
+            Password (on creation):
+            <input
+              type="password"
+              value={passwordOnCreate}
+              onChange={(e) => setPasswordOnCreate(e.target.value)}
+              placeholder="optional"
+              style={{ marginLeft: 8, padding: 6 }}
+            />
+          </label>
+          <label>
+            Hint:
+            <input
+              value={passwordHintOnCreate}
+              onChange={(e) => setPasswordHintOnCreate(e.target.value)}
+              placeholder="optional"
+              style={{ marginLeft: 8, padding: 6 }}
+            />
+          </label>
+          <button onClick={createRoom} style={{ padding: "6px 12px" }}>
+            Create Room
           </button>
-
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            style={{
-              padding: "8px 12px",
-              background: "rgba(255, 255, 255, 0.1)",
-              border: "none",
-              borderRadius: "8px",
-              color: "white",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center"
-            }}
-          >
-            <FiSettings size={18} />
+          <button onClick={join} style={{ padding: "6px 12px" }}>
+            Join
           </button>
-
-          <button
-            onClick={leave}
-            style={{
-              padding: "8px 16px",
-              background: "#ef4444",
-              border: "none",
-              borderRadius: "8px",
-              color: "white",
-              fontSize: "14px",
-              fontWeight: "600",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              transition: "background 0.2s"
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.background = "#dc2626"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "#ef4444"}
-          >
-            <FiLogOut size={16} />
+          <button onClick={leave} style={{ padding: "6px 12px" }}>
             Leave
           </button>
+          {participants.length > 0 && (
+            <button onClick={closeRoomForEveryone} style={{ padding: "6px 12px", background: "#e74c3c", color: "#fff" }}>
+              Close Room For Everybody
+            </button>
+          )}
+          {createdRoom && (
+            <span>
+              Created: <code>{createdRoom}</code>
+            </span>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Main Content */}
-      <div style={{ flex: 1, display: "flex", padding: "24px", gap: "24px", overflow: "hidden" }}>
-        {/* Local Video */}
-        <div ref={localContainerRef} style={{
-          position: "relative",
-          width: "320px",
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px"
-        }}>
-          <div style={{
-            position: "relative",
-            background: "#1e293b",
-            borderRadius: "16px",
-            overflow: "hidden",
-            aspectRatio: "16/9"
-          }}>
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              controls={false}
-              disablePictureInPicture
-              controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover"
-              }}
-            />
-            <div style={{
-              position: "absolute",
-              bottom: "12px",
-              left: "12px",
-              background: "rgba(0, 0, 0, 0.6)",
-              backdropFilter: "blur(10px)",
-              padding: "6px 12px",
-              borderRadius: "8px",
-              fontSize: "14px",
-              fontWeight: "600"
-            }}>
-              You
+      {meta && (
+        <div style={{ marginTop: 12, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
+          <div>Room: <code>{meta.roomId}</code> {meta.exists ? "(exists)" : "(will be auto-created on join)"}</div>
+          <div>Quality: <code>{meta.settings.videoQuality}</code></div>
+          <div>Password: <code>{meta.settings.passwordEnabled ? "enabled" : "disabled"}</code></div>
+          {meta.settings.passwordEnabled && (
+            <div style={{ marginTop: 8 }}>
+              <label>
+                Enter password {meta.settings.passwordHint ? `(hint: ${meta.settings.passwordHint})` : ""}:
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={{ marginLeft: 8, padding: 6 }}
+                />
+              </label>
             </div>
+          )}
+          <div style={{ marginTop: 8 }}>
+            <strong>Participants currently in room:</strong>
+            <ul style={{ marginTop: 6 }}>
+              {participants.map((p) => {
+                const self = p.userId === svcRef.current?.getUserId();
+                return (
+                  <li key={p.userId} style={{ fontWeight: self ? 600 : 400 }}>
+                    <code>{p.userId}</code> — {p.displayName} {self ? <span>(you)</span> : null}
+                  </li>
+                );
+              })}
+              {participants.length === 0 && <li>None</li>}
+            </ul>
           </div>
+        </div>
+      )}
 
-          {/* Control Buttons */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "8px"
-          }}>
-            <button
-              onClick={toggleMute}
-              style={{
-                padding: "12px",
-                background: micEnabled ? "rgba(255, 255, 255, 0.1)" : "#ef4444",
-                border: "none",
-                borderRadius: "12px",
-                color: "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                fontSize: "14px",
-                fontWeight: "500",
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
-              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
-            >
+      <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
+        <div ref={localContainerRef} style={{ position: "relative" }}>
+          <h3>Local</h3>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button onClick={toggleMute} aria-label={micEnabled ? "Mute" : "Unmute"} title={micEnabled ? "Mute" : "Unmute"} style={{ padding: "6px 12px" }}>
               {micEnabled ? <FiMic size={18} /> : <FiMicOff size={18} />}
             </button>
-
-            <button
-              onClick={toggleVideo}
-              style={{
-                padding: "12px",
-                background: camEnabled ? "rgba(255, 255, 255, 0.1)" : "#ef4444",
-                border: "none",
-                borderRadius: "12px",
-                color: "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                fontSize: "14px",
-                fontWeight: "500",
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
-              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
-            >
+            <button onClick={toggleVideo} aria-label={camEnabled ? "Disable Video" : "Enable Video"} title={camEnabled ? "Disable Video" : "Enable Video"} style={{ padding: "6px 12px" }}>
               {camEnabled ? <FiVideo size={18} /> : <FiVideoOff size={18} />}
             </button>
-
             <button
               onClick={async () => {
                 const svc = svcRef.current;
@@ -1184,6 +904,7 @@ export default function App() {
                   if (!isSharing) {
                     await svc.startScreenShare();
                     setIsSharing(true);
+                    // Rebind local preview to shared stream
                     const ls = svc.getLocalStream();
                     if (localVideoRef.current && ls) {
                       try { localVideoRef.current.pause?.(); } catch {}
@@ -1206,27 +927,12 @@ export default function App() {
                   console.warn("[share] toggle failed", e);
                 }
               }}
-              style={{
-                padding: "12px",
-                background: isSharing ? "#10b981" : "rgba(255, 255, 255, 0.1)",
-                border: "none",
-                borderRadius: "12px",
-                color: "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                fontSize: "14px",
-                fontWeight: "500",
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
-              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+              aria-label={isSharing ? "Stop Share" : "Start Share"}
+              title={isSharing ? "Stop Share" : "Start Share"}
+              style={{ padding: "6px 12px" }}
             >
-              <FiMonitor size={18} />
+              {isSharing ? "Stop Share" : "Share Screen"}
             </button>
-
             <button
               onClick={() => {
                 const isFs = document.fullscreenElement === localContainerRef.current;
@@ -1236,31 +942,41 @@ export default function App() {
                   requestFullscreen(localVideoRef.current);
                 }
               }}
-              style={{
-                padding: "12px",
-                background: "rgba(255, 255, 255, 0.1)",
-                border: "none",
-                borderRadius: "12px",
-                color: "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                fontSize: "14px",
-                fontWeight: "500",
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
-              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+              aria-label="Fullscreen"
+              title="Fullscreen"
+              style={{ padding: "6px 12px" }}
             >
               {document.fullscreenElement === localContainerRef.current ? <FiMinimize size={18} /> : <FiMaximize size={18} />}
             </button>
+            <button
+              onClick={switchFacing}
+              aria-label="Switch Camera"
+              title="Switch Camera"
+              style={{ padding: "6px 12px" }}
+            >
+              {facingMode === "user" ? "Back Camera" : "Front Camera"}
+            </button>
           </div>
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            controls={false}
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+            // @ts-ignore vendor attribute
+            webkit-playsinline="true"
+            style={{
+              width: isFullscreen && document.fullscreenElement === localContainerRef.current ? "100%" : 320,
+              height: isFullscreen && document.fullscreenElement === localContainerRef.current ? "100%" : "auto",
+              background: "#000",
+              objectFit: "contain"
+            }}
+          />
         </div>
-
-        {/* Remote Videos */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1 }}>
+          <h3>Remotes</h3>
           <VideoGrid
             tiles={Object.entries(remoteStreams).map(([uid, stream]) => {
               const p = participants.find(x => x.userId === uid);
@@ -1272,6 +988,7 @@ export default function App() {
                 displayName: p?.displayName ?? uid,
                 stream,
                 muted: !!(remoteAudioMuted[uid] || p?.micMuted),
+                // Consider fullscreen active if the tile container OR a descendant (e.g., video) is fullscreen
                 fullscreen: isTileFs
               };
             })}
@@ -1288,6 +1005,7 @@ export default function App() {
               if (isFs) {
                 exitFullscreen();
               } else {
+                // Always request fullscreen on the tile container to keep overlay controls visible
                 requestFullscreen(container || undefined);
               }
             }}
@@ -1300,129 +1018,131 @@ export default function App() {
         </div>
       </div>
 
-      {/* Settings Panel */}
-      {showSettings && (
-        <div style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: "rgba(0, 0, 0, 0.7)",
-          backdropFilter: "blur(4px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 1000,
-          padding: "20px"
-        }} onClick={() => setShowSettings(false)}>
-          <div style={{
-            background: "#1e293b",
-            borderRadius: "16px",
-            padding: "32px",
-            maxWidth: "500px",
-            width: "100%",
-            maxHeight: "80vh",
-            overflowY: "auto"
-          }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, marginBottom: "24px", fontSize: "24px", fontWeight: "700" }}>Settings</h2>
-            
-            <div style={{ marginBottom: "24px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>TURN Configuration</h3>
-              <input
-                placeholder="turn:host:3478,turns:host:5349"
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  marginBottom: "12px",
-                  background: "rgba(255, 255, 255, 0.05)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  borderRadius: "8px",
-                  color: "white",
-                  fontSize: "14px",
-                  boxSizing: "border-box"
-                }}
-                defaultValue={localStorage.getItem("turn.urls") || ""}
-                onChange={(e) => localStorage.setItem("turn.urls", e.target.value)}
-              />
-              <input
-                placeholder="TURN username"
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  marginBottom: "12px",
-                  background: "rgba(255, 255, 255, 0.05)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  borderRadius: "8px",
-                  color: "white",
-                  fontSize: "14px",
-                  boxSizing: "border-box"
-                }}
-                defaultValue={localStorage.getItem("turn.username") || ""}
-                onChange={(e) => localStorage.setItem("turn.username", e.target.value)}
-              />
-              <input
-                placeholder="TURN password"
-                type="password"
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  background: "rgba(255, 255, 255, 0.05)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  borderRadius: "8px",
-                  color: "white",
-                  fontSize: "14px",
-                  boxSizing: "border-box"
-                }}
-                defaultValue={localStorage.getItem("turn.password") || ""}
-                onChange={(e) => localStorage.setItem("turn.password", e.target.value)}
-              />
-            </div>
-
-            <div style={{ marginBottom: "24px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>Room Actions</h3>
-              <button
-                onClick={() => {
-                  if (confirm("Are you sure you want to close the room for everyone?")) {
-                    closeRoomForEveryone();
-                    setShowSettings(false);
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  background: "#ef4444",
-                  border: "none",
-                  borderRadius: "8px",
-                  color: "white",
-                  fontSize: "14px",
-                  fontWeight: "600",
-                  cursor: "pointer"
-                }}
-              >
-                Close Room For Everyone
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowSettings(false)}
-              style={{
-                width: "100%",
-                padding: "12px",
-                background: "rgba(255, 255, 255, 0.1)",
-                border: "none",
-                borderRadius: "8px",
-                color: "white",
-                fontSize: "14px",
-                fontWeight: "600",
-                cursor: "pointer"
-              }}
-            >
-              Close Settings
-            </button>
-          </div>
+      {/* TURN configuration (for NAT traversal) */}
+      <div style={{ marginTop: 16, padding: 12, border: "1px dashed #ccc", borderRadius: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>TURN Settings (optional)</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            placeholder="turn:host:3478,turns:host:5349"
+            style={{ padding: 6, minWidth: 280 }}
+            defaultValue={localStorage.getItem("turn.urls") || ""}
+            onChange={(e) => localStorage.setItem("turn.urls", e.target.value)}
+          />
+          <input
+            placeholder="TURN username"
+            style={{ padding: 6 }}
+            defaultValue={localStorage.getItem("turn.username") || ""}
+            onChange={(e) => localStorage.setItem("turn.username", e.target.value)}
+          />
+          <input
+            placeholder="TURN password"
+            style={{ padding: 6 }}
+            type="password"
+            defaultValue={localStorage.getItem("turn.password") || ""}
+            onChange={(e) => localStorage.setItem("turn.password", e.target.value)}
+          />
+          <button
+            style={{ padding: "6px 12px" }}
+            onClick={() => {
+              alert("TURN settings applied. New peer connections will use the configured iceServers.");
+            }}
+          >
+            Apply
+          </button>
         </div>
-      )}
+        <div style={{ marginTop: 8, fontSize: 12, color: "#555" }}>
+          Client reads TURN from localStorage in{" "}
+          <a href="/web/src/services/webrtc.ts">web/src/services/webrtc.ts</a>. Existing connections remain unchanged; new PCs will use the updated servers.
+        </div>
+      </div>
+
+      {/* Simple in-room chat panel */}
+      <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Chat</div>
+        <div
+          style={{
+            maxHeight: 200,
+            overflowY: "auto",
+            background: "#fafafa",
+            border: "1px solid #eee",
+            borderRadius: 6,
+            padding: 8,
+            fontSize: 13
+          }}
+        >
+          {chatMessages.length === 0 && <div style={{ color: "#888" }}>No messages yet</div>}
+          {chatMessages.map((m, idx) => {
+            const isSelf = m.fromId === svcRef.current?.getUserId();
+            const ts = new Date(m.ts).toLocaleTimeString();
+            return (
+              <div key={`${m.fromId}-${m.ts}-${idx}`} style={{ marginBottom: 6 }}>
+                <span style={{ color: isSelf ? "#2c3e50" : "#555", fontWeight: 600 }}>
+                  {m.displayName || m.fromId}
+                </span>
+                <span style={{ color: "#999", marginLeft: 6, fontSize: 12 }}>{ts}</span>
+                <div style={{ marginTop: 2 }}>{m.text}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            ref={chatInputRef}
+            placeholder="Type a message"
+            style={{ flex: 1, padding: 6 }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const text = chatInputRef.current?.value?.trim() || "";
+                if (!text) return;
+                try {
+                  const svc = svcRef.current!;
+                  const uid = svc.getUserId();
+                  const name = displayNameParamRef.current ?? `Guest_${uid?.slice(0, 5)}`;
+                  svc.sendChat(text);
+                  // Optimistic local echo
+                  setChatMessages((prev) => [...prev, { fromId: uid, displayName: name, text, ts: Date.now() }]);
+                  if (chatInputRef.current) chatInputRef.current.value = "";
+                } catch {}
+              }
+            }}
+          />
+          <button
+            style={{ padding: "6px 12px" }}
+            onClick={() => {
+              const text = chatInputRef.current?.value?.trim() || "";
+              if (!text) return;
+              try {
+                const svc = svcRef.current!;
+                const uid = svc.getUserId();
+                const name = displayNameParamRef.current ?? `Guest_${uid?.slice(0, 5)}`;
+                svc.sendChat(text);
+                setChatMessages((prev) => [...prev, { fromId: uid, displayName: name, text, ts: Date.now() }]);
+                if (chatInputRef.current) chatInputRef.current.value = "";
+              } catch {}
+            }}
+          >
+            Send
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        Server health:{" "}
+        <a
+          href={`${(((typeof window !== "undefined" ? (window as any).APP_CONFIG?.SIGNALING_URL : undefined) as string | undefined)?.trim()) || (((import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined)?.trim()) || `${window.location.protocol}//${window.location.hostname}:3000`}/health`}
+          target="_blank" rel="noreferrer"
+        >
+          {`${(((typeof window !== "undefined" ? (window as any).APP_CONFIG?.SIGNALING_URL : undefined) as string | undefined)?.trim()) || (((import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined)?.trim()) || `${window.location.protocol}//${window.location.hostname}:3000`}/health`}
+        </a>
+        <div style={{ marginTop: 12, fontSize: 12, color: "#555" }}>
+          Debug: peerId target = <code>{peerIdRef.current ?? "null"}</code>; participants = <code>{participants.length}</code>
+        </div>
+      </div>
+
+      <p>
+        For quick local P2P test use: <a href="/web/test.html">web/test.html</a>
+      </p>
+
     </div>
   );
 }
