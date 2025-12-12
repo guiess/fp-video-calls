@@ -95,6 +95,53 @@ app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 // Simple endpoint to verify CORS from other devices
 app.get("/cors-check", (_req, res) => res.json({ ok: true, origin: _req.headers.origin ?? null }));
 
+// TURN (coturn REST auth) ephemeral credentials
+const TURN_TTL_SECONDS = parseInt(process.env.TURN_TTL_SECONDS || "300", 10);
+const TURN_SECRET = (process.env.TURN_HMAC_SECRET || "").trim();
+const TURN_REALM = (process.env.TURN_REALM || process.env.TURN_DOMAIN || "").trim();
+const TURN_URLS = (process.env.TURN_URLS || "").split(",").map(s => s.trim()).filter(Boolean);
+
+function issueTurnCredentials(userId, roomId, realm, urls) {
+  const ts = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
+  const username = `${userId}:${ts}`;
+  const hmac = crypto.createHmac("sha1", TURN_SECRET);
+  hmac.update(username);
+  const credential = hmac.digest("base64");
+  return { username, credential, ttl: TURN_TTL_SECONDS, urls, realm, roomId, userId };
+}
+
+// GET /api/turn?userId=...&roomId=...
+app.get("/api/turn", (req, res) => {
+  try {
+    const userId = String(req.query.userId || "").trim();
+    const roomId = String(req.query.roomId || "").trim();
+    if (!TURN_SECRET || TURN_SECRET.length < 8) {
+      return res.status(500).json({ ok: false, error: "TURN_SECRET_NOT_CONFIGURED" });
+    }
+    if (!TURN_REALM) {
+      return res.status(500).json({ ok: false, error: "TURN_REALM_NOT_CONFIGURED" });
+    }
+    const urls = TURN_URLS.length ? TURN_URLS : [
+      `turns:turn.${TURN_REALM}:5349?transport=udp`,
+      `turns:turn.${TURN_REALM}:5349?transport=tcp`,
+      `turn:turn.${TURN_REALM}:3478?transport=udp`,
+      `turn:turn.${TURN_REALM}:3478?transport=tcp`
+    ];
+    if (!userId) return res.status(400).json({ ok: false, error: "BAD_REQUEST", hint: "userId required" });
+    // Optional: room existence check for basic scoping
+    const room = rooms.get(roomId);
+    if (roomId && !room) {
+      // Not fatal; allow issuance for pre-join flows, but you can require room existence by uncommenting:
+      // return res.status(404).json({ ok: false, error: "ROOM_NOT_FOUND" });
+    }
+    const payload = issueTurnCredentials(userId, roomId || null, TURN_REALM, urls);
+    return res.json(payload);
+  } catch (e) {
+    console.error("[turn] issue failed", e);
+    return res.status(500).json({ ok: false, error: "TURN_ISSUE_FAILED" });
+  }
+});
+
 // Create room (returns human-readable slug). Password can only be set at creation.
 app.post("/room", (req, res) => {
   const { videoQuality = "720p", passwordEnabled = false, passwordHint, password } = req.body || {};
@@ -309,5 +356,6 @@ server.listen(PORT, HOST, () => {
   console.log(`Signaling server listening on ${scheme}://${HOST}:${PORT}`);
   console.log(`Health: ${scheme}://${HOST}:${PORT}/health`);
   console.log(`Create room: POST ${scheme}://${HOST}:${PORT}/room (include passwordEnabled + password to protect)`);
+  console.log(`TURN creds: GET ${scheme}://${HOST}:${PORT}/api/turn?userId=alice&roomId=room-123`);
   console.log(`Tip: from another device on LAN use ${scheme}://192.168.0.114:3000`);
 });
