@@ -29,6 +29,8 @@ export class WebRTCService {
   private displayName: string = "";
   private handlers: SignalingHandlers = {};
   private endpoint: string = "";
+  // Cached TURN servers fetched from signaling REST (ephemeral creds)
+  private turnIceServers: RTCIceServer[] | null = null;
 
   private bindSocketEvents() {
     if (!this.socket) return;
@@ -163,21 +165,27 @@ export class WebRTCService {
     }
   }
  
-  /** Build ICE servers from env (VITE_TURN_*) + localStorage with sensible defaults */
+  /** Build ICE servers:
+   *  - Prefer ephemeral TURN creds fetched from /api/turn
+   *  - Fallback to env/localStorage TURN config if provided
+   *  - Always include public STUN defaults
+   */
   private getIceServers(): RTCIceServer[] {
     const defaults: RTCIceServer[] = [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:global.stun.twilio.com:3478" }
     ];
+    // If ephemeral TURN already fetched, use it
+    if (this.turnIceServers && this.turnIceServers.length > 0) {
+      return [...defaults, ...this.turnIceServers];
+    }
+
+    // Fallback: static TURN from env/localStorage
     const env: any = (import.meta as any)?.env || {};
     const envUrls = ((env.VITE_TURN_URLS as string | undefined) || "")
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
+      .split(",").map(s => s.trim()).filter(Boolean);
     const lsUrls = ((localStorage.getItem("turn.urls") || "") as string)
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
+      .split(",").map(s => s.trim()).filter(Boolean);
     const raw = [...envUrls, ...lsUrls].filter(Boolean);
 
     const turnUser = (env.VITE_TURN_USERNAME as string | undefined) || (localStorage.getItem("turn.username") || undefined);
@@ -189,11 +197,25 @@ export class WebRTCService {
     }
     return defaults;
   }
+
+  /** Fetch ephemeral TURN creds from signaling server and cache */
+  private async fetchTurnAndCache(): Promise<void> {
+    try {
+      const params = new URLSearchParams({ userId: this.userId || "", roomId: this.roomId || "" });
+      const r = await fetch(`${this.endpoint.replace(/\/$/, "")}/api/turn?${params.toString()}`, { credentials: "include" });
+      const j = await r.json();
+      if (j && j.username && j.credential && j.urls && Array.isArray(j.urls)) {
+        this.turnIceServers = [{ urls: j.urls, username: j.username, credential: j.credential }];
+      }
+    } catch (e) {
+      console.warn("[turn] fetch failed; falling back to env/localStorage TURN", e);
+    }
+  }
  
   createPeerConnection(targetId: string) {
     const existing = this.pcs.get(targetId);
     if (existing) return existing;
- 
+
     const pc = new RTCPeerConnection({ iceServers: this.getIceServers() });
     // Let App bind per-peer handlers and onicecandidate routing
     pc.onicecandidate = null;
@@ -212,6 +234,9 @@ export class WebRTCService {
     this.roomId = roomId;
     this.userId = userId;
     this.displayName = displayName;
+
+    // Pre-fetch ephemeral TURN credentials before any RTCPeerConnection is created
+    await this.fetchTurnAndCache();
 
     const initial = await this.getCaptureStream(quality, "user");
     if (!initial || initial.getTracks().length === 0) {
