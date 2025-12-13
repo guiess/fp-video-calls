@@ -4,6 +4,8 @@ export interface Translations {
   // Pre-join view
   videoConference: string;
   startOrJoinCall: string;
+  username: string;
+  usernamePlaceholder: string;
   roomId: string;
   roomIdPlaceholder: string;
   password: string;
@@ -71,6 +73,8 @@ export const translations: Record<Language, Translations> = {
     // Pre-join view
     videoConference: 'Видеоконференция',
     startOrJoinCall: 'Начать или присоединиться к видеозвонку',
+    username: 'Ваше имя',
+    usernamePlaceholder: 'Введите ваше имя',
     roomId: 'ID комнаты',
     roomIdPlaceholder: 'Введите ID комнаты или оставьте пустым для создания',
     password: 'Пароль',
@@ -136,6 +140,8 @@ export const translations: Record<Language, Translations> = {
     // Pre-join view
     videoConference: 'Video Conference',
     startOrJoinCall: 'Start or join a secure video call',
+    username: 'Your Name',
+    usernamePlaceholder: 'Enter your name',
     roomId: 'Room ID',
     roomIdPlaceholder: 'Enter room ID or leave blank to create',
     password: 'Password',

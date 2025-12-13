@@ -27,6 +27,7 @@ type RoomMeta = {
 export default function App() {
   const { language, setLanguage, t } = useLanguage();
   const [roomId, setRoomId] = useState("");
+  const [username, setUsername] = useState("");
   const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
   const [createdRoom, setCreatedRoom] = useState<string>("");
   const [meta, setMeta] = useState<RoomMeta | null>(null);
@@ -629,7 +630,9 @@ export default function App() {
   useEffect(() => {
     const url = new URL(window.location.href);
     const nameParam = url.searchParams.get("name") || url.searchParams.get("username");
-    displayNameParamRef.current = nameParam && nameParam.trim() ? nameParam.trim() : null;
+    const displayName = nameParam && nameParam.trim() ? nameParam.trim() : "";
+    displayNameParamRef.current = displayName || null;
+    setUsername(displayName);
   }, []);
 
   useEffect(() => {
@@ -683,7 +686,7 @@ export default function App() {
     }
     const svc = svcRef.current!;
     const userId = fixedUserIdRef.current;
-    const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
+    const displayName = username.trim() || displayNameParamRef.current || `Guest_${Math.floor(Math.random() * 10000)}`;
     const chosenQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
     await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality: chosenQuality });
     
@@ -952,6 +955,33 @@ export default function App() {
               color: "#718096",
               fontSize: "14px"
             }}>{t.startOrJoinCall}</p>
+          </div>
+
+          <div style={{ marginBottom: "24px" }}>
+            <label style={{
+              display: "block",
+              fontSize: "14px",
+              fontWeight: "600",
+              color: "#4a5568",
+              marginBottom: "8px"
+            }}>{t.username}</label>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t.usernamePlaceholder}
+              style={{
+                width: "100%",
+                padding: "12px 16px",
+                fontSize: "15px",
+                border: "2px solid #e2e8f0",
+                borderRadius: "12px",
+                outline: "none",
+                transition: "all 0.2s",
+                boxSizing: "border-box"
+              }}
+              onFocus={(e) => e.target.style.borderColor = "#667eea"}
+              onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
+            />
           </div>
 
           <div style={{ marginBottom: "24px" }}>
