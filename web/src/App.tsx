@@ -43,6 +43,7 @@ export default function App() {
   const [isSharing, setIsSharing] = useState<boolean>(false);
   const [hasRoomParam, setHasRoomParam] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [localFullscreen, setLocalFullscreen] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
 
@@ -62,47 +63,79 @@ export default function App() {
 
   function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string | null) {
     pc.ontrack = (e) => {
-      console.log("[ontrack]", {
+      console.log("[ontrack] received", {
         targetId,
         kind: e.track.kind,
+        trackId: e.track.id,
+        trackState: e.track.readyState,
         streamsCount: e.streams.length,
+        streamIds: e.streams.map(s => s.id),
         videoTracksInStreams: e.streams.map((s) => s.getVideoTracks().length),
         audioTracksInStreams: e.streams.map((s) => s.getAudioTracks().length)
       });
-      const hasVideoInStreams = e.streams.find((s) => s.getVideoTracks().length > 0);
-      const stream = hasVideoInStreams || (e.track.kind === "video" ? new MediaStream([e.track]) : e.streams[0]);
-      if (stream && targetId) {
-        setRemoteStreams((prev) => {
-          const next = { ...prev };
-          next[targetId] = stream as MediaStream;
-          return next;
-        });
-        const audioTrack = (stream as MediaStream).getAudioTracks()[0] || (e.track.kind === "audio" ? e.track : null);
-        if (audioTrack) {
-          setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !!(audioTrack as any).muted || audioTrack.enabled === false }));
-          audioTrack.onmute = () => {
-            setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
-          };
-          audioTrack.onunmute = () => {
-            setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
-          };
-          audioTrack.onended = () => {
-            setRemoteAudioMuted((prev) => {
-              const next = { ...prev };
-              delete next[targetId];
-              return next;
-            });
-          };
+      
+      if (!targetId) {
+        console.error("[ontrack] targetId is null!");
+        return;
+      }
+
+      // Collect all tracks for this peer into a single stream
+      setRemoteStreams((prev) => {
+        const existing = prev[targetId];
+        let stream: MediaStream;
+        
+        if (existing) {
+          // Add new track to existing stream
+          stream = existing;
+          const trackExists = stream.getTracks().some(t => t.id === e.track.id);
+          if (!trackExists) {
+            stream.addTrack(e.track);
+            console.log("[ontrack] added", e.track.kind, "track to existing stream for", targetId);
+          }
+        } else if (e.streams.length > 0) {
+          // Use the stream from the event
+          stream = e.streams[0];
+          console.log("[ontrack] using event stream for", targetId, "streamId:", stream.id);
+        } else {
+          // Create new stream with this track
+          stream = new MediaStream([e.track]);
+          console.log("[ontrack] created new stream for", targetId, "with", e.track.kind, "track");
         }
-      } else {
-        console.warn("[ontrack] no remote stream or targetId missing");
+        
+        const next = { ...prev };
+        next[targetId] = stream;
+        
+        console.log("[ontrack] updated remoteStreams", {
+          targetId,
+          streamId: stream.id,
+          videoTracks: stream.getVideoTracks().length,
+          audioTracks: stream.getAudioTracks().length
+        });
+        
+        return next;
+      });
+      
+      // Handle audio mute state
+      if (e.track.kind === "audio") {
+        setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !e.track.enabled }));
+        e.track.onmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
+        e.track.onunmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
+        e.track.onended = () => {
+          setRemoteAudioMuted((prev) => {
+            const next = { ...prev };
+            delete next[targetId];
+            return next;
+          });
+        };
       }
     };
     pc.onicecandidate = (e) => {
       const target = targetId ?? peerIdRef.current;
       if (e.candidate && target) {
-        console.log("[ice] send candidate ->", target, e.candidate.type, e.candidate.protocol);
+        console.log("[ice] sending candidate to", target, "type:", e.candidate.type);
         svc.sendIceCandidate(target, e.candidate.toJSON());
+      } else if (!e.candidate) {
+        console.log("[ice] gathering complete for", target);
       }
     };
     pc.oniceconnectionstatechange = () => {
@@ -119,13 +152,16 @@ export default function App() {
     };
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
-      console.log("[connectionState]", st);
+      console.log("[connectionState]", targetId, "->", st);
       if (st === "connected") {
+        console.log("[peer] connected to", targetId);
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls && localVideoRef.current.srcObject !== ls) {
           localVideoRef.current.srcObject = ls;
           console.log("[local] preview bound", { streamId: ls.id, tracks: ls.getTracks().map((t) => t.id) });
         }
+      } else if (st === "failed" || st === "disconnected") {
+        console.warn("[peer]", targetId, "connection", st);
       }
     };
     pc.onnegotiationneeded = async () => {
@@ -170,10 +206,24 @@ export default function App() {
 
         setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
         const others = existing.filter((p) => p.userId !== svc.getUserId());
+        console.log("[room_joined] found", others.length, "existing participants");
+        
         others.forEach(({ userId: uid }) => {
           const pc = svc.createPeerConnection(uid);
           wirePeerHandlers(pc, svc, uid);
+          
+          // Add transceivers for receiving media
+          try {
+            if (pc.getTransceivers().length === 0) {
+              pc.addTransceiver('audio', { direction: 'sendrecv' });
+              pc.addTransceiver('video', { direction: 'sendrecv' });
+              console.log("[peer] added transceivers for existing participant", uid);
+            }
+          } catch (err) {
+            console.warn("[peer] addTransceiver failed", err);
+          }
         });
+        
         if (others.length > 0) {
           others.forEach(({ userId: uid }) => {
             const pc = svc.getPeerConnection(uid);
@@ -184,13 +234,21 @@ export default function App() {
                 .then(async (offer) => {
                   await pc.setLocalDescription(offer);
                   svc.sendOffer(uid, offer);
+                  console.log("[offer] sent to existing participant", uid);
                 })
                 .catch((err) => console.warn("[offer] createOffer failed", err));
             }
           });
         }
         const ls = svc.getLocalStream();
-        if (localVideoRef.current && ls) localVideoRef.current.srcObject = ls;
+        if (localVideoRef.current && ls) {
+          localVideoRef.current.srcObject = ls;
+          console.log("[local] video bound on room_joined");
+          // Ensure video plays
+          try {
+            localVideoRef.current.play().catch(e => console.warn("[local] play failed", e));
+          } catch {}
+        }
       },
       onUserJoined: (uid, _name, micMuted) => {
         setParticipants((prev) => {
@@ -200,6 +258,33 @@ export default function App() {
         const svc = svcRef.current!;
         const pc = svc.createPeerConnection(uid);
         wirePeerHandlers(pc, svc, uid);
+        
+        // Add transceivers to ensure we receive media (critical for some mobile browsers)
+        try {
+          if (pc.getTransceivers().length === 0) {
+            pc.addTransceiver('audio', { direction: 'sendrecv' });
+            pc.addTransceiver('video', { direction: 'sendrecv' });
+            console.log("[peer] added transceivers for", uid);
+          }
+        } catch (err) {
+          console.warn("[peer] addTransceiver failed", err);
+        }
+        
+        // Polite peer negotiation: user with lexically smaller ID initiates offer
+        const shouldOffer = svc.getUserId() < uid;
+        if (shouldOffer && pc.signalingState === "stable") {
+          peerIdRef.current = uid;
+          console.log("[offer] polite negotiation -> sending offer to", uid);
+          pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+            .then(async (offer) => {
+              await pc.setLocalDescription(offer);
+              svc.sendOffer(uid, offer);
+              console.log("[offer] sent to", uid);
+            })
+            .catch((err) => console.warn("[offer] createOffer failed", err));
+        } else {
+          console.log("[peer] waiting for offer from", uid, "(they are the offerer)");
+        }
       },
       onPeerMicState: (uid, muted) => {
         setParticipants((prev) => prev.map(p => p.userId === uid ? { ...p, micMuted: !!muted } : p));
@@ -239,39 +324,51 @@ export default function App() {
         if (!pc || pc.signalingState === "closed") {
           pc = svc.createPeerConnection(fromId);
           wirePeerHandlers(pc, svc, fromId);
-        } else {
-          wirePeerHandlers(pc, svc, fromId);
+        }
+
+        // Handle collision: polite peer rolls back
+        const isPolite = svc.getUserId() > fromId;
+        if (pc.signalingState !== "stable" && !isPolite) {
+          console.log("[onOffer] collision detected, ignoring offer (impolite peer)");
+          return;
         }
 
         if (pc.signalingState !== "stable") {
           try {
+            console.log("[onOffer] rolling back for polite peer");
             await pc.setLocalDescription({ type: "rollback" } as any);
-          } catch {}
+          } catch (err) {
+            console.warn("[onOffer] rollback failed", err);
+          }
         }
 
         try {
           await pc.setRemoteDescription(offer);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          svc.sendAnswer(fromId, answer);
+          console.log("[answer] sent to", fromId);
         } catch (err) {
-          console.warn("[onOffer] setRemoteDescription failed; recreating PC", err);
-          try {
-            pc = svc.createPeerConnection(fromId);
-            wirePeerHandlers(pc, svc, fromId);
-            await pc.setRemoteDescription(offer);
-          } catch (err2) {
-            console.error("[onOffer] SRD failed after recreate", err2);
-            return;
-          }
+          console.error("[onOffer] failed", err);
         }
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        svc.sendAnswer(fromId, answer);
       },
       onAnswer: async (fromId, answer) => {
         const svc = svcRef.current!;
         const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
-        await pc.setRemoteDescription(answer);
+        if (!pc) {
+          console.warn("[onAnswer] no peer connection for", fromId);
+          return;
+        }
+        if (pc.signalingState !== "have-local-offer") {
+          console.warn("[onAnswer] wrong state", pc.signalingState, "for", fromId);
+          return;
+        }
+        try {
+          await pc.setRemoteDescription(answer);
+          console.log("[answer] received from", fromId);
+        } catch (err) {
+          console.error("[onAnswer] setRemoteDescription failed", err);
+        }
       },
       onIceCandidate: async (fromId, candidate) => {
         const svc = svcRef.current!;
@@ -350,6 +447,13 @@ export default function App() {
         !!(document as any).mozFullScreenElement ||
         !!(document as any).msFullscreenElement;
       setIsFullscreen(anyFs);
+      
+      // Check if local video container is in fullscreen
+      const fsEl = document.fullscreenElement ||
+                   (document as any).webkitFullscreenElement ||
+                   (document as any).mozFullScreenElement ||
+                   (document as any).msFullscreenElement;
+      setLocalFullscreen(fsEl === localContainerRef.current || fsEl?.contains(localContainerRef.current as any));
     };
     document.addEventListener("fullscreenchange", onFsChange);
     document.addEventListener("webkitfullscreenchange", onFsChange as any);
@@ -506,6 +610,18 @@ export default function App() {
     const displayName = displayNameParamRef.current ?? `Guest_${Math.floor(Math.random() * 10000)}`;
     const chosenQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
     await svc.join({ roomId: roomId.trim(), userId, displayName, password: password.trim() || undefined, quality: chosenQuality });
+    
+    // Ensure local video is displayed after join
+    setTimeout(() => {
+      const ls = svc.getLocalStream();
+      if (localVideoRef.current && ls && localVideoRef.current.srcObject !== ls) {
+        console.log("[local] binding video after join");
+        localVideoRef.current.srcObject = ls;
+        try {
+          localVideoRef.current.play().catch(e => console.warn("[local] play failed", e));
+        } catch {}
+      }
+    }, 500);
   }
 
   function leave() {
@@ -516,6 +632,10 @@ export default function App() {
     peerIdRef.current = null;
     setRemoteStreams({});
     autoJoinTriggeredRef.current = false;
+    
+    // Reset mic and camera states
+    setMicEnabled(true);
+    setCamEnabled(true);
 
     const svc = new WebRTCService();
     svcRef.current = svc;
@@ -1078,22 +1198,39 @@ export default function App() {
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: "flex", padding: "24px", gap: "24px", overflow: "hidden" }}>
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: window.innerWidth < 768 ? "column" : "row",
+        padding: window.innerWidth < 768 ? "12px" : "24px",
+        gap: window.innerWidth < 768 ? "12px" : "24px",
+        overflow: "auto"
+      }}>
         {/* Local Video */}
         <div ref={localContainerRef} style={{
-          position: "relative",
-          width: "320px",
-          flexShrink: 0,
+          position: localFullscreen ? "fixed" : "relative",
+          inset: localFullscreen ? 0 : undefined,
+          zIndex: localFullscreen ? 9999 : undefined,
+          background: localFullscreen ? "#000" : undefined,
+          width: localFullscreen ? "100vw" : (window.innerWidth < 768 ? "100%" : "320px"),
+          height: localFullscreen ? "100vh" : undefined,
           display: "flex",
           flexDirection: "column",
-          gap: "12px"
+          gap: localFullscreen ? 0 : "12px",
+          flexShrink: 0,
+          alignItems: localFullscreen ? "center" : undefined,
+          justifyContent: localFullscreen ? "center" : undefined
         }}>
           <div style={{
             position: "relative",
             background: "#1e293b",
-            borderRadius: "16px",
+            borderRadius: localFullscreen ? 0 : "16px",
             overflow: "hidden",
-            aspectRatio: "16/9"
+            aspectRatio: "16/9",
+            width: localFullscreen ? "100%" : "100%",
+            height: localFullscreen ? "100%" : "auto",
+            maxWidth: localFullscreen ? "100vw" : undefined,
+            maxHeight: localFullscreen ? "100vh" : undefined
           }}>
             <video
               ref={localVideoRef}
@@ -1106,7 +1243,7 @@ export default function App() {
               style={{
                 width: "100%",
                 height: "100%",
-                objectFit: "cover"
+                objectFit: localFullscreen ? "contain" : "cover"
               }}
             />
             <div style={{
@@ -1122,11 +1259,57 @@ export default function App() {
             }}>
               You
             </div>
+            
+            {/* Fullscreen controls for local video */}
+            {localFullscreen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  right: 12,
+                  zIndex: 10000,
+                  background: "rgba(0,0,0,0.6)",
+                  color: "#fff",
+                  borderRadius: 8,
+                  padding: "6px 10px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  pointerEvents: "auto"
+                }}
+              >
+                <button
+                  onClick={toggleMute}
+                  aria-label={micEnabled ? "Mute" : "Unmute"}
+                  title={micEnabled ? "Mute" : "Unmute"}
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                >
+                  {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
+                </button>
+                <button
+                  onClick={toggleVideo}
+                  aria-label={camEnabled ? "Disable Video" : "Enable Video"}
+                  title={camEnabled ? "Disable Video" : "Enable Video"}
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                >
+                  {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
+                </button>
+                <button
+                  onClick={exitFullscreen}
+                  aria-label="Exit Fullscreen"
+                  title="Exit Fullscreen"
+                  style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <FiMinimize size={16} /> Exit
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Control Buttons */}
           <div style={{
-            display: "grid",
+            display: localFullscreen ? "none" : "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
             gap: "8px"
           }}>
@@ -1229,11 +1412,15 @@ export default function App() {
 
             <button
               onClick={() => {
-                const isFs = document.fullscreenElement === localContainerRef.current;
+                const fsEl = document.fullscreenElement ||
+                             (document as any).webkitFullscreenElement ||
+                             (document as any).mozFullScreenElement ||
+                             (document as any).msFullscreenElement;
+                const isFs = fsEl === localContainerRef.current || localContainerRef.current?.contains(fsEl as any);
                 if (isFs) {
                   exitFullscreen();
                 } else {
-                  requestFullscreen(localVideoRef.current);
+                  requestFullscreen(localContainerRef.current);
                 }
               }}
               style={{
@@ -1254,13 +1441,17 @@ export default function App() {
               onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
               onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
             >
-              {document.fullscreenElement === localContainerRef.current ? <FiMinimize size={18} /> : <FiMaximize size={18} />}
+              {localFullscreen ? <FiMinimize size={18} /> : <FiMaximize size={18} />}
             </button>
           </div>
         </div>
 
         {/* Remote Videos */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          flex: 1,
+          minWidth: 0,
+          width: window.innerWidth < 768 ? "100%" : "auto"
+        }}>
           <VideoGrid
             tiles={Object.entries(remoteStreams).map(([uid, stream]) => {
               const p = participants.find(x => x.userId === uid);

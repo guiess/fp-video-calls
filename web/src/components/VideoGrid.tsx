@@ -23,8 +23,18 @@ type Props = {
 };
 
 export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onExitFullscreen, micEnabled, camEnabled }: Props) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, 320px)", gap: 12 }}>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: isMobile
+        ? "repeat(auto-fit, minmax(min(100%, 280px), 1fr))"
+        : "repeat(auto-fit, minmax(280px, 1fr))",
+      gap: isMobile ? 8 : 12,
+      width: "100%",
+      alignContent: "start"
+    }}>
       {tiles.map(({ userId, displayName, stream, muted, fullscreen }) => {
         const tileEl = getTileEl?.(userId) || null;
         // Use prop from parent (App) to determine fullscreen state reliably
@@ -70,6 +80,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
             <video
               autoPlay
               playsInline
+              muted={false}
               controls={false}
               disablePictureInPicture
               controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
@@ -77,17 +88,44 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
               webkit-playsinline="true"
               ref={(el) => {
                 if (el && stream && el.srcObject !== stream) {
+                  console.log("[VideoGrid] setting srcObject for", userId, "streamId:", stream.id, "tracks:", stream.getTracks().length);
                   el.srcObject = stream;
-                  try { el.play?.(); } catch {}
+                  
+                  // Mobile browsers need explicit play() call
+                  const playVideo = async () => {
+                    try {
+                      await el.play();
+                      console.log("[VideoGrid] video playing for", userId);
+                    } catch (err) {
+                      console.warn("[VideoGrid] play failed for", userId, err);
+                      // Retry on user interaction if needed
+                      const playOnInteraction = async () => {
+                        try {
+                          await el.play();
+                          document.removeEventListener("touchstart", playOnInteraction);
+                          document.removeEventListener("click", playOnInteraction);
+                        } catch {}
+                      };
+                      document.addEventListener("touchstart", playOnInteraction, { once: true });
+                      document.addEventListener("click", playOnInteraction, { once: true });
+                    }
+                  };
+                  
+                  if (el.readyState >= 2) {
+                    playVideo();
+                  } else {
+                    el.onloadedmetadata = () => playVideo();
+                  }
                 }
               }}
               style={{
                 // Centered, fully visible in fullscreen (letterboxed as needed)
                 position: "relative",
-                width: fsActive ? "100%" : 320,
+                width: fsActive ? "100%" : "100%",
                 height: fsActive ? "100%" : "auto",
                 maxWidth: fsActive ? "100vw" : undefined,
                 maxHeight: fsActive ? "100vh" : undefined,
+                aspectRatio: fsActive ? undefined : "16/9",
                 background: "#000",
                 objectFit: "contain",
                 display: "block",
