@@ -31,6 +31,11 @@ export class WebRTCService {
   private endpoint: string = "";
   // Cached TURN servers fetched from signaling REST (ephemeral creds)
   private turnIceServers: RTCIceServer[] | null = null;
+  // Canvas mirroring resources
+  private mirrorVideo: HTMLVideoElement | null = null;
+  private mirrorCanvas: HTMLCanvasElement | null = null;
+  private mirrorAnimationId: number | null = null;
+  private originalVideoTrack: MediaStreamTrack | null = null;
 
   private bindSocketEvents() {
     if (!this.socket) return;
@@ -109,7 +114,7 @@ export class WebRTCService {
   }
 
   // Capture stream without mutating localStream (callers decide assignment)
-  async getCaptureStream(quality: "720p" | "1080p", facing: "user" | "environment" = "user") {
+  async getCaptureStream(quality: "720p" | "1080p", facing: "user" | "environment" = "user"): Promise<MediaStream> {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) {
       const host = typeof window !== "undefined" ? window.location.hostname : "unknown-host";
       const msg =
@@ -145,17 +150,18 @@ export class WebRTCService {
       return stream;
     };
 
+    let rawStream: MediaStream;
     try {
-      return await attempt({ ...preferred, facingMode: { exact: facing } as any });
+      rawStream = await attempt({ ...preferred, facingMode: { exact: facing } as any });
     } catch {
       try {
-        return await attempt(preferred);
+        rawStream = await attempt(preferred);
       } catch {
         try {
-          return await attemptWithDeviceId();
+          rawStream = await attemptWithDeviceId();
         } catch (e3: any) {
           try {
-            return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            rawStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
           } catch (e4: any) {
             this.handlers.onError?.("CAPTURE_FAILED", e4?.message ?? e3?.message ?? "Unable to access camera/microphone");
             throw e4;
@@ -163,6 +169,99 @@ export class WebRTCService {
         }
       }
     }
+
+    // Mirror the video track for frontal camera before sending to peers
+    if (facing === "user") {
+      return await this.mirrorVideoStream(rawStream);
+    }
+    
+    return rawStream;
+  }
+
+  // Clean up mirroring resources
+  private cleanupMirroring() {
+    if (this.mirrorAnimationId !== null) {
+      cancelAnimationFrame(this.mirrorAnimationId);
+      this.mirrorAnimationId = null;
+    }
+    if (this.mirrorVideo) {
+      try {
+        this.mirrorVideo.pause();
+        this.mirrorVideo.srcObject = null;
+      } catch {}
+      this.mirrorVideo = null;
+    }
+    if (this.mirrorCanvas) {
+      try {
+        const ctx = this.mirrorCanvas.getContext("2d");
+        if (ctx) ctx.clearRect(0, 0, this.mirrorCanvas.width, this.mirrorCanvas.height);
+      } catch {}
+      this.mirrorCanvas = null;
+    }
+    if (this.originalVideoTrack) {
+      try {
+        this.originalVideoTrack.stop();
+      } catch {}
+      this.originalVideoTrack = null;
+    }
+  }
+
+  // Mirror video stream using canvas transformation
+  private async mirrorVideoStream(stream: MediaStream): Promise<MediaStream> {
+    // Clean up any previous mirroring
+    this.cleanupMirroring();
+
+    const videoTrack = stream.getVideoTracks()[0];
+    const audioTracks = stream.getAudioTracks();
+    
+    if (!videoTrack) return stream;
+
+    // Store original track for cleanup
+    this.originalVideoTrack = videoTrack;
+
+    // Create a video element to read from
+    const video = document.createElement("video");
+    video.srcObject = new MediaStream([videoTrack]);
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    this.mirrorVideo = video;
+
+    // Wait for video to be ready
+    await new Promise<void>((resolve) => {
+      video.onloadedmetadata = () => {
+        video.play().then(() => resolve()).catch(() => resolve());
+      };
+    });
+
+    // Create canvas to mirror the video
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return stream;
+    this.mirrorCanvas = canvas;
+
+    // Start mirroring loop
+    const mirror = () => {
+      if (video.readyState >= video.HAVE_CURRENT_DATA) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
+      this.mirrorAnimationId = requestAnimationFrame(mirror);
+    };
+    mirror();
+
+    // Capture the mirrored stream from canvas
+    const mirroredStream = canvas.captureStream(30);
+    const mirroredVideoTrack = mirroredStream.getVideoTracks()[0];
+    
+    // Create final stream with mirrored video and original audio
+    const finalStream = new MediaStream([mirroredVideoTrack, ...audioTracks]);
+    
+    return finalStream;
   }
  
   /** Build ICE servers:
@@ -302,6 +401,9 @@ export class WebRTCService {
   async switchCamera(quality: "720p" | "1080p", facing: "user" | "environment"): Promise<void> {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
 
+    // Clean up mirroring resources if switching away from front camera
+    this.cleanupMirroring();
+
     // Stop old video tracks BEFORE opening new camera (prevents device lock leading to black screen)
     try {
       (this.localStream?.getVideoTracks() ?? []).forEach(t => { try { t.stop(); } catch {} });
@@ -310,17 +412,18 @@ export class WebRTCService {
     // Preserve current live audio
     const currentAudio = (this.localStream?.getAudioTracks() ?? []).filter(t => t.readyState === "live");
 
-    // Acquire new video stream for desired facing
-    const tmpStream = await this.getCaptureStream(quality, facing);
-    const newVideo = tmpStream.getVideoTracks()[0];
+    // Acquire new video stream for desired facing (getCaptureStream already applies mirroring for "user")
+    const newStream = await this.getCaptureStream(quality, facing);
+    const newVideo = newStream.getVideoTracks()[0];
     if (!newVideo) throw new Error("NO_VIDEO_TRACK");
-    // Stop tmp audio to avoid duplicates
-    try { tmpStream.getAudioTracks().forEach(t => { try { t.stop(); } catch {} }); } catch {}
+    
+    // Stop new stream's audio to avoid duplicates (keep current audio)
+    try { newStream.getAudioTracks().forEach(t => { try { t.stop(); } catch {} }); } catch {}
 
     // Ensure the new track is enabled
     try { newVideo.enabled = true; } catch {}
 
-    // Merged local stream: keep audio, add new video
+    // Merged local stream: keep current audio, add new video (already mirrored if needed)
     const merged = new MediaStream();
     try {
       currentAudio.forEach(t => merged.addTrack(t));
@@ -449,6 +552,9 @@ export class WebRTCService {
   }
  
   leave() {
+    // Clean up mirroring resources
+    this.cleanupMirroring();
+
     // Notify server and tear down connections
     try { this.socket?.emit("leave_room", { roomId: this.roomId, userId: this.userId }); } catch {}
     try { this.socket?.off(); } catch {}

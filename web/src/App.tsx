@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
-import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize, FiMonitor, FiUsers, FiSettings, FiLogOut, FiCopy, FiCheck } from "react-icons/fi";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize, FiMonitor, FiUsers, FiSettings, FiLogOut, FiCopy, FiCheck, FiRefreshCcw } from "react-icons/fi";
 import VideoGrid from "./components/VideoGrid";
 
 function safeRandomId() {
@@ -79,39 +79,29 @@ export default function App() {
         return;
       }
 
-      // Collect all tracks for this peer into a single stream
+      // Collect all tracks for this peer into a single stream.
+      // Important: never rely on e.streams[0] because it's frequently empty on Safari/iOS
+      // when using transceivers; if we take it as-is we may end up with an audio-only
+      // stream => black remote video.
       setRemoteStreams((prev) => {
         const existing = prev[targetId];
-        let stream: MediaStream;
-        
-        if (existing) {
-          // Add new track to existing stream
-          stream = existing;
-          const trackExists = stream.getTracks().some(t => t.id === e.track.id);
-          if (!trackExists) {
-            stream.addTrack(e.track);
-            console.log("[ontrack] added", e.track.kind, "track to existing stream for", targetId);
-          }
-        } else if (e.streams.length > 0) {
-          // Use the stream from the event
-          stream = e.streams[0];
-          console.log("[ontrack] using event stream for", targetId, "streamId:", stream.id);
-        } else {
-          // Create new stream with this track
-          stream = new MediaStream([e.track]);
-          console.log("[ontrack] created new stream for", targetId, "with", e.track.kind, "track");
+        const stream = existing ?? new MediaStream();
+
+        const already = stream.getTracks().some((t) => t.id === e.track.id);
+        if (!already) {
+          stream.addTrack(e.track);
+          console.log("[ontrack] added", e.track.kind, "track to stream for", targetId);
         }
-        
-        const next = { ...prev };
-        next[targetId] = stream;
-        
+
+        const next = { ...prev, [targetId]: stream };
+
         console.log("[ontrack] updated remoteStreams", {
           targetId,
           streamId: stream.id,
           videoTracks: stream.getVideoTracks().length,
           audioTracks: stream.getAudioTracks().length
         });
-        
+
         return next;
       });
       
@@ -165,18 +155,9 @@ export default function App() {
       }
     };
     pc.onnegotiationneeded = async () => {
-      try {
-        const target = peerIdRef.current;
-        console.log("[negotiationneeded]", { target, signalingState: pc.signalingState });
-        if (!target) return;
-        if (pc.signalingState !== "stable") return;
-        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-        await pc.setLocalDescription(offer);
-        svc.sendOffer(target, offer);
-        console.log("[offer] onnegotiationneeded -> sent");
-      } catch (err) {
-        console.warn("[negotiationneeded] failed", err);
-      }
+      // We do manual initial offers; this handler tends to create glare / double-offers and
+      // can lead to "connected but black video" situations when both sides renegotiate repeatedly.
+      console.log("[negotiationneeded] ignored", { targetId, signalingState: pc.signalingState });
     };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
@@ -207,47 +188,63 @@ export default function App() {
         setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
         const others = existing.filter((p) => p.userId !== svc.getUserId());
         console.log("[room_joined] found", others.length, "existing participants");
-        
+
+        // Create peer connections for existing participants.
         others.forEach(({ userId: uid }) => {
           const pc = svc.createPeerConnection(uid);
           wirePeerHandlers(pc, svc, uid);
-          
-          // Add transceivers for receiving media
+
           try {
             if (pc.getTransceivers().length === 0) {
-              pc.addTransceiver('audio', { direction: 'sendrecv' });
-              pc.addTransceiver('video', { direction: 'sendrecv' });
+              pc.addTransceiver("audio", { direction: "sendrecv" });
+              pc.addTransceiver("video", { direction: "sendrecv" });
               console.log("[peer] added transceivers for existing participant", uid);
             }
           } catch (err) {
             console.warn("[peer] addTransceiver failed", err);
           }
-        });
-        
-        if (others.length > 0) {
-          others.forEach(({ userId: uid }) => {
-            const pc = svc.getPeerConnection(uid);
-            if (pc && pc.signalingState === "stable") {
-              peerIdRef.current = uid;
-              console.log("[offer] newcomer -> creating offer to", uid);
-              pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
-                .then(async (offer) => {
-                  await pc.setLocalDescription(offer);
-                  svc.sendOffer(uid, offer);
-                  console.log("[offer] sent to existing participant", uid);
-                })
-                .catch((err) => console.warn("[offer] createOffer failed", err));
+
+          try {
+            const ls = svc.getLocalStream();
+            if (ls) {
+              ls.getTracks().forEach((t) => {
+                const already = pc.getSenders().some((s) => s.track?.id === t.id);
+                if (!already) pc.addTrack(t, ls);
+              });
             }
-          });
-        }
+          } catch (err) {
+            console.warn("[peer] addTrack(local) failed", err);
+          }
+        });
+
+        // IMPORTANT: when joining an existing room (2+ peers), we must initiate offers to those peers
+        // (they won't get onUserJoined for us because we are the joiner). Use a deterministic rule
+        // to avoid glare: smaller userId offers.
+        const myId = svc.getUserId();
+        others.forEach(({ userId: uid }) => {
+          const shouldOffer = myId < uid;
+          const pc = svc.getPeerConnection(uid);
+          if (!pc) return;
+
+          if (shouldOffer && pc.signalingState === "stable") {
+            console.log("[offer] joiner->existing offerer, sending offer to", uid);
+            pc.createOffer()
+              .then(async (offer) => {
+                await pc.setLocalDescription(offer);
+                svc.sendOffer(uid, offer);
+                console.log("[offer] sent to existing participant", uid);
+              })
+              .catch((err) => console.warn("[offer] createOffer failed", err));
+          } else {
+            console.log("[peer] joiner waiting for offer from", uid);
+          }
+        });
+
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls) {
           localVideoRef.current.srcObject = ls;
           console.log("[local] video bound on room_joined");
-          // Ensure video plays
-          try {
-            localVideoRef.current.play().catch(e => console.warn("[local] play failed", e));
-          } catch {}
+          try { localVideoRef.current.play().catch(e => console.warn("[local] play failed", e)); } catch {}
         }
       },
       onUserJoined: (uid, _name, micMuted) => {
@@ -262,20 +259,32 @@ export default function App() {
         // Add transceivers to ensure we receive media (critical for some mobile browsers)
         try {
           if (pc.getTransceivers().length === 0) {
-            pc.addTransceiver('audio', { direction: 'sendrecv' });
-            pc.addTransceiver('video', { direction: 'sendrecv' });
+            pc.addTransceiver("audio", { direction: "sendrecv" });
+            pc.addTransceiver("video", { direction: "sendrecv" });
             console.log("[peer] added transceivers for", uid);
           }
         } catch (err) {
           console.warn("[peer] addTransceiver failed", err);
         }
+
+        // Ensure local tracks are attached to this PC.
+        try {
+          const ls = svc.getLocalStream();
+          if (ls) {
+            ls.getTracks().forEach((t) => {
+              const already = pc.getSenders().some((s) => s.track?.id === t.id);
+              if (!already) pc.addTrack(t, ls);
+            });
+          }
+        } catch (err) {
+          console.warn("[peer] addTrack(local) failed", err);
+        }
         
-        // Polite peer negotiation: user with lexically smaller ID initiates offer
+        // Deterministic offerer: user with lexicographically smaller userId sends offer.
         const shouldOffer = svc.getUserId() < uid;
         if (shouldOffer && pc.signalingState === "stable") {
-          peerIdRef.current = uid;
-          console.log("[offer] polite negotiation -> sending offer to", uid);
-          pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+          console.log("[offer] offerer -> sending offer to", uid);
+          pc.createOffer()
             .then(async (offer) => {
               await pc.setLocalDescription(offer);
               svc.sendOffer(uid, offer);
@@ -283,7 +292,7 @@ export default function App() {
             })
             .catch((err) => console.warn("[offer] createOffer failed", err));
         } else {
-          console.log("[peer] waiting for offer from", uid, "(they are the offerer)");
+          console.log("[peer] waiting for offer from", uid);
         }
       },
       onPeerMicState: (uid, muted) => {
@@ -344,6 +353,20 @@ export default function App() {
 
         try {
           await pc.setRemoteDescription(offer);
+
+          // Make sure we are sending our local tracks back (if we missed adding them earlier).
+          try {
+            const ls = svc.getLocalStream();
+            if (ls) {
+              ls.getTracks().forEach((t) => {
+                const already = pc.getSenders().some((s) => s.track?.id === t.id);
+                if (!already) pc.addTrack(t, ls);
+              });
+            }
+          } catch (err) {
+            console.warn("[onOffer] addTrack(local) failed", err);
+          }
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           svc.sendAnswer(fromId, answer);
@@ -815,7 +838,9 @@ export default function App() {
           await playSafe();
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn("[camera] switchFacing failed", e);
+    }
   }
 
   function exitFullscreen() {
@@ -1109,11 +1134,11 @@ export default function App() {
     }}>
       {/* Top Bar */}
       <div style={{
+        display: (isFullscreen || localFullscreen) ? "none" : "flex",
         background: "rgba(15, 23, 42, 0.95)",
         backdropFilter: "blur(10px)",
         borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
         padding: "12px 24px",
-        display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         gap: "16px",
@@ -1219,7 +1244,9 @@ export default function App() {
           gap: localFullscreen ? 0 : "12px",
           flexShrink: 0,
           alignItems: localFullscreen ? "center" : undefined,
-          justifyContent: localFullscreen ? "center" : undefined
+          justifyContent: localFullscreen ? "center" : undefined,
+          // Prevent any hidden overlays from intercepting clicks in fullscreen
+          pointerEvents: localFullscreen ? "none" : undefined
         }}>
           <div style={{
             position: "relative",
@@ -1230,7 +1257,9 @@ export default function App() {
             width: localFullscreen ? "100%" : "100%",
             height: localFullscreen ? "100%" : "auto",
             maxWidth: localFullscreen ? "100vw" : undefined,
-            maxHeight: localFullscreen ? "100vh" : undefined
+            maxHeight: localFullscreen ? "100vh" : undefined,
+            // Re-enable events for the actual video container in fullscreen
+            pointerEvents: localFullscreen ? "auto" : undefined
           }}>
             <video
               ref={localVideoRef}
@@ -1243,7 +1272,7 @@ export default function App() {
               style={{
                 width: "100%",
                 height: "100%",
-                objectFit: localFullscreen ? "contain" : "cover"
+                objectFit: (window.innerWidth < 768 || localFullscreen) ? "contain" : "cover"
               }}
             />
             <div style={{
@@ -1264,10 +1293,10 @@ export default function App() {
             {localFullscreen && (
               <div
                 style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  zIndex: 10000,
+                  position: "fixed",
+                  top: "max(12px, env(safe-area-inset-top))",
+                  right: "max(12px, env(safe-area-inset-right))",
+                  zIndex: 2147483647,
                   background: "rgba(0,0,0,0.6)",
                   color: "#fff",
                   borderRadius: 8,
@@ -1294,6 +1323,14 @@ export default function App() {
                   style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                 >
                   {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
+                </button>
+                <button
+                  onClick={switchFacing}
+                  aria-label="Switch camera"
+                  title="Switch camera"
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                >
+                  <FiRefreshCcw size={16} />
                 </button>
                 <button
                   onClick={exitFullscreen}
@@ -1357,6 +1394,30 @@ export default function App() {
               onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
             >
               {camEnabled ? <FiVideo size={18} /> : <FiVideoOff size={18} />}
+            </button>
+
+            <button
+              onClick={switchFacing}
+              title="Switch camera"
+              style={{
+                padding: "12px",
+                background: "rgba(255, 255, 255, 0.1)",
+                border: "none",
+                borderRadius: "12px",
+                color: "white",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                fontSize: "14px",
+                fontWeight: "500",
+                transition: "all 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
+              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+            >
+              <FiRefreshCcw size={18} />
             </button>
 
             <button
