@@ -25,7 +25,7 @@ type RoomMeta = {
 
 export default function App() {
   const [roomId, setRoomId] = useState("");
-  const [quality, setQuality] = useState<"720p" | "1080p">("720p");
+  const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
   const [createdRoom, setCreatedRoom] = useState<string>("");
   const [meta, setMeta] = useState<RoomMeta | null>(null);
   const [password, setPassword] = useState("");
@@ -608,7 +608,7 @@ export default function App() {
       const qParam = url.searchParams.get("q") as "720p" | "1080p" | null;
       const cqValid = cqParam === "720p" || cqParam === "1080p";
       const qValid = qParam === "720p" || qParam === "1080p";
-      const intended = (cqValid ? cqParam : (qValid ? qParam : data.settings.videoQuality)) as "720p" | "1080p";
+      const intended = (cqValid ? cqParam : (qValid ? qParam : quality)) as "720p" | "1080p";
       data.settings.videoQuality = intended;
     }
 
@@ -656,7 +656,7 @@ export default function App() {
           const intended =
             (cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam :
              qParam && (qParam === "720p" || qParam === "1080p") ? qParam :
-             data?.settings?.videoQuality) as "720p" | "1080p";
+             quality) as "720p" | "1080p";
           setMeta({
             roomId: roomParam,
             exists: false,
@@ -905,7 +905,7 @@ export default function App() {
   }
 
   function copyRoomLink() {
-    const link = `${window.location.origin}/room/${roomId}`;
+    const link = `${window.location.origin}/?room=${encodeURIComponent(roomId)}`;
     navigator.clipboard.writeText(link).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
