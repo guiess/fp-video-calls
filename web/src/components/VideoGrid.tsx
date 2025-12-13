@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMinimize } from "react-icons/fi";
 
 export type RemoteTile = {
@@ -20,10 +20,34 @@ type Props = {
   onExitFullscreen?: () => void;
   micEnabled?: boolean;
   camEnabled?: boolean;
+  localStream?: MediaStream | null;
 };
 
-export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onExitFullscreen, micEnabled, camEnabled }: Props) {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onExitFullscreen, micEnabled, camEnabled, localStream }: Props) {
+  const [dimensions, setDimensions] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1024,
+    height: typeof window !== 'undefined' ? window.innerHeight : 768
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
+  const isMobile = dimensions.width < 768;
+  const isPortrait = dimensions.height > dimensions.width;
   
   return (
     <div style={{
@@ -137,48 +161,112 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
               }}
             />
             {fsActive && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  zIndex: 10000,
-                  background: "rgba(0,0,0,0.6)",
-                  color: "#fff",
-                  borderRadius: 8,
-                  padding: "6px 10px",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  pointerEvents: "auto"
-                }}
-              >
-                <button
-                  onClick={onLocalMuteToggle}
-                  aria-label={micEnabled ? "Mute" : "Unmute"}
-                  title={micEnabled ? "Mute" : "Unmute"}
-                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              <>
+                {/* Control bar at top right */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    right: 12,
+                    zIndex: 10000,
+                    background: "rgba(0,0,0,0.6)",
+                    color: "#fff",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    pointerEvents: "auto"
+                  }}
                 >
-                  {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
-                </button>
-                <button
-                  onClick={onLocalVideoToggle}
-                  aria-label={camEnabled ? "Disable Video" : "Enable Video"}
-                  title={camEnabled ? "Disable Video" : "Enable Video"}
-                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-                >
-                  {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
-                </button>
-                <button
-                  onClick={onExitFullscreen}
-                  aria-label="Exit Fullscreen"
-                  title="Exit Fullscreen"
-                  style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
-                >
-                  <FiMinimize size={16} /> Exit
-                </button>
-              </div>
+                  <button
+                    onClick={onLocalMuteToggle}
+                    aria-label={micEnabled ? "Mute" : "Unmute"}
+                    title={micEnabled ? "Mute" : "Unmute"}
+                    style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                  >
+                    {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
+                  </button>
+                  <button
+                    onClick={onLocalVideoToggle}
+                    aria-label={camEnabled ? "Disable Video" : "Enable Video"}
+                    title={camEnabled ? "Disable Video" : "Enable Video"}
+                    style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                  >
+                    {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
+                  </button>
+                  <button
+                    onClick={onExitFullscreen}
+                    aria-label="Exit Fullscreen"
+                    title="Exit Fullscreen"
+                    style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    <FiMinimize size={16} /> Exit
+                  </button>
+                </div>
+
+                {/* Local video PIP in bottom right corner */}
+                {localStream && camEnabled && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: 16,
+                      right: 16,
+                      width: isMobile && isPortrait ? "min(140px, 20vw)" : "min(280px, 25vw)",
+                      aspectRatio: isMobile && isPortrait ? "9/16" : "16/9",
+                      zIndex: 10001,
+                      background: "#1e293b",
+                      borderRadius: 12,
+                      overflow: "hidden",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                      border: "2px solid rgba(255,255,255,0.2)",
+                      pointerEvents: "auto"
+                    }}
+                  >
+                    <video
+                      autoPlay
+                      muted
+                      playsInline
+                      controls={false}
+                      disablePictureInPicture
+                      controlsList="nodownload noplaybackrate noremoteplayback nofullscreen"
+                      ref={(el) => {
+                        if (el && localStream && el.srcObject !== localStream) {
+                          el.srcObject = localStream;
+                          el.play().catch(err => console.warn("[PIP] play failed", err));
+                        }
+                      }}
+                      style={{
+                        width: "100% !important" as any,
+                        height: "100% !important" as any,
+                        maxWidth: "100%",
+                        maxHeight: "100%",
+                        objectFit: "contain",
+                        display: "block",
+                        position: "relative",
+                        transform: "none"
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 8,
+                        left: 8,
+                        background: "rgba(0,0,0,0.6)",
+                        backdropFilter: "blur(10px)",
+                        padding: "4px 8px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#fff"
+                      }}
+                    >
+                      You
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         );

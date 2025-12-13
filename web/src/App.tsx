@@ -46,6 +46,10 @@ export default function App() {
   const [localFullscreen, setLocalFullscreen] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
+  const [windowDimensions, setWindowDimensions] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1024,
+    height: typeof window !== 'undefined' ? window.innerHeight : 768
+  });
 
   const [chatMessages, setChatMessages] = useState<Array<{ fromId: string; displayName: string; text: string; ts: number }>>([]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
@@ -489,6 +493,53 @@ export default function App() {
       document.removeEventListener("MSFullscreenChange", onFsChange as any);
     };
   }, []);
+
+  useEffect(() => {
+    let resizeTimer: NodeJS.Timeout;
+    
+    const handleResize = () => {
+      setWindowDimensions({
+        width: window.innerWidth,
+        height: window.innerHeight
+      });
+    };
+
+    const handleOrientationChange = async () => {
+      handleResize();
+      
+      // Restart camera after orientation change to get correct video orientation
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(async () => {
+        const svc = svcRef.current;
+        if (svc && inRoom) {
+          try {
+            console.log("[orientation] restarting camera for new orientation");
+            const currentQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
+            await svc.switchCamera(currentQuality, facingMode);
+            
+            const ls = svc.getLocalStream();
+            if (localVideoRef.current && ls) {
+              try { localVideoRef.current.pause?.(); } catch {}
+              try { localVideoRef.current.srcObject = null; } catch {}
+              localVideoRef.current.srcObject = ls;
+              try { await localVideoRef.current.play?.(); } catch {}
+            }
+          } catch (err) {
+            console.warn("[orientation] camera restart failed", err);
+          }
+        }
+      }, 500);
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleOrientationChange);
+    
+    return () => {
+      clearTimeout(resizeTimer);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+    };
+  }, [inRoom, meta, quality, facingMode]);
 
   async function createRoom() {
     const url = new URL(window.location.href);
@@ -1226,9 +1277,9 @@ export default function App() {
       <div style={{
         flex: 1,
         display: "flex",
-        flexDirection: window.innerWidth < 768 ? "column" : "row",
-        padding: window.innerWidth < 768 ? "12px" : "24px",
-        gap: window.innerWidth < 768 ? "12px" : "24px",
+        flexDirection: windowDimensions.width < 768 ? "column" : "row",
+        padding: windowDimensions.width < 768 ? "12px" : "24px",
+        gap: windowDimensions.width < 768 ? "12px" : "24px",
         overflow: "auto"
       }}>
         {/* Local Video */}
@@ -1237,7 +1288,7 @@ export default function App() {
           inset: localFullscreen ? 0 : undefined,
           zIndex: localFullscreen ? 9999 : undefined,
           background: localFullscreen ? "#000" : undefined,
-          width: localFullscreen ? "100vw" : (window.innerWidth < 768 ? "100%" : "320px"),
+          width: localFullscreen ? "100vw" : (windowDimensions.width < 768 ? "100%" : "320px"),
           height: localFullscreen ? "100vh" : undefined,
           display: "flex",
           flexDirection: "column",
@@ -1272,7 +1323,7 @@ export default function App() {
               style={{
                 width: "100%",
                 height: "100%",
-                objectFit: (window.innerWidth < 768 || localFullscreen) ? "contain" : "cover"
+                objectFit: (windowDimensions.width < 768 || localFullscreen) ? "contain" : "cover"
               }}
             />
             <div style={{
@@ -1511,7 +1562,7 @@ export default function App() {
         <div style={{
           flex: 1,
           minWidth: 0,
-          width: window.innerWidth < 768 ? "100%" : "auto"
+          width: windowDimensions.width < 768 ? "100%" : "auto"
         }}>
           <VideoGrid
             tiles={Object.entries(remoteStreams).map(([uid, stream]) => {
@@ -1548,6 +1599,7 @@ export default function App() {
             onExitFullscreen={exitFullscreen}
             micEnabled={micEnabled}
             camEnabled={camEnabled}
+            localStream={svcRef.current?.getLocalStream() || null}
           />
         </div>
       </div>
