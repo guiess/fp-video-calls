@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMinimize, FiRefreshCcw } from "react-icons/fi";
+import { useLanguage } from "../i18n/LanguageContext";
 
 export type RemoteTile = {
   userId: string;
@@ -25,6 +26,7 @@ type Props = {
 };
 
 export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onSwitchCamera, onExitFullscreen, micEnabled, camEnabled, localStream }: Props) {
+  const { t } = useLanguage();
   const [dimensions, setDimensions] = useState({
     width: typeof window !== 'undefined' ? window.innerWidth : 1024,
     height: typeof window !== 'undefined' ? window.innerHeight : 768
@@ -88,7 +90,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
             <div style={{ display: fsActive ? "none" : "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 6 }}>
                 <span>peer: <strong>{displayName || userId}</strong></span>
-                <span aria-label={muted ? "Muted" : "Unmuted"} title={muted ? "Muted" : "Unmuted"}>{muted ? "🔇" : "🎤"}</span>
+                <span aria-label={muted ? t.mute : t.unmute} title={muted ? t.mute : t.unmute}>{muted ? "🔇" : "🎤"}</span>
               </div>
               <button
                 style={{ padding: "4px 8px", fontSize: 12 }}
@@ -99,7 +101,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                   onToggleFullscreen?.(userId, container, videoEl);
                 }}
               >
-                {fsActive ? "Exit FS" : "Fullscreen"}
+                {fsActive ? t.exitFullscreen.split(' ')[0] : t.fullscreen}
               </button>
             </div>
             <video
@@ -183,35 +185,35 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 >
                   <button
                     onClick={onLocalMuteToggle}
-                    aria-label={micEnabled ? "Mute" : "Unmute"}
-                    title={micEnabled ? "Mute" : "Unmute"}
+                    aria-label={micEnabled ? t.mute : t.unmute}
+                    title={micEnabled ? t.mute : t.unmute}
                     style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                   >
                     {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
                   </button>
                   <button
                     onClick={onLocalVideoToggle}
-                    aria-label={camEnabled ? "Disable Video" : "Enable Video"}
-                    title={camEnabled ? "Disable Video" : "Enable Video"}
+                    aria-label={camEnabled ? t.disableVideo : t.enableVideo}
+                    title={camEnabled ? t.disableVideo : t.enableVideo}
                     style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                   >
                     {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
                   </button>
                   <button
                     onClick={onSwitchCamera}
-                    aria-label="Switch camera"
-                    title="Switch camera"
+                    aria-label={t.switchCamera}
+                    title={t.switchCamera}
                     style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                   >
                     <FiRefreshCcw size={16} />
                   </button>
                   <button
                     onClick={onExitFullscreen}
-                    aria-label="Exit Fullscreen"
-                    title="Exit Fullscreen"
+                    aria-label={t.exitFullscreen}
+                    title={t.exitFullscreen}
                     style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
                   >
-                    <FiMinimize size={16} /> Exit
+                    <FiMinimize size={16} /> {t.exitFullscreen.split(' ')[0]}
                   </button>
                 </div>
 
@@ -271,7 +273,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                         color: "#fff"
                       }}
                     >
-                      You
+                      {t.you}
                     </div>
                   </div>
                 )}
@@ -280,7 +282,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
           </div>
         );
       })}
-      {tiles.length === 0 && <div style={{ color: "#888" }}>No remote participants</div>}
+      {tiles.length === 0 && <div style={{ color: "#888" }}>{t.noRemoteParticipants}</div>}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
-import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize, FiMonitor, FiUsers, FiSettings, FiLogOut, FiCopy, FiCheck, FiRefreshCcw } from "react-icons/fi";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize, FiMonitor, FiUsers, FiSettings, FiLogOut, FiCopy, FiCheck, FiRefreshCcw, FiGlobe } from "react-icons/fi";
 import VideoGrid from "./components/VideoGrid";
+import { useLanguage } from "./i18n/LanguageContext";
 
 function safeRandomId() {
   const c: any = (typeof window !== "undefined" && (window as any).crypto) || undefined;
@@ -24,6 +25,7 @@ type RoomMeta = {
 };
 
 export default function App() {
+  const { language, setLanguage, t } = useLanguage();
   const [roomId, setRoomId] = useState("");
   const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
   const [createdRoom, setCreatedRoom] = useState<string>("");
@@ -565,7 +567,7 @@ export default function App() {
       body: JSON.stringify(payload)
     });
     if (!resp.ok) {
-      alert("Create room failed");
+      alert(t.createRoomFailed);
       return;
     }
     const data = await resp.json();
@@ -672,11 +674,11 @@ export default function App() {
 
   async function join() {
     if (!roomId.trim()) {
-      alert("Enter room id");
+      alert(t.enterRoomId);
       return;
     }
     if (meta?.settings?.passwordEnabled && password.trim().length === 0) {
-      alert("Password required");
+      alert(t.passwordRequired);
       return;
     }
     const svc = svcRef.current!;
@@ -808,7 +810,7 @@ export default function App() {
   }
 
   async function closeRoomForEveryone() {
-    if (!roomId.trim()) { alert("Enter room id"); return; }
+    if (!roomId.trim()) { alert(t.enterRoomId); return; }
     try {
       const cfg: any = (typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined) || {};
       const runtimeBase = (cfg.SIGNALING_URL as string | undefined)?.trim();
@@ -820,13 +822,13 @@ export default function App() {
         mode: "cors"
       });
       if (!resp.ok) {
-        alert("Failed to close room");
+        alert(t.failedToCloseRoom);
         return;
       }
       leave();
-      alert("Room closed for everyone");
+      alert(t.roomClosedForEveryone);
     } catch (e) {
-      alert("Close room request failed");
+      alert(t.closeRoomRequestFailed);
     }
   }
 
@@ -944,12 +946,12 @@ export default function App() {
               fontWeight: "700",
               color: "#1a202c",
               marginBottom: "8px"
-            }}>Video Conference</h1>
+            }}>{t.videoConference}</h1>
             <p style={{
               margin: 0,
               color: "#718096",
               fontSize: "14px"
-            }}>Start or join a secure video call</p>
+            }}>{t.startOrJoinCall}</p>
           </div>
 
           <div style={{ marginBottom: "24px" }}>
@@ -959,11 +961,11 @@ export default function App() {
               fontWeight: "600",
               color: "#4a5568",
               marginBottom: "8px"
-            }}>Room ID</label>
+            }}>{t.roomId}</label>
             <input
               value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
-              placeholder="Enter room ID or leave blank to create"
+              placeholder={t.roomIdPlaceholder}
               style={{
                 width: "100%",
                 padding: "12px 16px",
@@ -988,13 +990,13 @@ export default function App() {
                 color: "#4a5568",
                 marginBottom: "8px"
               }}>
-                Password {meta.settings.passwordHint && <span style={{ fontWeight: "400", color: "#718096" }}>({meta.settings.passwordHint})</span>}
+                {t.password} {meta.settings.passwordHint && <span style={{ fontWeight: "400", color: "#718096" }}>({meta.settings.passwordHint})</span>}
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
+                placeholder={t.passwordPlaceholder}
                 style={{
                   width: "100%",
                   padding: "12px 16px",
@@ -1019,7 +1021,7 @@ export default function App() {
               color: "#4a5568",
               padding: "12px 0",
               userSelect: "none"
-            }}>Advanced Settings</summary>
+            }}>{t.advancedSettings}</summary>
             <div style={{ paddingTop: "16px", paddingLeft: "8px" }}>
               <div style={{ marginBottom: "16px" }}>
                 <label style={{
@@ -1028,7 +1030,7 @@ export default function App() {
                   fontWeight: "600",
                   color: "#4a5568",
                   marginBottom: "8px"
-                }}>Video Quality</label>
+                }}>{t.videoQuality}</label>
                 <select
                   value={quality}
                   onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
@@ -1056,12 +1058,12 @@ export default function App() {
                   fontWeight: "600",
                   color: "#4a5568",
                   marginBottom: "8px"
-                }}>Room Password (optional)</label>
+                }}>{t.roomPassword}</label>
                 <input
                   type="password"
                   value={passwordOnCreate}
                   onChange={(e) => setPasswordOnCreate(e.target.value)}
-                  placeholder="Set password for new room"
+                  placeholder={t.roomPasswordPlaceholder}
                   style={{
                     width: "100%",
                     padding: "12px 16px",
@@ -1082,11 +1084,11 @@ export default function App() {
                     fontWeight: "600",
                     color: "#4a5568",
                     marginBottom: "8px"
-                  }}>Password Hint (optional)</label>
+                  }}>{t.passwordHint}</label>
                   <input
                     value={passwordHintOnCreate}
                     onChange={(e) => setPasswordHintOnCreate(e.target.value)}
-                    placeholder="Hint for password"
+                    placeholder={t.passwordHintPlaceholder}
                     style={{
                       width: "100%",
                       padding: "12px 16px",
@@ -1126,7 +1128,7 @@ export default function App() {
                 e.currentTarget.style.transform = "scale(1)";
               }}
             >
-              {roomId.trim() ? "Join Room" : "Create New Room"}
+              {roomId.trim() ? t.joinRoom : t.createNewRoom}
             </button>
           </div>
 
@@ -1139,13 +1141,13 @@ export default function App() {
               color: "#4a5568"
             }}>
               <div style={{ marginBottom: "6px" }}>
-                <strong>Room:</strong> <code style={{ background: "#e2e8f0", padding: "2px 6px", borderRadius: "4px" }}>{meta.roomId}</code>
+                <strong>{t.room}:</strong> <code style={{ background: "#e2e8f0", padding: "2px 6px", borderRadius: "4px" }}>{meta.roomId}</code>
               </div>
               <div style={{ marginBottom: "6px" }}>
-                <strong>Status:</strong> {meta.exists ? "Active" : "Will be created"}
+                <strong>{t.status}:</strong> {meta.exists ? t.active : t.willBeCreated}
               </div>
               <div>
-                <strong>Quality:</strong> {meta.settings.videoQuality}
+                <strong>{t.quality}:</strong> {meta.settings.videoQuality}
               </div>
             </div>
           )}
@@ -1165,8 +1167,39 @@ export default function App() {
                 fontWeight: "500"
               }}
             >
-              Switch to Classic View
+              {t.switchToClassicView}
             </a>
+          </div>
+
+          {/* Language Switcher */}
+          <div style={{
+            marginTop: "16px",
+            paddingTop: "16px",
+            borderTop: "1px solid #e2e8f0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px"
+          }}>
+            <FiGlobe size={16} style={{ color: "#667eea" }} />
+            <button
+              onClick={() => setLanguage(language === 'en' ? 'ru' : 'en')}
+              style={{
+                padding: "6px 12px",
+                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                border: "none",
+                borderRadius: "8px",
+                color: "white",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor: "pointer",
+                transition: "transform 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
+              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+            >
+              {language === 'en' ? 'Русский' : 'English'}
+            </button>
           </div>
         </div>
       </div>
@@ -1199,16 +1232,39 @@ export default function App() {
           <div style={{ fontSize: "24px" }}>🎥</div>
           <div>
             <div style={{ fontSize: "14px", fontWeight: "600", marginBottom: "2px" }}>
-              Room: <code style={{ background: "rgba(255, 255, 255, 0.1)", padding: "2px 8px", borderRadius: "6px", fontSize: "13px" }}>{roomId}</code>
+              {t.room}: <code style={{ background: "rgba(255, 255, 255, 0.1)", padding: "2px 8px", borderRadius: "6px", fontSize: "13px" }}>{roomId}</code>
             </div>
             <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "8px" }}>
               <FiUsers size={14} />
-              {participants.length} participant{participants.length !== 1 ? "s" : ""}
+              {participants.length} {participants.length === 1 ? t.participant : t.participants}
             </div>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            onClick={() => setLanguage(language === 'en' ? 'ru' : 'en')}
+            style={{
+              padding: "8px 12px",
+              background: "rgba(255, 255, 255, 0.1)",
+              border: "none",
+              borderRadius: "8px",
+              color: "white",
+              fontSize: "14px",
+              fontWeight: "500",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              transition: "background 0.2s"
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)"}
+          >
+            <FiGlobe size={16} />
+            {language === 'en' ? 'RU' : 'EN'}
+          </button>
+
           <button
             onClick={copyRoomLink}
             style={{
@@ -1229,7 +1285,7 @@ export default function App() {
             onMouseLeave={(e) => !copied && (e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)")}
           >
             {copied ? <FiCheck size={16} /> : <FiCopy size={16} />}
-            {copied ? "Copied!" : "Copy Link"}
+            {copied ? t.copied : t.copyLink}
           </button>
 
           <button
@@ -1268,7 +1324,7 @@ export default function App() {
             onMouseLeave={(e) => e.currentTarget.style.background = "#ef4444"}
           >
             <FiLogOut size={16} />
-            Leave
+            {t.leave}
           </button>
         </div>
       </div>
@@ -1337,7 +1393,7 @@ export default function App() {
               fontSize: "14px",
               fontWeight: "600"
             }}>
-              You
+              {t.you}
             </div>
             
             {/* Fullscreen controls for local video */}
@@ -1361,35 +1417,35 @@ export default function App() {
               >
                 <button
                   onClick={toggleMute}
-                  aria-label={micEnabled ? "Mute" : "Unmute"}
-                  title={micEnabled ? "Mute" : "Unmute"}
+                  aria-label={micEnabled ? t.mute : t.unmute}
+                  title={micEnabled ? t.mute : t.unmute}
                   style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                 >
                   {micEnabled ? <FiMic size={16} /> : <FiMicOff size={16} />}
                 </button>
                 <button
                   onClick={toggleVideo}
-                  aria-label={camEnabled ? "Disable Video" : "Enable Video"}
-                  title={camEnabled ? "Disable Video" : "Enable Video"}
+                  aria-label={camEnabled ? t.disableVideo : t.enableVideo}
+                  title={camEnabled ? t.disableVideo : t.enableVideo}
                   style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                 >
                   {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
                 </button>
                 <button
                   onClick={switchFacing}
-                  aria-label="Switch camera"
-                  title="Switch camera"
+                  aria-label={t.switchCamera}
+                  title={t.switchCamera}
                   style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                 >
                   <FiRefreshCcw size={16} />
                 </button>
                 <button
                   onClick={exitFullscreen}
-                  aria-label="Exit Fullscreen"
-                  title="Exit Fullscreen"
+                  aria-label={t.exitFullscreen}
+                  title={t.exitFullscreen}
                   style={{ padding: "6px 10px", background: "#e74c3c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
                 >
-                  <FiMinimize size={16} /> Exit
+                  <FiMinimize size={16} /> {t.exitFullscreen.split(' ')[0]}
                 </button>
               </div>
             )}
@@ -1449,7 +1505,7 @@ export default function App() {
 
             <button
               onClick={switchFacing}
-              title="Switch camera"
+              title={t.switchCamera}
               style={{
                 padding: "12px",
                 background: "rgba(255, 255, 255, 0.1)",
@@ -1630,12 +1686,52 @@ export default function App() {
             maxHeight: "80vh",
             overflowY: "auto"
           }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, marginBottom: "24px", fontSize: "24px", fontWeight: "700" }}>Settings</h2>
+            <h2 style={{ marginTop: 0, marginBottom: "24px", fontSize: "24px", fontWeight: "700" }}>{t.settings}</h2>
             
             <div style={{ marginBottom: "24px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>TURN Configuration</h3>
+              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>{t.language}</h3>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => setLanguage('ru')}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    background: language === 'ru' ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" : "rgba(255, 255, 255, 0.05)",
+                    border: language === 'ru' ? "2px solid #667eea" : "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "8px",
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: language === 'ru' ? "600" : "500",
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  Русский
+                </button>
+                <button
+                  onClick={() => setLanguage('en')}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    background: language === 'en' ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" : "rgba(255, 255, 255, 0.05)",
+                    border: language === 'en' ? "2px solid #667eea" : "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "8px",
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: language === 'en' ? "600" : "500",
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  English
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "24px" }}>
+              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>{t.turnConfiguration}</h3>
               <input
-                placeholder="turn:host:3478,turns:host:5349"
+                placeholder={t.turnUrls}
                 style={{
                   width: "100%",
                   padding: "12px",
@@ -1651,7 +1747,7 @@ export default function App() {
                 onChange={(e) => localStorage.setItem("turn.urls", e.target.value)}
               />
               <input
-                placeholder="TURN username"
+                placeholder={t.turnUsername}
                 style={{
                   width: "100%",
                   padding: "12px",
@@ -1667,7 +1763,7 @@ export default function App() {
                 onChange={(e) => localStorage.setItem("turn.username", e.target.value)}
               />
               <input
-                placeholder="TURN password"
+                placeholder={t.turnPassword}
                 type="password"
                 style={{
                   width: "100%",
@@ -1685,10 +1781,10 @@ export default function App() {
             </div>
 
             <div style={{ marginBottom: "24px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>Room Actions</h3>
+              <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", color: "#94a3b8" }}>{t.roomActions}</h3>
               <button
                 onClick={() => {
-                  if (confirm("Are you sure you want to close the room for everyone?")) {
+                  if (confirm(t.closeRoomConfirm)) {
                     closeRoomForEveryone();
                     setShowSettings(false);
                   }
@@ -1705,7 +1801,7 @@ export default function App() {
                   cursor: "pointer"
                 }}
               >
-                Close Room For Everyone
+                {t.closeRoomForEveryone}
               </button>
             </div>
 
@@ -1723,7 +1819,7 @@ export default function App() {
                 cursor: "pointer"
               }}
             >
-              Close Settings
+              {t.closeSettings}
             </button>
           </div>
         </div>

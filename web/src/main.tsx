@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import DevApp from "./DevApp";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { LanguageProvider } from "./i18n/LanguageContext";
 
 const container = document.getElementById("root");
 if (!container) {
@@ -17,4 +18,8 @@ const router = createBrowserRouter([
   { path: "/dev/room/:roomId", element: <DevApp /> }
 ]);
 
-root.render(<RouterProvider router={router} />);
+root.render(
+  <LanguageProvider>
+    <RouterProvider router={router} />
+  </LanguageProvider>
+);
