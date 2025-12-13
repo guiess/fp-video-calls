@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMinimize } from "react-icons/fi";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMinimize, FiRefreshCcw } from "react-icons/fi";
 
 export type RemoteTile = {
   userId: string;
@@ -17,13 +17,14 @@ type Props = {
   onToggleFullscreen?: (uid: string, tileEl: HTMLDivElement | null, videoEl: HTMLVideoElement | null) => void;
   onLocalMuteToggle?: () => void;
   onLocalVideoToggle?: () => void;
+  onSwitchCamera?: () => void;
   onExitFullscreen?: () => void;
   micEnabled?: boolean;
   camEnabled?: boolean;
   localStream?: MediaStream | null;
 };
 
-export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onExitFullscreen, micEnabled, camEnabled, localStream }: Props) {
+export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onSwitchCamera, onExitFullscreen, micEnabled, camEnabled, localStream }: Props) {
   const [dimensions, setDimensions] = useState({
     width: typeof window !== 'undefined' ? window.innerWidth : 1024,
     height: typeof window !== 'undefined' ? window.innerHeight : 768
@@ -195,6 +196,14 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                     style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                   >
                     {camEnabled ? <FiVideo size={16} /> : <FiVideoOff size={16} />}
+                  </button>
+                  <button
+                    onClick={onSwitchCamera}
+                    aria-label="Switch camera"
+                    title="Switch camera"
+                    style={{ padding: "6px 10px", background: "transparent", border: "1px solid #fff", borderRadius: 6, color: "#fff", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                  >
+                    <FiRefreshCcw size={16} />
                   </button>
                   <button
                     onClick={onExitFullscreen}

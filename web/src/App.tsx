@@ -1596,6 +1596,7 @@ export default function App() {
             }}
             onLocalMuteToggle={toggleMute}
             onLocalVideoToggle={toggleVideo}
+            onSwitchCamera={switchFacing}
             onExitFullscreen={exitFullscreen}
             micEnabled={micEnabled}
             camEnabled={camEnabled}
