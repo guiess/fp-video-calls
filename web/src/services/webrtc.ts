@@ -18,6 +18,7 @@ export type SignalingHandlers = {
   onPeerMicState?: (userId: string, muted: boolean) => void;
   onChatMessage?: (roomId: string, fromId: string, displayName: string, text: string, ts: number) => void;
   onError?: (code: string, message?: string) => void;
+  onSignalingStateChange?: (state: "connected" | "disconnected" | "reconnecting") => void;
 };
 
 export class WebRTCService {
@@ -36,6 +37,13 @@ export class WebRTCService {
   private mirrorCanvas: HTMLCanvasElement | null = null;
   private mirrorAnimationId: number | null = null;
   private originalVideoTrack: MediaStreamTrack | null = null;
+  // Reconnection state
+  private password: string | undefined = undefined;
+  private quality: "720p" | "1080p" = "720p";
+  private hasJoined: boolean = false;
+  // TURN credential refresh timer
+  private turnRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private turnTtlSeconds: number = 0;
 
   private bindSocketEvents() {
     if (!this.socket) return;
@@ -52,6 +60,33 @@ export class WebRTCService {
     this.socket.on("chat_message", ({ roomId, fromId, displayName, text, ts }) =>
       this.handlers.onChatMessage?.(roomId, fromId, displayName, text, ts)
     );
+
+    // Connection state tracking
+    this.socket.on("connect", () => {
+      this.handlers.onSignalingStateChange?.("connected");
+    });
+    this.socket.on("disconnect", () => {
+      this.handlers.onSignalingStateChange?.("disconnected");
+    });
+
+    // Socket.IO Manager-level reconnection events
+    this.socket.io.on("reconnect_attempt", () => {
+      this.handlers.onSignalingStateChange?.("reconnecting");
+    });
+    this.socket.io.on("reconnect", () => {
+      console.log("[signaling] reconnected, re-joining room");
+      this.handlers.onSignalingStateChange?.("connected");
+      // Re-join the room with stored params so the server restores our state
+      if (this.hasJoined && this.roomId && this.userId) {
+        this.socket?.emit("join_room", {
+          roomId: this.roomId,
+          userId: this.userId,
+          displayName: this.displayName,
+          password: this.password,
+          videoQuality: this.quality
+        });
+      }
+    });
   }
 
   private ensureSocket() {
@@ -99,7 +134,7 @@ export class WebRTCService {
       try {
         this.socket?.off(); // remove previous listeners if any
       } catch {}
-      this.socket = io(this.endpoint, { transports: ["websocket"] });
+      this.socket = io(this.endpoint, { transports: ["websocket", "polling"] });
       this.bindSocketEvents();
     }
   }
@@ -305,9 +340,31 @@ export class WebRTCService {
       const j = await r.json();
       if (j && j.username && j.credential && j.urls && Array.isArray(j.urls)) {
         this.turnIceServers = [{ urls: j.urls, username: j.username, credential: j.credential }];
+        this.turnTtlSeconds = j.ttl || 0;
+
+        // Schedule refresh at 80% of TTL
+        if (this.turnRefreshTimer) clearTimeout(this.turnRefreshTimer);
+        if (this.turnTtlSeconds > 0) {
+          const refreshMs = this.turnTtlSeconds * 0.8 * 1000;
+          this.turnRefreshTimer = setTimeout(() => this.refreshTurnCredentials(), refreshMs);
+        }
       }
     } catch (e) {
       console.warn("[turn] fetch failed; falling back to env/localStorage TURN", e);
+    }
+  }
+
+  /** Refresh TURN credentials and update existing peer connections */
+  private async refreshTurnCredentials(): Promise<void> {
+    console.log("[turn] refreshing credentials");
+    await this.fetchTurnAndCache();
+    const iceServers = this.getIceServers();
+    for (const pc of this.pcs.values()) {
+      try {
+        pc.setConfiguration({ iceServers });
+      } catch (e) {
+        console.warn("[turn] setConfiguration failed on PC", e);
+      }
     }
   }
  
@@ -333,6 +390,9 @@ export class WebRTCService {
     this.roomId = roomId;
     this.userId = userId;
     this.displayName = displayName;
+    // Store for reconnection
+    this.password = password;
+    this.quality = quality;
 
     // Pre-fetch ephemeral TURN credentials before any RTCPeerConnection is created
     await this.fetchTurnAndCache();
@@ -349,6 +409,7 @@ export class WebRTCService {
     } catch {}
 
     this.socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
+    this.hasJoined = true;
     try { console.log("[join] emitted", { roomId, userId, quality }); } catch {}
   }
 
@@ -555,6 +616,12 @@ export class WebRTCService {
     // Clean up mirroring resources
     this.cleanupMirroring();
 
+    // Clear TURN refresh timer
+    if (this.turnRefreshTimer) {
+      clearTimeout(this.turnRefreshTimer);
+      this.turnRefreshTimer = null;
+    }
+
     // Notify server and tear down connections
     try { this.socket?.emit("leave_room", { roomId: this.roomId, userId: this.userId }); } catch {}
     try { this.socket?.off(); } catch {}
@@ -573,5 +640,8 @@ export class WebRTCService {
     this.localStream = null;
     // Reset room id; userId persists externally in App for stable identity
     this.roomId = "";
+    // Clear reconnection state
+    this.password = undefined;
+    this.hasJoined = false;
   }
 }

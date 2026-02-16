@@ -54,6 +54,8 @@ export default function App() {
     height: typeof window !== 'undefined' ? window.innerHeight : 768
   });
 
+  const [signalingState, setSignalingState] = useState<"connected" | "disconnected" | "reconnecting">("connected");
+
   const [chatMessages, setChatMessages] = useState<Array<{ fromId: string; displayName: string; text: string; ts: number }>>([]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -80,7 +82,7 @@ export default function App() {
         videoTracksInStreams: e.streams.map((s) => s.getVideoTracks().length),
         audioTracksInStreams: e.streams.map((s) => s.getAudioTracks().length)
       });
-      
+
       if (!targetId) {
         console.error("[ontrack] targetId is null!");
         return;
@@ -111,7 +113,7 @@ export default function App() {
 
         return next;
       });
-      
+
       // Handle audio mute state
       if (e.track.kind === "audio") {
         setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !e.track.enabled }));
@@ -137,14 +139,18 @@ export default function App() {
     };
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
-      console.log("[iceConnectionState]", st);
-      if (st === "failed") {
-        try {
-          console.log("[ice] restartIce()");
-          pc.restartIce();
-        } catch (err) {
-          console.warn("[ice] restartIce failed", err);
-        }
+      console.log("[iceConnectionState]", targetId, st);
+      if (st === "failed" || st === "disconnected") {
+        const tid = targetId;
+        if (!tid) return;
+        console.log("[ice] attempting ICE restart for", tid);
+        pc.createOffer({ iceRestart: true })
+          .then(async (offer) => {
+            await pc.setLocalDescription(offer);
+            svc.sendOffer(tid, offer);
+            console.log("[ice] ICE restart offer sent to", tid);
+          })
+          .catch((err) => console.warn("[ice] ICE restart failed", err));
       }
     };
     pc.onconnectionstatechange = () => {
@@ -166,19 +172,10 @@ export default function App() {
       // can lead to "connected but black video" situations when both sides renegotiate repeatedly.
       console.log("[negotiationneeded] ignored", { targetId, signalingState: pc.signalingState });
     };
-    pc.oniceconnectionstatechange = () => {
-      const st = pc.iceConnectionState;
-      console.log("[iceConnectionState]", st);
-      if (st === "failed" || st === "disconnected") {
-        try { pc.restartIce(); } catch (err) { console.warn("[ice] restartIce failed", err); }
-      }
-    };
   }
 
-  useEffect(() => {
-    const svc = new WebRTCService();
-    svcRef.current = svc;
-    svc.init({
+  function buildSignalingHandlers(): import("./services/webrtc").SignalingHandlers {
+    return {
       onRoomJoined: (existing, roomInfo) => {
         if (roomInfo?.settings) {
           setMeta({
@@ -193,10 +190,10 @@ export default function App() {
         }
 
         setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
+        const svc = svcRef.current!;
         const others = existing.filter((p) => p.userId !== svc.getUserId());
         console.log("[room_joined] found", others.length, "existing participants");
 
-        // Create peer connections for existing participants.
         others.forEach(({ userId: uid }) => {
           const pc = svc.createPeerConnection(uid);
           wirePeerHandlers(pc, svc, uid);
@@ -224,9 +221,6 @@ export default function App() {
           }
         });
 
-        // IMPORTANT: when joining an existing room (2+ peers), we must initiate offers to those peers
-        // (they won't get onUserJoined for us because we are the joiner). Use a deterministic rule
-        // to avoid glare: smaller userId offers.
         const myId = svc.getUserId();
         others.forEach(({ userId: uid }) => {
           const shouldOffer = myId < uid;
@@ -262,8 +256,7 @@ export default function App() {
         const svc = svcRef.current!;
         const pc = svc.createPeerConnection(uid);
         wirePeerHandlers(pc, svc, uid);
-        
-        // Add transceivers to ensure we receive media (critical for some mobile browsers)
+
         try {
           if (pc.getTransceivers().length === 0) {
             pc.addTransceiver("audio", { direction: "sendrecv" });
@@ -274,7 +267,6 @@ export default function App() {
           console.warn("[peer] addTransceiver failed", err);
         }
 
-        // Ensure local tracks are attached to this PC.
         try {
           const ls = svc.getLocalStream();
           if (ls) {
@@ -286,8 +278,7 @@ export default function App() {
         } catch (err) {
           console.warn("[peer] addTrack(local) failed", err);
         }
-        
-        // Deterministic offerer: user with lexicographically smaller userId sends offer.
+
         const shouldOffer = svc.getUserId() < uid;
         if (shouldOffer && pc.signalingState === "stable") {
           console.log("[offer] offerer -> sending offer to", uid);
@@ -342,7 +333,6 @@ export default function App() {
           wirePeerHandlers(pc, svc, fromId);
         }
 
-        // Handle collision: polite peer rolls back
         const isPolite = svc.getUserId() > fromId;
         if (pc.signalingState !== "stable" && !isPolite) {
           console.log("[onOffer] collision detected, ignoring offer (impolite peer)");
@@ -361,7 +351,6 @@ export default function App() {
         try {
           await pc.setRemoteDescription(offer);
 
-          // Make sure we are sending our local tracks back (if we missed adding them earlier).
           try {
             const ls = svc.getLocalStream();
             if (ls) {
@@ -424,10 +413,19 @@ export default function App() {
           alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
         }
       },
-      onChatMessage: (roomId, fromId, displayName, text, ts) => {
+      onChatMessage: (_roomId, fromId, displayName, text, ts) => {
         setChatMessages((prev) => [...prev, { fromId, displayName, text, ts }]);
+      },
+      onSignalingStateChange: (state) => {
+        setSignalingState(state);
       }
-    });
+    };
+  }
+
+  useEffect(() => {
+    const svc = new WebRTCService();
+    svcRef.current = svc;
+    svc.init(buildSignalingHandlers());
     return () => {
       svcRef.current?.leave();
     };
@@ -710,106 +708,16 @@ export default function App() {
     setPeerId(null);
     peerIdRef.current = null;
     setRemoteStreams({});
+    setSignalingState("connected");
     autoJoinTriggeredRef.current = false;
-    
+
     // Reset mic and camera states
     setMicEnabled(true);
     setCamEnabled(true);
 
     const svc = new WebRTCService();
     svcRef.current = svc;
-    svc.init({
-      onRoomJoined: (existing, roomInfo) => {
-        if (roomInfo?.settings) {
-          setMeta({
-            roomId: roomInfo.roomId ?? roomId,
-            exists: true,
-            settings: {
-              videoQuality: roomInfo.settings.videoQuality,
-              passwordEnabled: !!roomInfo.settings.passwordEnabled,
-              passwordHint: roomInfo.settings.passwordHint
-            }
-          });
-        }
-        setParticipants(existing);
-        const others = existing.filter((p) => p.userId !== svc.getUserId());
-        others.forEach(({ userId: uid }) => {
-          const pc = svc.createPeerConnection(uid);
-          wirePeerHandlers(pc, svc, uid);
-        });
-        if (others.length > 0) {
-          others.forEach(({ userId: uid }) => {
-            const pc = svc.getPeerConnection(uid);
-            if (pc && pc.signalingState === "stable") {
-              pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
-                .then(async (offer) => {
-                  await pc.setLocalDescription(offer);
-                  svc.sendOffer(uid, offer);
-                })
-                .catch((err) => console.warn("[offer] createOffer failed", err));
-            }
-          });
-        }
-        const ls = svc.getLocalStream();
-        if (localVideoRef.current && ls) localVideoRef.current.srcObject = ls;
-      },
-      onUserJoined: (uid, _name) => {
-        setParticipants((prev) => {
-          const exists = prev.some(p => p.userId === uid);
-          return exists ? prev : [...prev, { userId: uid, displayName: _name }];
-        });
-        const pc = svc.createPeerConnection(uid);
-        wirePeerHandlers(pc, svc, uid);
-      },
-      onUserLeft: (uid) => {
-        setParticipants((prev) => prev.filter((p) => p.userId !== uid));
-        if (peerId === uid) {
-          setPeerId(null);
-          peerIdRef.current = null;
-        }
-        try {
-          const pc = svc.getPeerConnection(uid);
-          if (pc) {
-            try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
-            try { pc.close(); } catch {}
-          }
-        } catch {}
-        setRemoteStreams((prev) => {
-          const next = { ...prev };
-          const removed = next[uid] as MediaStream | undefined;
-          delete next[uid];
-          const current = remoteVideoRef.current?.srcObject as MediaStream | null;
-          if (current && removed && current.id === removed.id && remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = null;
-          }
-          return next;
-        });
-      },
-      onOffer: async (fromId, offer) => {
-        const pc = svc.getPeerConnection(fromId) ?? svc.createPeerConnection(fromId);
-        wirePeerHandlers(pc, svc, fromId);
-        if (pc.signalingState !== "stable") {
-          try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {}
-        }
-        await pc.setRemoteDescription(offer);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        svc.sendAnswer(fromId, answer);
-      },
-      onAnswer: async (fromId, answer) => {
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
-        await pc.setRemoteDescription(answer);
-      },
-      onIceCandidate: async (fromId, candidate) => {
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
-        try { await pc.addIceCandidate(candidate); } catch {}
-      },
-      onError: (code, message) => {
-        alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
-      }
-    });
+    svc.init(buildSignalingHandlers());
   }
 
   async function closeRoomForEveryone() {
@@ -1358,6 +1266,23 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {/* Connection Status Banner */}
+      {signalingState !== "connected" && (
+        <div style={{
+          display: (isFullscreen || localFullscreen) ? "none" : "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "8px",
+          padding: "8px 16px",
+          fontSize: "14px",
+          fontWeight: "600",
+          color: "white",
+          background: signalingState === "reconnecting" ? "#d97706" : "#dc2626"
+        }}>
+          {signalingState === "reconnecting" ? t.signalingReconnecting : t.signalingDisconnected}
+        </div>
+      )}
 
       {/* Main Content */}
       <div style={{

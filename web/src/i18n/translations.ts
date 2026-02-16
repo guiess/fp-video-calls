@@ -58,6 +58,10 @@ export interface Translations {
   // Messages
   noRemoteParticipants: string;
   
+  // Connection status
+  signalingReconnecting: string;
+  signalingDisconnected: string;
+
   // Alerts & Errors
   enterRoomId: string;
   passwordRequired: string;
@@ -127,6 +131,10 @@ export const translations: Record<Language, Translations> = {
     closeSettings: 'Закрыть настройки',
     language: 'Язык',
     
+    // Connection status
+    signalingReconnecting: 'Переподключение...',
+    signalingDisconnected: 'Соединение потеряно',
+
     // Alerts & Errors
     enterRoomId: 'Введите ID комнаты',
     passwordRequired: 'Требуется пароль',
@@ -194,6 +202,10 @@ export const translations: Record<Language, Translations> = {
     closeSettings: 'Close Settings',
     language: 'Language',
     
+    // Connection status
+    signalingReconnecting: 'Reconnecting...',
+    signalingDisconnected: 'Connection lost',
+
     // Alerts & Errors
     enterRoomId: 'Enter room id',
     passwordRequired: 'Password required',

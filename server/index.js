@@ -202,9 +202,11 @@ io.on("connection", (socket) => {
       }
     }
 
-    room.participants.set(userId, { socketId: socket.id, displayName, micMuted: false });
+    const isReconnect = room.participants.has(userId);
+    const prevMicMuted = isReconnect ? !!room.participants.get(userId)?.micMuted : false;
+    room.participants.set(userId, { socketId: socket.id, displayName, micMuted: prevMicMuted });
     socket.join(roomId);
-   
+
     // Notify caller with existing participants (include micMuted for initial badges)
     const participants = Array.from(room.participants.entries()).map(([id, p]) => ({
       userId: id,
@@ -212,9 +214,13 @@ io.on("connection", (socket) => {
       micMuted: !!p.micMuted
     }));
     socket.emit("room_joined", { participants, roomInfo: { roomId, settings: room.settings } });
-   
-    // Notify others
-    socket.to(roomId).emit("user_joined", { userId, displayName, micMuted: false });
+
+    // Only notify others on first join (skip for reconnects to avoid duplicate user_joined)
+    if (!isReconnect) {
+      socket.to(roomId).emit("user_joined", { userId, displayName, micMuted: false });
+    } else {
+      console.log(`[room:rejoin] ${userId} reconnected to ${roomId}`);
+    }
   });
 
   socket.on("leave_room", ({ roomId, userId }) => {
@@ -270,19 +276,6 @@ io.on("connection", (socket) => {
       p.micMuted = !!muted;
       room.participants.set(userId, p);
     }
-    io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
-  });
-
-  // Broadcast mic mute/unmute state to room participants
-  socket.on("mic_state_changed", ({ roomId, userId, muted }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
-    const p = room.participants.get(userId);
-    if (p) {
-      p.micMuted = !!muted;
-      room.participants.set(userId, p);
-    }
-    // Notify everyone in the room (including sender) to keep UI consistent
     io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
   });
 
