@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import {v4 as uuidv4} from 'uuid';
+import Feather from 'react-native-vector-icons/Feather';
 import {useAuth} from '../contexts/AuthContext';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../types';
@@ -52,6 +53,11 @@ export default function RoomJoinScreen({navigation}: any) {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {!user && (
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Feather name="arrow-left" size={22} color="#fff" />
+        </TouchableOpacity>
+      )}
       <Text style={styles.title}>Join a Room</Text>
       <Text style={styles.sub}>Enter any room name to start or join a call</Text>
 
@@ -96,6 +102,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#12121e',
     padding: 24,
     justifyContent: 'center',
+  },
+  backBtn: {
+    position: 'absolute',
+    top: 48,
+    left: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     fontSize: 26,
