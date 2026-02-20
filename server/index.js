@@ -7,6 +7,31 @@ import { fileURLToPath } from "url";
 import { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
 import cors from "cors";
+import admin from "firebase-admin";
+
+// ── Firebase Admin (optional — only initialised when service account is set) ──
+// Set FIREBASE_SERVICE_ACCOUNT_JSON to a base64-encoded service-account JSON,
+// or GOOGLE_APPLICATION_CREDENTIALS to the path of the JSON file.
+let firebaseReady = false;
+try {
+  const saJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (saJson) {
+    const credential = admin.credential.cert(
+      JSON.parse(Buffer.from(saJson, "base64").toString("utf8"))
+    );
+    admin.initializeApp({ credential });
+    firebaseReady = true;
+    console.log("[firebase] Admin SDK initialised");
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    admin.initializeApp({ credential: admin.credential.applicationDefault() });
+    firebaseReady = true;
+    console.log("[firebase] Admin SDK initialised via GOOGLE_APPLICATION_CREDENTIALS");
+  } else {
+    console.log("[firebase] No service account configured — call invite endpoints disabled");
+  }
+} catch (e) {
+  console.error("[firebase] Admin SDK init failed:", e);
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -139,6 +164,89 @@ app.get("/api/turn", (req, res) => {
   } catch (e) {
     console.error("[turn] issue failed", e);
     return res.status(500).json({ ok: false, error: "TURN_ISSUE_FAILED" });
+  }
+});
+
+// ── Mobile call invite / cancel (Firebase FCM) ────────────────────────────
+
+/** Lookup a user's FCM token from Firestore */
+async function getFcmToken(uid) {
+  const doc = await admin.firestore().collection("users").doc(uid).get();
+  return doc.exists ? (doc.data().fcmToken || null) : null;
+}
+
+/**
+ * POST /api/call/invite
+ * Body: { callerId, callerName, callerPhoto?, calleeUids: string[], roomId, callType }
+ * Sends an FCM data message to each callee so their device rings.
+ */
+app.post("/api/call/invite", async (req, res) => {
+  if (!firebaseReady) {
+    return res.status(503).json({ ok: false, error: "FIREBASE_NOT_CONFIGURED" });
+  }
+  const { callerId, callerName, callerPhoto, calleeUids, roomId, callType } = req.body || {};
+  if (!callerId || !callerName || !Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
+    return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
+  }
+  const callUUID = crypto.randomUUID();
+  try {
+    const results = await Promise.allSettled(
+      calleeUids.map(async (uid) => {
+        const token = await getFcmToken(uid);
+        if (!token) return;
+        await admin.messaging().send({
+          token,
+          android: { priority: "high" },
+          data: {
+            type: "call_invite",
+            callUUID,
+            callerId: String(callerId),
+            callerName: String(callerName),
+            callerPhoto: String(callerPhoto || ""),
+            calleeUid: String(uid),
+            roomId: String(roomId),
+            callType: String(callType || "direct"),
+          },
+        });
+      })
+    );
+    const failed = results.filter(r => r.status === "rejected").length;
+    return res.json({ ok: true, callUUID, sent: calleeUids.length - failed, failed });
+  } catch (e) {
+    console.error("[call/invite] failed", e);
+    return res.status(500).json({ ok: false, error: "SEND_FAILED" });
+  }
+});
+
+/**
+ * POST /api/call/cancel
+ * Body: { calleeUids: string[], roomId }
+ * Sends a cancel FCM message so the callee's ringing screen dismisses.
+ */
+app.post("/api/call/cancel", async (req, res) => {
+  if (!firebaseReady) {
+    return res.status(503).json({ ok: false, error: "FIREBASE_NOT_CONFIGURED" });
+  }
+  const { calleeUids, roomId } = req.body || {};
+  if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
+    return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
+  }
+  try {
+    await Promise.allSettled(
+      calleeUids.map(async (uid) => {
+        const token = await getFcmToken(uid);
+        if (!token) return;
+        await admin.messaging().send({
+          token,
+          android: { priority: "high" },
+          data: { type: "call_cancel", roomId: String(roomId) },
+        });
+      })
+    );
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("[call/cancel] failed", e);
+    return res.status(500).json({ ok: false, error: "SEND_FAILED" });
   }
 });
 

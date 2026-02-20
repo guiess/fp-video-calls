@@ -1,0 +1,20 @@
+# React Native
+node_modules/
+.gradle
+local.properties
+*.keystore
+!debug.keystore
+
+# Android
+android/app/build/
+android/build/
+android/.gradle/
+android/app/src/main/assets/index.android.bundle*
+
+# Firebase — never commit real credentials
+google-services.json
+
+# Misc
+.env
+.DS_Store
+*.log
