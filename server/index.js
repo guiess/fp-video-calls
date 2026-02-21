@@ -184,7 +184,7 @@ app.post("/api/call/invite", async (req, res) => {
   if (!firebaseReady) {
     return res.status(503).json({ ok: false, error: "FIREBASE_NOT_CONFIGURED" });
   }
-  const { callerId, callerName, callerPhoto, calleeUids, roomId, callType } = req.body || {};
+  const { callerId, callerName, callerPhoto, calleeUids, roomId, callType, roomPassword } = req.body || {};
   if (!callerId || !callerName || !Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   }
@@ -196,7 +196,20 @@ app.post("/api/call/invite", async (req, res) => {
         if (!token) return;
         await admin.messaging().send({
           token,
-          android: { priority: "high" },
+          notification: {
+            title: "Incoming Call",
+            body: `${String(callerName)} is calling you`,
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "calls",
+              priority: "max",
+              defaultSound: false,
+              defaultVibrateTimings: false,
+              vibrateTimingsMillis: [0, 1000, 500, 1000],
+            },
+          },
           data: {
             type: "call_invite",
             callUUID,
@@ -206,6 +219,7 @@ app.post("/api/call/invite", async (req, res) => {
             calleeUid: String(uid),
             roomId: String(roomId),
             callType: String(callType || "direct"),
+            roomPassword: String(roomPassword || ""),
           },
         });
       })
@@ -227,7 +241,7 @@ app.post("/api/call/cancel", async (req, res) => {
   if (!firebaseReady) {
     return res.status(503).json({ ok: false, error: "FIREBASE_NOT_CONFIGURED" });
   }
-  const { calleeUids, roomId } = req.body || {};
+  const { calleeUids, roomId, callUUID } = req.body || {};
   if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   }
@@ -239,7 +253,7 @@ app.post("/api/call/cancel", async (req, res) => {
         await admin.messaging().send({
           token,
           android: { priority: "high" },
-          data: { type: "call_cancel", roomId: String(roomId) },
+          data: { type: "call_cancel", roomId: String(roomId), callUUID: String(callUUID || "") },
         });
       })
     );

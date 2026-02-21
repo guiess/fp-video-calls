@@ -2,11 +2,37 @@
 node_modules/
 *.log
 .DS_Store
+
 # Vite/React
 web/node_modules/
 web/dist/
+
 # Server
 server/node_modules/
+
 # Env/secrets
 .env
 *.local
+
+# Android / Kotlin
+mobile-kotlin/.gradle/
+mobile-kotlin/.idea/
+mobile-kotlin/build/
+mobile-kotlin/app/build/
+mobile-kotlin/local.properties
+mobile-kotlin/app/google-services.json
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Claude Code
+.claude/
+
+# Logs / archives
+server-logs.zip
+server-logs-extracted/
+server-deploy.zip
+
+# OS
+Thumbs.db
