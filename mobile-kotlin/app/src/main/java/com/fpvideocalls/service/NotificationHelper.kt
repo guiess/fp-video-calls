@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
 import com.fpvideocalls.MainActivity
 import com.fpvideocalls.util.Constants
@@ -13,15 +15,27 @@ import com.fpvideocalls.util.Constants
 object NotificationHelper {
 
     fun createCallChannel(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        // Delete legacy silent channel so the new one with sound/vibration takes effect
+        @Suppress("DEPRECATION")
+        manager.deleteNotificationChannel(Constants.LEGACY_CHANNEL_ID)
+
+        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
         val channel = NotificationChannel(
             Constants.NOTIFICATION_CHANNEL_ID,
             "Incoming Calls",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Notifications for incoming video calls"
-            // Service handles ringtone directly — disable channel-level sound/vibration
-            setSound(null, null)
-            enableVibration(false)
+            setSound(ringtoneUri, audioAttributes)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 1000, 500, 1000)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
 
@@ -35,7 +49,6 @@ object NotificationHelper {
             enableVibration(false)
         }
 
-        val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(channel)
         manager.createNotificationChannel(activeChannel)
     }
@@ -50,10 +63,9 @@ object NotificationHelper {
         callerPhoto: String?,
         roomPassword: String?
     ): Notification {
-        // Full-screen intent: opens IncomingCallScreen
-        val fullScreenIntent = Intent(context, MainActivity::class.java).apply {
+        // Full-screen intent: opens IncomingCallActivity (shows over lock screen)
+        val fullScreenIntent = Intent(context, IncomingCallActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("type", "call_invite")
             putExtra("callUUID", callUUID)
             putExtra("roomId", roomId)
             putExtra("callerId", callerId)
@@ -127,7 +139,14 @@ object NotificationHelper {
         manager.notify(callUUID.hashCode(), notification)
     }
 
-    fun showActiveCallNotification(context: Context, callerName: String, callType: String) {
+    fun buildActiveCallNotification(
+        context: Context,
+        callerName: String,
+        callType: String,
+        roomId: String,
+        userId: String,
+        password: String?
+    ): Notification {
         val hangUpIntent = Intent(context, CallActionReceiver::class.java).apply {
             action = CallActionReceiver.ACTION_HANG_UP
         }
@@ -137,6 +156,7 @@ object NotificationHelper {
         )
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
+            action = "RETURN_TO_CALL"
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val openPendingIntent = PendingIntent.getActivity(
@@ -146,7 +166,7 @@ object NotificationHelper {
 
         val callTypeLabel = if (callType == "group") "Group call" else "Video call"
 
-        val notification = NotificationCompat.Builder(context, Constants.ACTIVE_CALL_CHANNEL_ID)
+        return NotificationCompat.Builder(context, Constants.ACTIVE_CALL_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("$callTypeLabel in progress")
             .setContentText(callerName)
@@ -155,9 +175,6 @@ object NotificationHelper {
             .setContentIntent(openPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangUpPendingIntent)
             .build()
-
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.notify(Constants.ACTIVE_CALL_NOTIFICATION_ID, notification)
     }
 
     fun cancelActiveCallNotification(context: Context) {

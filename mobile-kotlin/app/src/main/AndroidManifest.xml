@@ -38,6 +38,17 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".service.IncomingCallActivity"
+            android:label="Incoming Call"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.fpvideocalls.incoming"
+            android:exported="false"
+            android:theme="@style/Theme.FPVideoCalls" />
+
         <service
             android:name=".service.FcmService"
             android:exported="false">
@@ -51,12 +62,17 @@
             android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
 
+        <service
+            android:name=".service.ActiveCallService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+
         <receiver
             android:name=".service.CallActionReceiver"
             android:exported="false" />
 
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="calls" />
+            android:value="incoming_calls" />
     </application>
 </manifest>

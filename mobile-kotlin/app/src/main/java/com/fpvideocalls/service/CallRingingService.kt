@@ -9,9 +9,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.media.AudioAttributes
+import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
-import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
@@ -62,27 +64,35 @@ class CallRingingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "Service created")
         audioHelper = AudioManagerHelper(this)
 
-        // Listen for answer/decline/cancel events to stop ourselves
+        // Listen for answer/decline/cancel events — only stop if UUID matches current call
         serviceScope.launch {
             CallEventBus.events.collect { event ->
-                when (event) {
-                    is CallEvent.Answer,
-                    is CallEvent.Decline,
-                    is CallEvent.Cancel,
-                    is CallEvent.Timeout -> {
-                        stopRinging()
-                        stopSelf()
-                    }
-                    else -> {}
+                val eventUUID = when (event) {
+                    is CallEvent.Answer -> event.data.callUUID
+                    is CallEvent.Decline -> event.callUUID
+                    is CallEvent.Cancel -> event.callUUID
+                    is CallEvent.Timeout -> event.callUUID
+                    else -> null
+                }
+
+                if (eventUUID != null && (eventUUID == currentCallUUID || eventUUID.isEmpty())) {
+                    Log.d(TAG, "Event matched current call ($eventUUID), stopping")
+                    stopRinging()
+                    stopSelf()
+                } else if (eventUUID != null) {
+                    Log.d(TAG, "Ignoring event for different call: $eventUUID (current: $currentCallUUID)")
                 }
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand called")
         if (intent == null) {
+            Log.w(TAG, "Intent is null, stopping service")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -95,9 +105,16 @@ class CallRingingService : Service() {
         val callType = intent.getStringExtra("callType") ?: "direct"
         val roomPassword = intent.getStringExtra("roomPassword")?.takeIf { it.isNotEmpty() }
 
-        currentCallUUID = callUUID
+        // If already ringing for a different call, stop previous first
+        if (currentCallUUID != null && currentCallUUID != callUUID) {
+            Log.d(TAG, "New call $callUUID replacing previous $currentCallUUID")
+            stopRinging()
+        }
 
-        // Build and show foreground notification with Answer/Decline buttons
+        currentCallUUID = callUUID
+        Log.d(TAG, "Processing call: uuid=$callUUID, caller=$callerName, type=$callType")
+
+        // Build and show foreground notification
         val notification = NotificationHelper.buildRingingNotification(
             context = this,
             callerName = callerName,
@@ -119,7 +136,6 @@ class CallRingingService : Service() {
             startForeground(Constants.RINGING_SERVICE_NOTIFICATION_ID, notification)
         }
 
-        // Also show as a regular notification (so it appears separately from service notification)
         NotificationHelper.showCallNotification(
             context = this,
             callerName = callerName,
@@ -131,25 +147,28 @@ class CallRingingService : Service() {
             roomPassword = roomPassword
         )
 
-        // Acquire wake lock to turn on screen
+        // Acquire wake lock
         acquireWakeLock()
 
-        // Start ringtone
+        // Start ringtone — AudioAttributes handle DND/ringer mode, no manual gating
+        Log.d(TAG, "Starting ringtone...")
         audioHelper?.startRingtone()
 
         // Start vibration
+        Log.d(TAG, "Starting vibration...")
         startVibration()
 
         // Set timeout
         handler.postDelayed(timeoutRunnable, Constants.CALL_TIMEOUT_MS)
 
-        Log.d(TAG, "Ringing started for call $callUUID from $callerName")
+        Log.d(TAG, "Ringing fully started for call $callUUID from $callerName")
         return START_NOT_STICKY
     }
 
     private fun acquireWakeLock() {
         try {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
             wakeLock = powerManager.newWakeLock(
                 PowerManager.FULL_WAKE_LOCK or
                         PowerManager.ACQUIRE_CAUSES_WAKEUP or
@@ -158,6 +177,7 @@ class CallRingingService : Service() {
             ).apply {
                 acquire(Constants.CALL_TIMEOUT_MS + 5000)
             }
+            Log.d(TAG, "Wake lock acquired")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to acquire wake lock", e)
         }
@@ -165,9 +185,28 @@ class CallRingingService : Service() {
 
     private fun startVibration() {
         try {
-            vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (vibrator?.hasVibrator() != true) {
+                Log.d(TAG, "Device has no vibrator")
+                vibrator = null
+                return
+            }
+
             val pattern = longArrayOf(0, 1000, 500, 1000)
-            vibrator?.vibrate(android.os.VibrationEffect.createWaveform(pattern, 0))
+            // Use USAGE_ALARM to match ringtone behaviour: vibrate even in DND/silent mode
+            val vibrateAttrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0), vibrateAttrs)
+            Log.d(TAG, "Vibration started")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to start vibration", e)
         }
@@ -182,6 +221,7 @@ class CallRingingService : Service() {
             wakeLock?.let { if (it.isHeld) it.release() }
         } catch (_: Exception) {}
         wakeLock = null
+        Log.d(TAG, "Ringing stopped")
     }
 
     override fun onDestroy() {

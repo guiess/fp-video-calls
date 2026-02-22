@@ -1,6 +1,8 @@
 package com.fpvideocalls.data
 
 import com.fpvideocalls.model.Contact
+import com.fpvideocalls.model.Group
+import com.fpvideocalls.model.RecentGroup
 import com.fpvideocalls.model.User
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -102,5 +104,104 @@ class FirestoreRepository @Inject constructor(
                     photoURL = doc.getString("photoURL")
                 )
             }
+    }
+
+    // --- Groups ---
+
+    suspend fun saveGroup(uid: String, group: Group) {
+        val data = hashMapOf<String, Any>(
+            "name" to group.name,
+            "memberUids" to group.memberUids,
+            "memberNames" to group.memberNames,
+            "createdAt" to group.createdAt
+        )
+        firestore.collection("users")
+            .document(uid)
+            .collection("groups")
+            .document(group.id)
+            .set(data)
+            .await()
+    }
+
+    suspend fun deleteGroup(uid: String, groupId: String) {
+        firestore.collection("users")
+            .document(uid)
+            .collection("groups")
+            .document(groupId)
+            .delete()
+            .await()
+    }
+
+    fun subscribeToGroups(uid: String): Flow<List<Group>> = callbackFlow {
+        val listener = firestore.collection("users")
+            .document(uid)
+            .collection("groups")
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val groups = snapshot?.documents?.map { doc ->
+                    Group(
+                        id = doc.id,
+                        name = doc.getString("name") ?: "",
+                        memberUids = (doc.get("memberUids") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        memberNames = (doc.get("memberNames") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        createdAt = doc.getLong("createdAt") ?: 0
+                    )
+                } ?: emptyList()
+                trySend(groups)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    // --- Recent Groups ---
+
+    suspend fun saveRecentGroup(uid: String, recentGroup: RecentGroup) {
+        val data = hashMapOf<String, Any>(
+            "memberUids" to recentGroup.memberUids,
+            "memberNames" to recentGroup.memberNames,
+            "lastUsedAt" to recentGroup.lastUsedAt
+        )
+        firestore.collection("users")
+            .document(uid)
+            .collection("recentGroups")
+            .document(recentGroup.id)
+            .set(data)
+            .await()
+    }
+
+    suspend fun deleteRecentGroup(uid: String, id: String) {
+        firestore.collection("users")
+            .document(uid)
+            .collection("recentGroups")
+            .document(id)
+            .delete()
+            .await()
+    }
+
+    fun subscribeToRecentGroups(uid: String): Flow<List<RecentGroup>> = callbackFlow {
+        val listener = firestore.collection("users")
+            .document(uid)
+            .collection("recentGroups")
+            .orderBy("lastUsedAt", Query.Direction.DESCENDING)
+            .limit(20)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val groups = snapshot?.documents?.map { doc ->
+                    RecentGroup(
+                        id = doc.id,
+                        memberUids = (doc.get("memberUids") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        memberNames = (doc.get("memberNames") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        lastUsedAt = doc.getLong("lastUsedAt") ?: 0
+                    )
+                } ?: emptyList()
+                trySend(groups)
+            }
+        awaitClose { listener.remove() }
     }
 }

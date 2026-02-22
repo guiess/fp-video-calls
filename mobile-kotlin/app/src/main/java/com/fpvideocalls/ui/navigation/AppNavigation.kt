@@ -22,11 +22,13 @@ import androidx.navigation.navArgument
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.ui.screens.*
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
 import com.fpvideocalls.viewmodel.CallNavigationEvent
 import com.fpvideocalls.viewmodel.CallViewModel
+import com.fpvideocalls.viewmodel.GroupsViewModel
 
 // Shared state for passing contacts between screens
 private val pendingContacts = mutableListOf<Contact>()
@@ -110,6 +112,21 @@ fun AppNavigation(
             // Clear the intent extras so we don't re-handle on recomposition
             intent.removeExtra("type")
         }
+
+        // Handle RETURN_TO_CALL from active call notification
+        if (intent.action == "RETURN_TO_CALL") {
+            val callInfo = ActiveCallService.activeCallInfo
+            if (callInfo != null) {
+                navController.navigate(
+                    Routes.inCall(callInfo.roomId, callInfo.displayName, callInfo.userId, callInfo.callType, callInfo.password)
+                ) {
+                    popUpTo(Routes.MAIN) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            // Clear the action so we don't re-handle on recomposition
+            intent.action = null
+        }
     }
 
     if (loading) {
@@ -164,7 +181,12 @@ fun AppNavigation(
                 userId = backStackEntry.arguments?.getString("userId") ?: "",
                 callType = backStackEntry.arguments?.getString("callType") ?: "room",
                 password = backStackEntry.arguments?.getString("password"),
-                onEndCall = { navController.popBackStack() }
+                onEndCall = {
+                    navController.navigate(Routes.MAIN) {
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             )
         }
 
@@ -217,13 +239,16 @@ fun AppNavigation(
 
         // Group call setup
         composable(Routes.GROUP_CALL_SETUP) {
+            val groupsViewModel: GroupsViewModel = hiltViewModel()
             GroupCallSetupScreen(
                 onBack = { navController.popBackStack() },
                 onStartCall = { contacts ->
+                    groupsViewModel.addRecentGroup(contacts)
                     pendingContacts.clear()
                     pendingContacts.addAll(contacts)
                     navController.navigate(Routes.outgoingCall("group"))
-                }
+                },
+                groupsViewModel = groupsViewModel
             )
         }
     }

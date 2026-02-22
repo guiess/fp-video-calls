@@ -58,8 +58,8 @@ class CallActionReceiver : BroadcastReceiver() {
             }
 
             ACTION_HANG_UP -> {
-                // Post a hang-up event; the InCallViewModel will handle cleanup
-                CallEventBus.post(CallEvent.Decline(""))
+                // Stop the active call service (which cleans up WebRTC/audio)
+                ActiveCallService.endCall(context)
             }
         }
     }

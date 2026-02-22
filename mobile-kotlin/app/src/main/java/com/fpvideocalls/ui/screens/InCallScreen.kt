@@ -1,6 +1,7 @@
 package com.fpvideocalls.ui.screens
 
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,6 +14,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.LocalActivity
+import com.fpvideocalls.service.ActiveCallService
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.fpvideocalls.ui.components.CallControls
 import com.fpvideocalls.ui.components.VideoGrid
 import com.fpvideocalls.viewmodel.InCallViewModel
@@ -29,12 +32,22 @@ fun InCallScreen(
 ) {
     val activity = LocalActivity.current
 
-    val localVideoTrack by inCallViewModel.webRTCManager.localVideoTrackFlow.collectAsState()
-    val remoteVideoTracks by inCallViewModel.webRTCManager.remoteVideoTracks.collectAsState()
-    val participants by inCallViewModel.webRTCManager.participants.collectAsState()
-    val micMuted by inCallViewModel.webRTCManager.micMuted.collectAsState()
-    val camEnabled by inCallViewModel.webRTCManager.camEnabled.collectAsState()
-    val signalingState by inCallViewModel.webRTCManager.signalingState.collectAsState()
+    // Back press moves app to background instead of ending the call
+    BackHandler {
+        activity.moveTaskToBack(true)
+    }
+
+    val isCallActive by ActiveCallService.isCallActive.collectAsState()
+    // Track whether we initiated or joined the call (to avoid nav-back on first composition)
+    var callWasActive by remember { mutableStateOf(ActiveCallService.isCallActive.value) }
+
+    val webRTCManager = inCallViewModel.webRTCManager
+    val localVideoTrack by (webRTCManager?.localVideoTrackFlow ?: MutableStateFlow(null)).collectAsState()
+    val remoteVideoTracks by (webRTCManager?.remoteVideoTracks ?: MutableStateFlow(emptyMap())).collectAsState()
+    val participants by (webRTCManager?.participants ?: MutableStateFlow(emptyList())).collectAsState()
+    val micMuted by (webRTCManager?.micMuted ?: MutableStateFlow(false)).collectAsState()
+    val camEnabled by (webRTCManager?.camEnabled ?: MutableStateFlow(true)).collectAsState()
+    val signalingState by (webRTCManager?.signalingState ?: MutableStateFlow("connecting")).collectAsState()
 
     // Keep screen awake
     DisposableEffect(Unit) {
@@ -44,9 +57,25 @@ fun InCallScreen(
         }
     }
 
-    // Start call
+    // Start call only if not already active (handles return-to-call)
     LaunchedEffect(roomId) {
-        inCallViewModel.startCall(roomId, userId, displayName, password, callType)
+        if (!ActiveCallService.isCallActive.value) {
+            inCallViewModel.startCall(roomId, userId, displayName, password, callType)
+        }
+    }
+
+    // Track that a call became active so we can detect when it ends
+    LaunchedEffect(isCallActive) {
+        if (isCallActive) {
+            callWasActive = true
+        }
+    }
+
+    // Navigate back when call ends (e.g., hang-up from notification) — only after call was started
+    LaunchedEffect(isCallActive, callWasActive) {
+        if (callWasActive && !isCallActive) {
+            onEndCall()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -88,7 +117,7 @@ fun InCallScreen(
             participants = participants,
             localUserId = userId,
             camEnabled = camEnabled,
-            eglBase = inCallViewModel.webRTCManager.getEglBase(),
+            eglBase = webRTCManager?.getEglBase(),
             modifier = Modifier.fillMaxSize().padding(bottom = 80.dp + bottomInset)
         )
 
@@ -96,9 +125,9 @@ fun InCallScreen(
         CallControls(
             micMuted = micMuted,
             camEnabled = camEnabled,
-            onToggleMic = { inCallViewModel.webRTCManager.toggleMic() },
-            onToggleCam = { inCallViewModel.webRTCManager.toggleCam() },
-            onSwitchCamera = { inCallViewModel.webRTCManager.switchCamera() },
+            onToggleMic = { webRTCManager?.toggleMic() },
+            onToggleCam = { webRTCManager?.toggleCam() },
+            onSwitchCamera = { webRTCManager?.switchCamera() },
             onEndCall = {
                 inCallViewModel.endCall()
                 onEndCall()

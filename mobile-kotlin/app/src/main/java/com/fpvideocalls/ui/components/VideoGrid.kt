@@ -73,8 +73,7 @@ fun VideoGrid(
                     WebRTCVideoView(
                         videoTrack = localVideoTrack,
                         eglBase = eglBase,
-                        modifier = Modifier.fillMaxSize(),
-                        mirror = true
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
             }
@@ -90,8 +89,7 @@ fun VideoGrid(
                         WebRTCVideoView(
                             videoTrack = localVideoTrack,
                             eglBase = eglBase,
-                            modifier = Modifier.fillMaxSize(),
-                            mirror = true
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                     if (!camEnabled) {
@@ -109,7 +107,7 @@ fun VideoGrid(
                     // Local
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (localVideoTrack != null) {
-                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize(), mirror = true)
+                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
                         }
                         if (!camEnabled) {
                             Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
@@ -138,7 +136,7 @@ fun VideoGrid(
                     allTiles.add {
                         Box(Modifier.fillMaxSize()) {
                             if (localVideoTrack != null) {
-                                WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize(), mirror = true)
+                                WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
                             }
                             if (!camEnabled) {
                                 Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {

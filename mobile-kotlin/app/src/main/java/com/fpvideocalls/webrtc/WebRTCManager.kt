@@ -36,10 +36,10 @@ class WebRTCManager(
     private var videoCapturer: CameraVideoCapturer? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
+    private val mirrorProcessor = MirrorVideoProcessor()
     private val peerConnections = mutableMapOf<String, PeerConnection>()
     private var signalingService: SignalingService? = null
     private var iceServers = STUN_SERVERS.toMutableList()
-    private var isFrontCamera = true
     private var localUserId: String = ""
 
     // Exposed state
@@ -57,6 +57,9 @@ class WebRTCManager(
 
     private val _camEnabled = MutableStateFlow(true)
     val camEnabled: StateFlow<Boolean> = _camEnabled.asStateFlow()
+
+    private val _isFrontCamera = MutableStateFlow(true)
+    val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
 
     private val _signalingState = MutableStateFlow("connecting")
     val signalingState: StateFlow<String> = _signalingState.asStateFlow()
@@ -200,6 +203,9 @@ class WebRTCManager(
         videoCapturer = enumerator.createCapturer(cameraName, null)
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", egl.eglBaseContext)
         val videoSource = f.createVideoSource(videoCapturer!!.isScreencast)
+        // Mirror front camera frames before encoding (matches web client behavior)
+        mirrorProcessor.mirrorEnabled = (frontCamera != null)
+        videoSource.setVideoProcessor(mirrorProcessor)
         videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource.capturerObserver)
         videoCapturer!!.startCapture(1280, 720, 30)
 
@@ -373,7 +379,8 @@ class WebRTCManager(
     fun switchCamera() {
         videoCapturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
             override fun onCameraSwitchDone(isFront: Boolean) {
-                isFrontCamera = isFront
+                _isFrontCamera.value = isFront
+                mirrorProcessor.mirrorEnabled = isFront
             }
             override fun onCameraSwitchError(error: String?) {
                 Log.w(TAG, "Camera switch failed: $error")

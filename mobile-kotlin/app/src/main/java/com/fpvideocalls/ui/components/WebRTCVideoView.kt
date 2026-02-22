@@ -35,16 +35,21 @@ private class TextureViewRenderer(context: Context) : TextureView(context), Vide
 
     init {
         surfaceTextureListener = this
+        // EglRenderer outputs GL Y-up; TextureView composites Y-down → flip to compensate
+        scaleY = -1f
     }
 
     fun init(eglContext: EglBase.Context?) {
         this.eglContext = eglContext
         eglRenderer.init(eglContext, EglBase.CONFIG_PLAIN, GlRectDrawer())
         isInitialized = true
+        setBackgroundColor(android.graphics.Color.BLACK)
 
         // If surface is already available (TextureView reuse), create EGL surface now
         if (isAvailable) {
             eglRenderer.createEglSurface(surfaceTexture!!)
+            eglRenderer.setLayoutAspectRatio(width.toFloat() / height.coerceAtLeast(1).toFloat())
+            eglRenderer.setMirror(mirror)
         }
     }
 
@@ -60,6 +65,7 @@ private class TextureViewRenderer(context: Context) : TextureView(context), Vide
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
         if (isInitialized) {
             eglRenderer.createEglSurface(surface)
+            eglRenderer.setMirror(mirror)
         }
         eglRenderer.setLayoutAspectRatio(width.toFloat() / height.coerceAtLeast(1).toFloat())
     }
