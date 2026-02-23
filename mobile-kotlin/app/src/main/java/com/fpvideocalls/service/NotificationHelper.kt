@@ -115,6 +115,9 @@ object NotificationHelper {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
             .setAutoCancel(false)
+            // Suppress the notification's own sound/vibration — CallRingingService
+            // handles continuous looping ringtone and vibration via AudioManagerHelper.
+            .setSilent(true)
             .setContentIntent(fullScreenPendingIntent)
             .setFullScreenIntent(fullScreenPendingIntent, true)
             .addAction(android.R.drawable.ic_menu_call, "Answer", answerPendingIntent)
