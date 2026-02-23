@@ -98,11 +98,17 @@ class WebRTCManager(
                     onRoomJoined = { existingParticipants, _ ->
                         _participants.value = existingParticipants.filter { it.userId != userId }
                         _signalingState.value = "connected"
-                        // Create offers for existing participants
+                        // Create peer connections and send offers following the convention:
+                        // lower userId is the canonical offerer (matches web client).
                         for (p in existingParticipants) {
                             if (p.userId == userId) continue
-                            scope.launch(Dispatchers.Main) {
-                                createAndSendOffer(p.userId, signaling)
+                            // Always create the peer connection so we can receive offers
+                            createPeerConnection(p.userId)
+                            val shouldOffer = userId < p.userId
+                            if (shouldOffer) {
+                                scope.launch(Dispatchers.Main) {
+                                    createAndSendOffer(p.userId, signaling)
+                                }
                             }
                         }
                     },
@@ -110,8 +116,14 @@ class WebRTCManager(
                         _participants.value = _participants.value
                             .filter { it.userId != joinedId } +
                             Participant(joinedId, joinedName, micMutedState)
-                        scope.launch(Dispatchers.Main) {
-                            createAndSendOffer(joinedId, signaling)
+                        // Always create peer connection; only send offer if we are
+                        // the canonical offerer (lower userId), matching web client.
+                        createPeerConnection(joinedId)
+                        val shouldOffer = userId < joinedId
+                        if (shouldOffer) {
+                            scope.launch(Dispatchers.Main) {
+                                createAndSendOffer(joinedId, signaling)
+                            }
                         }
                     },
                     onUserLeft = { leftId ->
@@ -299,10 +311,11 @@ class WebRTCManager(
         )
 
         // Glare handling using polite/impolite peer pattern.
-        // Polite peer (lower userId) rolls back its offer and accepts the remote offer.
-        // Impolite peer (higher userId) ignores the incoming offer — its own offer stands.
+        // Polite peer (higher userId) rolls back its offer and accepts the remote offer.
+        // Impolite peer (lower userId) ignores the incoming offer — its own offer stands.
+        // This matches the web client convention: lower userId is the canonical offerer.
         if (pc.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
-            val isPolite = localUserId < fromId
+            val isPolite = localUserId > fromId
             if (isPolite) {
                 Log.d(TAG, "Glare with $fromId — we are polite, rolling back our offer")
                 val rollback = SdpObserverAdapter()
