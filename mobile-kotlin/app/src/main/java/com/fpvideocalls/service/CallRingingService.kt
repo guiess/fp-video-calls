@@ -9,7 +9,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.media.AudioAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -98,6 +97,11 @@ class CallRingingService : Service() {
         }
 
         val callUUID = intent.getStringExtra("callUUID") ?: ""
+        if (IncomingCallState.isCancelledRecently(callUUID)) {
+            Log.d(TAG, "Ignoring ringing start for cancelled call $callUUID")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val roomId = intent.getStringExtra("roomId") ?: ""
         val callerId = intent.getStringExtra("callerId") ?: ""
         val callerName = intent.getStringExtra("callerName") ?: "Unknown"
@@ -200,12 +204,7 @@ class CallRingingService : Service() {
             }
 
             val pattern = longArrayOf(0, 1000, 500, 1000)
-            // Use USAGE_ALARM to match ringtone behaviour: vibrate even in DND/silent mode
-            val vibrateAttrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0), vibrateAttrs)
+            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
             Log.d(TAG, "Vibration started")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to start vibration", e)

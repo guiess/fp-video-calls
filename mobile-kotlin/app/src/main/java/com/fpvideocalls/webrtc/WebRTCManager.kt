@@ -203,8 +203,10 @@ class WebRTCManager(
         videoCapturer = enumerator.createCapturer(cameraName, null)
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", egl.eglBaseContext)
         val videoSource = f.createVideoSource(videoCapturer!!.isScreencast)
-        // Mirror front camera frames before encoding (matches web client behavior)
-        mirrorProcessor.mirrorEnabled = (frontCamera != null)
+        // Mirror front-camera frames at source via the official VideoProcessor API.
+        // applyTransformMatrix returns a real TextureBufferImpl so the transform
+        // survives cropAndScale and is honoured by both encoder and local sinks.
+        mirrorProcessor.mirrorEnabled = true
         videoSource.setVideoProcessor(mirrorProcessor)
         videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource.capturerObserver)
         videoCapturer!!.startCapture(1280, 720, 30)

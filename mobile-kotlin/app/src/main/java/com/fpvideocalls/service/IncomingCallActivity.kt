@@ -55,6 +55,11 @@ class IncomingCallActivity : ComponentActivity() {
         setupWindowFlags()
 
         val callUUID = intent.getStringExtra("callUUID") ?: ""
+        if (IncomingCallState.isCancelledRecently(callUUID)) {
+            Log.d(TAG, "Ignoring activity for cancelled call $callUUID")
+            finish()
+            return
+        }
         val roomId = intent.getStringExtra("roomId") ?: ""
         val callerId = intent.getStringExtra("callerId") ?: ""
         val callerName = intent.getStringExtra("callerName") ?: "Unknown"

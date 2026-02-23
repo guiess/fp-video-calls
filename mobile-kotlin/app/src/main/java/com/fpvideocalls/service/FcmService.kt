@@ -22,8 +22,13 @@ class FcmService : FirebaseMessagingService() {
 
         when (data["type"]) {
             "call_invite" -> {
+                val callUUID = data["callUUID"] ?: ""
+                if (IncomingCallState.isCancelledRecently(callUUID)) {
+                    Log.d(TAG, "Ignoring stale invite for cancelled callUUID=$callUUID")
+                    return
+                }
                 val callData = IncomingCallData(
-                    callUUID = data["callUUID"] ?: "",
+                    callUUID = callUUID,
                     roomId = data["roomId"] ?: "",
                     callerId = data["callerId"] ?: "",
                     callerName = data["callerName"] ?: "Unknown",
@@ -49,6 +54,7 @@ class FcmService : FirebaseMessagingService() {
                 val callUUID = data["callUUID"] ?: ""
                 val roomId = data["roomId"] ?: ""
                 Log.d(TAG, "Call cancelled: uuid=$callUUID, roomId=$roomId")
+                IncomingCallState.markCancelled(callUUID)
                 CallEventBus.post(CallEvent.Cancel(callUUID, roomId))
                 if (callUUID.isNotEmpty()) {
                     NotificationHelper.cancelNotification(applicationContext, callUUID)
@@ -62,6 +68,10 @@ class FcmService : FirebaseMessagingService() {
 
     private fun launchIncomingCallActivity(callData: IncomingCallData) {
         try {
+            if (IncomingCallState.isCancelledRecently(callData.callUUID)) {
+                Log.d(TAG, "Skip launch: call already cancelled ${callData.callUUID}")
+                return
+            }
             val intent = Intent(applicationContext, IncomingCallActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or

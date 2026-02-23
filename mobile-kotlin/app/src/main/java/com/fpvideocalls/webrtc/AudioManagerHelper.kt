@@ -27,7 +27,7 @@ class AudioManagerHelper(private val context: Context) {
     private var audioFocusRequest: AudioFocusRequest? = null
 
     private val ringtoneAudioAttributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ALARM)
+        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
@@ -46,12 +46,12 @@ class AudioManagerHelper(private val context: Context) {
         }
     }
 
-    fun requestAudioFocus(usage: Int = AudioAttributes.USAGE_ALARM): Boolean {
+    fun requestAudioFocus(usage: Int = AudioAttributes.USAGE_NOTIFICATION_RINGTONE): Boolean {
         val attrs = AudioAttributes.Builder()
             .setUsage(usage)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener(focusChangeListener)
             .build()

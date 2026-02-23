@@ -1,5 +1,6 @@
 package com.fpvideocalls.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fpvideocalls.model.Participant
@@ -33,6 +35,9 @@ fun VideoGrid(
     modifier: Modifier = Modifier
 ) {
     var pinnedId by remember { mutableStateOf<String?>(null) }
+    val config = LocalConfiguration.current
+    val isMobile = config.screenWidthDp < 600
+    val isPortrait = config.orientation == Configuration.ORIENTATION_PORTRAIT
 
     if (pinnedId != null) {
         // Pinned/fullscreen mode
@@ -61,12 +66,18 @@ fun VideoGrid(
 
             // Local PiP
             if (localVideoTrack != null && camEnabled) {
+                val pipWidth = if (isMobile && isPortrait) {
+                    minOf(140.dp, (config.screenWidthDp.dp * 0.2f)).coerceAtLeast(96.dp)
+                } else {
+                    minOf(280.dp, (config.screenWidthDp.dp * 0.25f)).coerceAtLeast(120.dp)
+                }
+                val pipAspect = if (isMobile && isPortrait) 9f / 16f else 16f / 9f
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(16.dp)
-                        .width(96.dp)
-                        .height(128.dp)
+                        .width(pipWidth)
+                        .aspectRatio(pipAspect)
                         .clip(RoundedCornerShape(12.dp))
                         .border(2.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                 ) {
@@ -104,17 +115,6 @@ fun VideoGrid(
             } else if (totalTiles == 2) {
                 // 2 tiles vertically
                 Column(Modifier.fillMaxSize()) {
-                    // Local
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        if (localVideoTrack != null) {
-                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
-                        }
-                        if (!camEnabled) {
-                            Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.VideocamOff, "Camera off", tint = Color.Gray, modifier = Modifier.size(32.dp))
-                            }
-                        }
-                    }
                     // Remote
                     participants.firstOrNull()?.let { p ->
                         val track = remoteVideoTracks[p.userId]
@@ -123,6 +123,17 @@ fun VideoGrid(
                                 WebRTCVideoView(track, eglBase, Modifier.fillMaxSize())
                             } else {
                                 Box(Modifier.fillMaxSize().background(SurfaceVariant))
+                            }
+                        }
+                    }
+                    // Local
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (localVideoTrack != null) {
+                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize(), )
+                        }
+                        if (!camEnabled) {
+                            Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.VideocamOff, "Camera off", tint = Color.Gray, modifier = Modifier.size(32.dp))
                             }
                         }
                     }
@@ -136,7 +147,7 @@ fun VideoGrid(
                     allTiles.add {
                         Box(Modifier.fillMaxSize()) {
                             if (localVideoTrack != null) {
-                                WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
+                                WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize(), )
                             }
                             if (!camEnabled) {
                                 Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
