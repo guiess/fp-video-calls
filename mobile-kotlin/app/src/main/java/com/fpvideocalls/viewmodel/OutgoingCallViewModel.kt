@@ -9,17 +9,19 @@ import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.User
 import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.webrtc.AudioManagerHelper
+import com.fpvideocalls.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import javax.inject.Inject
 
 enum class OutgoingCallStatus {
-    SETTING_UP, CALLING, ERROR
+    SETTING_UP, CALLING, TIMED_OUT, ERROR
 }
 
 data class OutgoingCallResult(
@@ -47,9 +49,15 @@ class OutgoingCallViewModel @Inject constructor(
     private var cancelled = false
     private var roomId: String? = null
     private var password: String? = null
+    private var lastUser: User? = null
+    private var lastContacts: List<Contact>? = null
+    private var lastCallType: String? = null
 
     fun initCall(user: User, contacts: List<Contact>, callType: String) {
         cancelled = false
+        lastUser = user
+        lastContacts = contacts
+        lastCallType = callType
         audioHelper.startRingback()
 
         viewModelScope.launch {
@@ -100,10 +108,20 @@ class OutgoingCallViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Wait for a remote participant to join (callee answered)
+                // Wait for a remote participant to join (callee answered) with timeout
                 Log.d(TAG, "Waiting for participants (current=${manager.participants.value.size})")
-                manager.participants.first { it.isNotEmpty() }
+                val joined = withTimeoutOrNull(Constants.OUTGOING_CALL_TIMEOUT_MS) {
+                    manager.participants.first { it.isNotEmpty() }
+                }
                 if (cancelled) return@launch
+
+                if (joined == null) {
+                    Log.d(TAG, "Outgoing call timed out after ${Constants.OUTGOING_CALL_TIMEOUT_MS}ms")
+                    audioHelper.stopRingback()
+                    ActiveCallService.endCall(getApplication())
+                    _status.value = OutgoingCallStatus.TIMED_OUT
+                    return@launch
+                }
 
                 Log.d(TAG, "Recipient joined, navigating to InCall")
                 audioHelper.stopRingback()
@@ -113,6 +131,15 @@ class OutgoingCallViewModel @Inject constructor(
                 if (!cancelled) _status.value = OutgoingCallStatus.ERROR
             }
         }
+    }
+
+    fun retry() {
+        val user = lastUser ?: return
+        val contacts = lastContacts ?: return
+        val callType = lastCallType ?: return
+        _status.value = OutgoingCallStatus.SETTING_UP
+        _result.value = null
+        initCall(user, contacts, callType)
     }
 
     fun cancel(contacts: List<Contact>) {

@@ -9,6 +9,9 @@ import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.provider.Settings
 import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class AudioManagerHelper(private val context: Context) {
 
@@ -22,6 +25,9 @@ class AudioManagerHelper(private val context: Context) {
     private var previousMode: Int = AudioManager.MODE_NORMAL
     private var previousSpeakerOn: Boolean = false
     private var audioFocusRequest: AudioFocusRequest? = null
+
+    private val _isSpeakerOn = MutableStateFlow(true)
+    val isSpeakerOn: StateFlow<Boolean> = _isSpeakerOn.asStateFlow()
 
     private val ringtoneAudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
@@ -72,6 +78,13 @@ class AudioManagerHelper(private val context: Context) {
         requestAudioFocus(AudioAttributes.USAGE_VOICE_COMMUNICATION)
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         audioManager.isSpeakerphoneOn = true
+        _isSpeakerOn.value = true
+    }
+
+    fun toggleSpeaker() {
+        val newState = !audioManager.isSpeakerphoneOn
+        audioManager.isSpeakerphoneOn = newState
+        _isSpeakerOn.value = newState
     }
 
     fun resetAudioMode() {

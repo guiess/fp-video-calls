@@ -8,6 +8,7 @@ object Routes {
     const val MAIN = "main"
     const val IN_CALL = "in_call/{roomId}/{displayName}/{userId}?callType={callType}&password={password}"
     const val OUTGOING_CALL = "outgoing_call/{callType}"
+    const val PRE_CALL = "pre_call/{callType}"
     const val INCOMING_CALL = "incoming_call"
     const val GROUP_CALL_SETUP = "group_call_setup"
 
@@ -26,4 +27,5 @@ object Routes {
     }
 
     fun outgoingCall(callType: String): String = "outgoing_call/$callType"
+    fun preCall(callType: String): String = "pre_call/$callType"
 }

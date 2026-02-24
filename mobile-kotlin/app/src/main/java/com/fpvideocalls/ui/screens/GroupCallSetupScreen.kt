@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.ui.theme.*
+import com.fpvideocalls.util.Constants
 import com.fpvideocalls.viewmodel.AuthViewModel
 import com.fpvideocalls.viewmodel.ContactsViewModel
 import com.fpvideocalls.viewmodel.GroupsViewModel
@@ -149,8 +150,8 @@ fun GroupCallSetupScreen(
         }
 
         Text(
-            "Select contacts to invite",
-            color = TextTertiary,
+            "Select contacts to invite (${selected.size}/${Constants.MAX_GROUP_CALL_MEMBERS})",
+            color = if (selected.size >= Constants.MAX_GROUP_CALL_MEMBERS) ErrorRed else TextTertiary,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)
         )
@@ -180,7 +181,7 @@ fun GroupCallSetupScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    selected = group.memberUids.toSet()
+                                    selected = group.memberUids.take(Constants.MAX_GROUP_CALL_MEMBERS).toSet()
                                 }
                                 .background(SurfaceVariant)
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -245,7 +246,7 @@ fun GroupCallSetupScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    selected = recent.memberUids.toSet()
+                                    selected = recent.memberUids.take(Constants.MAX_GROUP_CALL_MEMBERS).toSet()
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -301,11 +302,14 @@ fun GroupCallSetupScreen(
 
                 items(contacts, key = { it.uid }) { contact ->
                     val isSelected = contact.uid in selected
+                    val atLimit = selected.size >= Constants.MAX_GROUP_CALL_MEMBERS
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                selected = if (isSelected) selected - contact.uid else selected + contact.uid
+                                selected = if (isSelected) selected - contact.uid
+                                else if (!atLimit) selected + contact.uid
+                                else selected
                             }
                             .background(if (isSelected) Purple.copy(alpha = 0.08f) else Background)
                             .padding(horizontal = 16.dp, vertical = 14.dp),

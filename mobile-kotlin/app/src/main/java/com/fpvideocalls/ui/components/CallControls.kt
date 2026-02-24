@@ -18,8 +18,10 @@ import com.fpvideocalls.ui.theme.ErrorRed
 fun CallControls(
     micMuted: Boolean,
     camEnabled: Boolean,
+    isSpeakerOn: Boolean,
     onToggleMic: () -> Unit,
     onToggleCam: () -> Unit,
+    onToggleSpeaker: () -> Unit,
     onSwitchCamera: () -> Unit,
     onEndCall: () -> Unit,
     modifier: Modifier = Modifier
@@ -46,6 +48,14 @@ fun CallControls(
             contentDescription = if (camEnabled) "Disable camera" else "Enable camera",
             isActive = camEnabled,
             onClick = onToggleCam
+        )
+
+        // Speaker
+        ControlButton(
+            icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.HearingDisabled,
+            contentDescription = if (isSpeakerOn) "Earpiece" else "Speaker",
+            isActive = isSpeakerOn,
+            onClick = onToggleSpeaker
         )
 
         // End call

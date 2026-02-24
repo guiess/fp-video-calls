@@ -70,13 +70,14 @@ fun OutgoingCallScreen(
             when (status) {
                 OutgoingCallStatus.SETTING_UP -> "Connecting\u2026"
                 OutgoingCallStatus.CALLING -> "Calling\u2026"
+                OutgoingCallStatus.TIMED_OUT -> "No answer"
                 OutgoingCallStatus.ERROR -> "Call failed"
             },
             color = TextSecondary,
             fontSize = 15.sp
         )
 
-        if (status != OutgoingCallStatus.ERROR) {
+        if (status == OutgoingCallStatus.CALLING || status == OutgoingCallStatus.SETTING_UP) {
             Spacer(Modifier.height(16.dp))
             CircularProgressIndicator(
                 color = Purple,
@@ -91,6 +92,22 @@ fun OutgoingCallScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text("Cancel", color = TextSecondary, fontSize = 16.sp)
+            }
+        } else if (status == OutgoingCallStatus.TIMED_OUT) {
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = { outgoingCallViewModel.retry() },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Purple)
+            ) {
+                Text("Try Again", fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onBack,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Close", color = TextSecondary, fontSize = 16.sp)
             }
         } else {
             Spacer(Modifier.height(16.dp))

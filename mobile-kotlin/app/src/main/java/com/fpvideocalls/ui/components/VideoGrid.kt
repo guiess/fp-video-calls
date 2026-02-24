@@ -139,7 +139,9 @@ fun VideoGrid(
                     }
                 }
             } else {
-                // Quad grid
+                // Dynamic grid for 3+ tiles
+                // Calculate optimal columns: 2 cols for 3-4, 3 cols for 7+
+                val cols = if (totalTiles <= 4) 2 else if (totalTiles <= 6) 2 else 3
                 Column(Modifier.fillMaxSize()) {
                     val allTiles = mutableListOf<@Composable () -> Unit>()
 
@@ -154,6 +156,16 @@ fun VideoGrid(
                                     Icon(Icons.Default.VideocamOff, "Camera off", tint = Color.Gray, modifier = Modifier.size(32.dp))
                                 }
                             }
+                            // Name label
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(6.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("You", color = Color.White, fontSize = 11.sp, maxLines = 1)
+                            }
                         }
                     }
 
@@ -167,12 +179,27 @@ fun VideoGrid(
                                 } else {
                                     Box(Modifier.fillMaxSize().background(SurfaceVariant))
                                 }
+                                // Name label
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(6.dp)
+                                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        p.displayName,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
 
-                    // Layout in rows of 2
-                    val rows = allTiles.chunked(2)
+                    // Layout in rows
+                    val rows = allTiles.chunked(cols)
                     for (row in rows) {
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             for (tile in row) {
@@ -180,8 +207,8 @@ fun VideoGrid(
                                     tile()
                                 }
                             }
-                            // If odd tile in last row, fill space
-                            if (row.size == 1) {
+                            // Fill remaining cells in last row
+                            repeat(cols - row.size) {
                                 Box(Modifier.weight(1f).fillMaxHeight().background(Color.Black))
                             }
                         }

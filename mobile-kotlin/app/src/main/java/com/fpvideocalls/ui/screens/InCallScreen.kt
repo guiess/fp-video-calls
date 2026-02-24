@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.LocalActivity
+import com.fpvideocalls.MainActivity
 import com.fpvideocalls.service.ActiveCallService
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.fpvideocalls.ui.components.CallControls
@@ -31,6 +32,7 @@ fun InCallScreen(
     inCallViewModel: InCallViewModel = hiltViewModel()
 ) {
     val activity = LocalActivity.current
+    val isInPipMode = (activity as? MainActivity)?.isInPipMode == true
 
     // Back press moves app to background instead of ending the call
     BackHandler {
@@ -48,6 +50,7 @@ fun InCallScreen(
     val micMuted by (webRTCManager?.micMuted ?: MutableStateFlow(false)).collectAsState()
     val camEnabled by (webRTCManager?.camEnabled ?: MutableStateFlow(true)).collectAsState()
     val signalingState by (webRTCManager?.signalingState ?: MutableStateFlow("connecting")).collectAsState()
+    val isSpeakerOn by (inCallViewModel.audioHelper?.isSpeakerOn ?: MutableStateFlow(true)).collectAsState()
 
     // Keep screen awake
     DisposableEffect(Unit) {
@@ -79,38 +82,43 @@ fun InCallScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // Signaling status badge
-        if (signalingState != "connected") {
+        if (!isInPipMode) {
+            // Signaling status badge
+            if (signalingState != "connected") {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 8.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        if (signalingState == "connecting") "\u23F3 Connecting\u2026" else "\u26A0 Reconnecting\u2026",
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            // Room label
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.TopStart)
                     .statusBarsPadding()
-                    .padding(top = 8.dp)
-                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(top = 4.dp, start = 16.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
-                Text(
-                    if (signalingState == "connecting") "\u23F3 Connecting\u2026" else "\u26A0 Reconnecting\u2026",
-                    color = Color.White,
-                    fontSize = 13.sp
-                )
+                Text("\uD83D\uDEAA $roomId", color = Color.White, fontSize = 12.sp, maxLines = 1)
             }
         }
 
-        // Room label
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(top = 4.dp, start = 16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        ) {
-            Text("\uD83D\uDEAA $roomId", color = Color.White, fontSize = 12.sp, maxLines = 1)
+        // Video grid — in PiP mode, use full space; otherwise leave room for controls
+        val bottomPadding = if (isInPipMode) 0.dp else {
+            val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            80.dp + bottomInset
         }
-
-        // Video grid — leave space for controls + nav bar
-        val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         VideoGrid(
             localVideoTrack = localVideoTrack,
             remoteVideoTracks = remoteVideoTracks,
@@ -118,23 +126,27 @@ fun InCallScreen(
             localUserId = userId,
             camEnabled = camEnabled,
             eglBase = webRTCManager?.getEglBase(),
-            modifier = Modifier.fillMaxSize().padding(bottom = 80.dp + bottomInset)
+            modifier = Modifier.fillMaxSize().padding(bottom = bottomPadding)
         )
 
-        // Controls at bottom, above navigation bar
-        CallControls(
-            micMuted = micMuted,
-            camEnabled = camEnabled,
-            onToggleMic = { webRTCManager?.toggleMic() },
-            onToggleCam = { webRTCManager?.toggleCam() },
-            onSwitchCamera = { webRTCManager?.switchCamera() },
-            onEndCall = {
-                inCallViewModel.endCall()
-                onEndCall()
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-        )
+        if (!isInPipMode) {
+            // Controls at bottom, above navigation bar
+            CallControls(
+                micMuted = micMuted,
+                camEnabled = camEnabled,
+                isSpeakerOn = isSpeakerOn,
+                onToggleMic = { webRTCManager?.toggleMic() },
+                onToggleCam = { webRTCManager?.toggleCam() },
+                onToggleSpeaker = { inCallViewModel.audioHelper?.toggleSpeaker() },
+                onSwitchCamera = { webRTCManager?.switchCamera() },
+                onEndCall = {
+                    inCallViewModel.endCall()
+                    onEndCall()
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+            )
+        }
     }
 }

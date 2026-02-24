@@ -246,9 +246,30 @@ fun AppNavigation(
                     groupsViewModel.addRecentGroup(contacts)
                     pendingContacts.clear()
                     pendingContacts.addAll(contacts)
-                    navController.navigate(Routes.outgoingCall("group"))
+                    navController.navigate(Routes.preCall("group"))
                 },
                 groupsViewModel = groupsViewModel
+            )
+        }
+
+        // Pre-call camera preview
+        composable(
+            route = Routes.PRE_CALL,
+            arguments = listOf(
+                navArgument("callType") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val callType = backStackEntry.arguments?.getString("callType") ?: "direct"
+            val contacts = pendingContacts.toList()
+            PreCallScreen(
+                contacts = contacts,
+                callType = callType,
+                onStartCall = {
+                    navController.navigate(Routes.outgoingCall(callType)) {
+                        popUpTo(Routes.PRE_CALL) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
             )
         }
     }
@@ -353,7 +374,7 @@ fun MainScreen(navController: NavHostController) {
                     onCallContact = { contact ->
                         pendingContacts.clear()
                         pendingContacts.add(contact)
-                        navController.navigate(Routes.outgoingCall("direct"))
+                        navController.navigate(Routes.preCall("direct"))
                     },
                     onGroupCall = {
                         navController.navigate(Routes.GROUP_CALL_SETUP)
