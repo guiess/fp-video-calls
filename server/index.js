@@ -194,22 +194,13 @@ app.post("/api/call/invite", async (req, res) => {
       calleeUids.map(async (uid) => {
         const token = await getFcmToken(uid);
         if (!token) return;
+        // Data-only message (no "notification" field) so that
+        // onMessageReceived is ALWAYS called — even when the app is in
+        // the background.  The app's CallRingingService handles the
+        // notification display, looping ringtone, and vibration.
         await admin.messaging().send({
           token,
-          notification: {
-            title: "Incoming Call",
-            body: `${String(callerName)} is calling you`,
-          },
-          android: {
-            priority: "high",
-            notification: {
-              channelId: "calls",
-              priority: "max",
-              defaultSound: false,
-              defaultVibrateTimings: false,
-              vibrateTimingsMillis: [0, 1000, 500, 1000],
-            },
-          },
+          android: { priority: "high" },
           data: {
             type: "call_invite",
             callUUID,
@@ -277,6 +268,7 @@ app.post("/room", (req, res) => {
       passwordHint: passwordHint
     }
   });
+  console.log(`[room:create] ${roomId} via POST (password=${!!passwordEnabled})`);
   res.status(201).json({ roomId, settings: rooms.get(roomId).settings });
 });
 
@@ -335,13 +327,12 @@ io.on("connection", (socket) => {
       displayName: p.displayName,
       micMuted: !!p.micMuted
     }));
+    console.log(`[room:join] ${userId} ${isReconnect ? "re" : ""}joined ${roomId} (${room.participants.size} participants)`);
     socket.emit("room_joined", { participants, roomInfo: { roomId, settings: room.settings } });
 
     // Only notify others on first join (skip for reconnects to avoid duplicate user_joined)
     if (!isReconnect) {
       socket.to(roomId).emit("user_joined", { userId, displayName, micMuted: false });
-    } else {
-      console.log(`[room:rejoin] ${userId} reconnected to ${roomId}`);
     }
   });
 
@@ -351,7 +342,8 @@ io.on("connection", (socket) => {
       room.participants.delete(userId);
       socket.leave(roomId);
       socket.to(roomId).emit("user_left", { userId });
-      if (room.participants.size === 0) rooms.delete(roomId);
+      console.log(`[room:leave] ${userId} left ${roomId} (${room.participants.size} remaining)`);
+      if (room.participants.size === 0) { rooms.delete(roomId); console.log(`[room:delete] ${roomId} (empty)`); }
     }
   });
 
@@ -371,10 +363,14 @@ io.on("connection", (socket) => {
 
   // WebRTC signaling relay
   socket.on("offer", ({ roomId, targetId, offer }) => {
-    relayToUser(roomId, targetId, "offer_received", { fromId: getUserIdBySocket(roomId, socket.id), offer });
+    const fromId = getUserIdBySocket(roomId, socket.id);
+    console.log(`[signal] offer ${fromId} -> ${targetId} in ${roomId}`);
+    relayToUser(roomId, targetId, "offer_received", { fromId, offer });
   });
   socket.on("answer", ({ roomId, targetId, answer }) => {
-    relayToUser(roomId, targetId, "answer_received", { fromId: getUserIdBySocket(roomId, socket.id), answer });
+    const fromId = getUserIdBySocket(roomId, socket.id);
+    console.log(`[signal] answer ${fromId} -> ${targetId} in ${roomId}`);
+    relayToUser(roomId, targetId, "answer_received", { fromId, answer });
   });
   socket.on("ice_candidate", ({ roomId, targetId, candidate }) => {
     relayToUser(roomId, targetId, "ice_candidate_received", { fromId: getUserIdBySocket(roomId, socket.id), candidate });
@@ -408,7 +404,8 @@ io.on("connection", (socket) => {
       if (userId) {
         room.participants.delete(userId);
         socket.to(roomId).emit("user_left", { userId });
-        if (room.participants.size === 0) rooms.delete(roomId);
+        console.log(`[room:disconnect] ${userId} disconnected from ${roomId} (${room.participants.size} remaining)`);
+        if (room.participants.size === 0) { rooms.delete(roomId); console.log(`[room:delete] ${roomId} (empty)`); }
       }
     }
   });

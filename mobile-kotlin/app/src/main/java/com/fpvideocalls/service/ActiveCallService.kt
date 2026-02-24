@@ -110,7 +110,6 @@ class ActiveCallService : Service() {
 
         val info = ActiveCallInfo(roomId, displayName, userId, callType, password)
         activeCallInfo = info
-        _isCallActive.value = true
 
         // Start foreground with notification
         val notification = NotificationHelper.buildActiveCallNotification(
@@ -131,6 +130,11 @@ class ActiveCallService : Service() {
         val manager = WebRTCManager(applicationContext, callApiService, serviceScope)
         webRTCManager = manager
         manager.setup(roomId, userId, displayName, password)
+
+        // Signal readiness AFTER webRTCManager is assigned — callers using
+        // Dispatchers.Main.immediate will resume inline on this emission,
+        // so the manager must already be set.
+        _isCallActive.value = true
 
         Log.d(TAG, "Call started: room=$roomId, user=$userId")
     }

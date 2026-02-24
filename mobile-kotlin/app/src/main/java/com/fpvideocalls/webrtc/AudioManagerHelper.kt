@@ -5,10 +5,8 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
-import android.media.Ringtone
 import android.media.RingtoneManager
 import android.media.ToneGenerator
-import android.os.Build
 import android.provider.Settings
 import android.util.Log
 
@@ -19,7 +17,6 @@ class AudioManagerHelper(private val context: Context) {
     }
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private var ringtone: Ringtone? = null
     private var mediaPlayer: MediaPlayer? = null
     private var toneGenerator: ToneGenerator? = null
     private var previousMode: Int = AudioManager.MODE_NORMAL
@@ -36,22 +33,23 @@ class AudioManagerHelper(private val context: Context) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                ringtone?.stop()
                 mediaPlayer?.let { if (it.isPlaying) it.pause() }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                ringtone?.play()
                 mediaPlayer?.let { if (!it.isPlaying) it.start() }
             }
         }
     }
 
-    fun requestAudioFocus(usage: Int = AudioAttributes.USAGE_NOTIFICATION_RINGTONE): Boolean {
+    fun requestAudioFocus(
+        usage: Int = AudioAttributes.USAGE_NOTIFICATION_RINGTONE,
+        focusGain: Int = AudioManager.AUDIOFOCUS_GAIN
+    ): Boolean {
         val attrs = AudioAttributes.Builder()
             .setUsage(usage)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        val request = AudioFocusRequest.Builder(focusGain)
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener(focusChangeListener)
             .build()
@@ -103,35 +101,8 @@ class AudioManagerHelper(private val context: Context) {
                 return
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val r = RingtoneManager.getRingtone(context, uri)
-                if (r != null) {
-                    r.audioAttributes = ringtoneAudioAttributes
-                    r.isLooping = true
-                    r.play()
-                    ringtone = r
-                    Log.d(TAG, "Ringtone playing=${r.isPlaying} (API 28+)")
-                    // If Ringtone didn't actually play, try MediaPlayer
-                    if (!r.isPlaying) {
-                        Log.w(TAG, "Ringtone.play() didn't start, trying MediaPlayer")
-                        ringtone = null
-                        startMediaPlayerFallback(uri)
-                    }
-                } else {
-                    Log.w(TAG, "getRingtone returned null, trying MediaPlayer")
-                    startMediaPlayerFallback(uri)
-                }
-            } else {
-                startMediaPlayerFallback(uri)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start ringtone", e)
-        }
-    }
-
-    private fun startMediaPlayerFallback(uri: android.net.Uri) {
-        try {
-            Log.d(TAG, "Starting MediaPlayer fallback")
+            // Use MediaPlayer for reliable looping — Ringtone API's isLooping
+            // is unreliable on many devices/emulators and silently plays once.
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(context, uri)
                 setAudioAttributes(ringtoneAudioAttributes)
@@ -139,20 +110,13 @@ class AudioManagerHelper(private val context: Context) {
                 prepare()
                 start()
             }
-            Log.d(TAG, "MediaPlayer started, isPlaying=${mediaPlayer?.isPlaying}")
+            Log.d(TAG, "MediaPlayer ringtone started, isPlaying=${mediaPlayer?.isPlaying}")
         } catch (e: Exception) {
-            Log.e(TAG, "MediaPlayer fallback failed", e)
+            Log.e(TAG, "Failed to start ringtone", e)
         }
     }
 
     private fun stopPlayback() {
-        try {
-            ringtone?.let { if (it.isPlaying) it.stop() }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error stopping ringtone", e)
-        }
-        ringtone = null
-
         try {
             mediaPlayer?.apply {
                 if (isPlaying) stop()

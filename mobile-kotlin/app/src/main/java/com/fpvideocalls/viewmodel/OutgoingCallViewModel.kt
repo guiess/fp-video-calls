@@ -6,16 +6,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.data.CallApiService
 import com.fpvideocalls.model.Contact
-import com.fpvideocalls.model.JoinOptions
-import com.fpvideocalls.model.SignalingHandlers
 import com.fpvideocalls.model.User
-import com.fpvideocalls.service.SignalingService
-import com.fpvideocalls.util.Constants
+import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.webrtc.AudioManagerHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -35,6 +33,10 @@ class OutgoingCallViewModel @Inject constructor(
     private val callApiService: CallApiService
 ) : AndroidViewModel(application) {
 
+    companion object {
+        private const val TAG = "OutgoingCallVM"
+    }
+
     private val _status = MutableStateFlow(OutgoingCallStatus.SETTING_UP)
     val status: StateFlow<OutgoingCallStatus> = _status.asStateFlow()
 
@@ -45,7 +47,6 @@ class OutgoingCallViewModel @Inject constructor(
     private var cancelled = false
     private var roomId: String? = null
     private var password: String? = null
-    private var signalingService: SignalingService? = null
 
     fun initCall(user: User, contacts: List<Contact>, callType: String) {
         cancelled = false
@@ -74,34 +75,41 @@ class OutgoingCallViewModel @Inject constructor(
                 )
                 if (cancelled) return@launch
 
-                // Join the signaling room to listen for the recipient
-                val signaling = SignalingService(Constants.SIGNALING_URL)
-                signalingService = signaling
-
-                signaling.init(SignalingHandlers(
-                    onSignalingStateChange = { /* ignore */ },
-                    onUserJoined = { _, _, _ ->
-                        // Recipient answered! Navigate to InCall.
-                        Log.d("OutgoingCallVM", "Recipient joined, navigating to InCall")
-                        audioHelper.stopRingback()
-                        _result.value = OutgoingCallResult(room.roomId, pw)
-                        // Disconnect this lightweight signaling; InCall creates its own
-                        disconnectSignaling()
-                    },
-                    onError = { code, msg ->
-                        Log.w("OutgoingCallVM", "Signaling error: $code $msg")
-                    }
-                ))
-
-                signaling.join(JoinOptions(
+                // Start the real call (ActiveCallService + WebRTCManager)
+                // immediately so there is only ONE signaling socket per user.
+                // The previous approach used a lightweight socket here that
+                // caused a user_left→user_joined cycle when handing off to
+                // the WebRTCManager, breaking the callee's peer connections.
+                Log.d(TAG, "Starting ActiveCallService for room=${room.roomId}")
+                ActiveCallService.startCall(
+                    context = getApplication(),
                     roomId = room.roomId,
-                    userId = user.uid,
                     displayName = user.displayName,
-                    password = pw,
-                    quality = "720p"
-                ))
+                    userId = user.uid,
+                    callType = callType,
+                    password = pw
+                )
+
+                // Wait for ActiveCallService to initialise the WebRTCManager
+                Log.d(TAG, "Waiting for isCallActive (current=${ActiveCallService.isCallActive.value})")
+                ActiveCallService.isCallActive.first { it }
+                Log.d(TAG, "isCallActive=true, webRTCManager=${ActiveCallService.webRTCManager != null}")
+                val manager = ActiveCallService.webRTCManager
+                if (manager == null || cancelled) {
+                    Log.w(TAG, "Aborting: manager=$manager cancelled=$cancelled")
+                    return@launch
+                }
+
+                // Wait for a remote participant to join (callee answered)
+                Log.d(TAG, "Waiting for participants (current=${manager.participants.value.size})")
+                manager.participants.first { it.isNotEmpty() }
+                if (cancelled) return@launch
+
+                Log.d(TAG, "Recipient joined, navigating to InCall")
+                audioHelper.stopRingback()
+                _result.value = OutgoingCallResult(room.roomId, pw)
             } catch (e: Exception) {
-                Log.e("OutgoingCallVM", "initCall failed", e)
+                Log.e(TAG, "initCall failed", e)
                 if (!cancelled) _status.value = OutgoingCallStatus.ERROR
             }
         }
@@ -110,21 +118,16 @@ class OutgoingCallViewModel @Inject constructor(
     fun cancel(contacts: List<Contact>) {
         cancelled = true
         audioHelper.stopRingback()
-        disconnectSignaling()
+        ActiveCallService.endCall(getApplication())
         val rid = roomId ?: return
         viewModelScope.launch {
             callApiService.cancelCall(contacts.map { it.uid }, rid)
         }
     }
 
-    private fun disconnectSignaling() {
-        signalingService?.leave()
-        signalingService = null
-    }
-
     override fun onCleared() {
         super.onCleared()
-        disconnectSignaling()
         audioHelper.release()
+        // Don't end the active call — InCallScreen takes over
     }
 }

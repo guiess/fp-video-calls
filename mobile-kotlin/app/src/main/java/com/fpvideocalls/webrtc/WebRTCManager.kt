@@ -68,6 +68,7 @@ class WebRTCManager(
 
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
         localUserId = userId
+        Log.d(TAG, "setup() called: room=$roomId user=$userId")
         scope.launch(Dispatchers.Main) {
             try {
                 initWebRTC()
@@ -89,6 +90,7 @@ class WebRTCManager(
 
                 signaling.init(SignalingHandlers(
                     onSignalingStateChange = { state ->
+                        Log.d(TAG, "Signaling state: $state")
                         _signalingState.value = when (state) {
                             "connected" -> "connected"
                             "reconnecting" -> "connecting"
@@ -96,6 +98,7 @@ class WebRTCManager(
                         }
                     },
                     onRoomJoined = { existingParticipants, _ ->
+                        Log.d(TAG, "room_joined: ${existingParticipants.size} participants: ${existingParticipants.map { it.userId }}")
                         _participants.value = existingParticipants.filter { it.userId != userId }
                         _signalingState.value = "connected"
                         // Create peer connections and send offers following the convention:
@@ -105,6 +108,7 @@ class WebRTCManager(
                             // Always create the peer connection so we can receive offers
                             createPeerConnection(p.userId)
                             val shouldOffer = userId < p.userId
+                            Log.d(TAG, "Peer ${p.userId}: shouldOffer=$shouldOffer (me=$userId)")
                             if (shouldOffer) {
                                 scope.launch(Dispatchers.Main) {
                                     createAndSendOffer(p.userId, signaling)
@@ -113,6 +117,7 @@ class WebRTCManager(
                         }
                     },
                     onUserJoined = { joinedId, joinedName, micMutedState ->
+                        Log.d(TAG, "user_joined: $joinedId ($joinedName)")
                         _participants.value = _participants.value
                             .filter { it.userId != joinedId } +
                             Participant(joinedId, joinedName, micMutedState)
@@ -120,6 +125,7 @@ class WebRTCManager(
                         // the canonical offerer (lower userId), matching web client.
                         createPeerConnection(joinedId)
                         val shouldOffer = userId < joinedId
+                        Log.d(TAG, "user_joined peer $joinedId: shouldOffer=$shouldOffer")
                         if (shouldOffer) {
                             scope.launch(Dispatchers.Main) {
                                 createAndSendOffer(joinedId, signaling)
@@ -127,6 +133,7 @@ class WebRTCManager(
                         }
                     },
                     onUserLeft = { leftId ->
+                        Log.d(TAG, "user_left: $leftId")
                         _participants.value = _participants.value.filter { it.userId != leftId }
                         _remoteVideoTracks.value = _remoteVideoTracks.value - leftId
                         peerConnections[leftId]?.let { pc ->
@@ -240,10 +247,16 @@ class WebRTCManager(
         }
 
         val observer = object : PeerConnection.Observer {
-            override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
+            override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+                Log.d(TAG, "Peer $targetId signaling: $state")
+            }
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                Log.d(TAG, "Peer $targetId ICE connection: $state")
+            }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+                Log.d(TAG, "Peer $targetId ICE gathering: $state")
+            }
 
             override fun onIceCandidate(candidate: IceCandidate?) {
                 candidate ?: return
@@ -298,10 +311,12 @@ class WebRTCManager(
             put("type", offer.type.canonicalForm())
             put("sdp", offer.description)
         }
+        Log.d(TAG, "Sending offer to $targetId")
         signaling.sendOffer(targetId, offerJson)
     }
 
     private suspend fun handleOffer(fromId: String, offerData: Any, signaling: SignalingService) {
+        Log.d(TAG, "Received offer from $fromId")
         val offerJson = offerData as? JSONObject ?: return
         val pc = createPeerConnection(fromId)
 
@@ -343,10 +358,12 @@ class WebRTCManager(
             put("type", answer.type.canonicalForm())
             put("sdp", answer.description)
         }
+        Log.d(TAG, "Sending answer to $fromId")
         signaling.sendAnswer(fromId, answerJson)
     }
 
     private suspend fun handleAnswer(fromId: String, answerData: Any) {
+        Log.d(TAG, "Received answer from $fromId")
         val answerJson = answerData as? JSONObject ?: return
         val pc = peerConnections[fromId] ?: return
 

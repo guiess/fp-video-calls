@@ -25,6 +25,10 @@ data class TurnCredentials(
 class CallApiService @Inject constructor(
     private val client: OkHttpClient
 ) {
+    companion object {
+        private const val TAG = "CallApiService"
+    }
+
     private val baseUrl = Constants.SIGNALING_URL
     private val json = "application/json; charset=utf-8".toMediaType()
 
@@ -35,6 +39,7 @@ class CallApiService @Inject constructor(
                 put("password", password)
             }
         }
+        android.util.Log.d(TAG, "POST /room -> $baseUrl/room (password=${password != null})")
         val request = Request.Builder()
             .url("$baseUrl/room")
             .post(body.toString().toRequestBody(json))
@@ -42,7 +47,9 @@ class CallApiService @Inject constructor(
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) throw Exception("Room creation failed: ${response.code}")
         val result = JSONObject(response.body!!.string())
-        RoomCreateResult(roomId = result.getString("roomId"))
+        val roomId = result.getString("roomId")
+        android.util.Log.d(TAG, "Room created: $roomId")
+        RoomCreateResult(roomId = roomId)
     }
 
     suspend fun getTurnCredentials(userId: String, roomId: String): TurnCredentials? = withContext(Dispatchers.IO) {
