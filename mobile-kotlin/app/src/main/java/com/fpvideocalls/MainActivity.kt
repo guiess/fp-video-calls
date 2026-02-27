@@ -1,9 +1,9 @@
 package com.fpvideocalls
 
+import android.app.KeyguardManager
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.res.Configuration
-import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import androidx.activity.ComponentActivity
@@ -18,6 +18,9 @@ import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.ui.navigation.AppNavigation
 import com.fpvideocalls.ui.theme.FPVideoCallsTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 val LocalActivity = staticCompositionLocalOf<ComponentActivity> {
     error("No Activity provided")
@@ -30,10 +33,28 @@ class MainActivity : ComponentActivity() {
     private var _isInPipMode by mutableStateOf(false)
     val isInPipMode: Boolean get() = _isInPipMode
 
+    /** True when the call was answered from the lock screen */
+    var answeredFromLockScreen = false
+        private set
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         currentIntent = intent
+        checkLockScreenAnswer(intent)
         enableEdgeToEdge()
+        // Clear missed call notification when user opens the app
+        com.fpvideocalls.service.NotificationHelper.cancelMissedCallNotification(this)
+
+        // Watch for call ending — if answered from lock screen, return to lock
+        CoroutineScope(Dispatchers.Main).launch {
+            ActiveCallService.isCallActive.collect { active ->
+                if (!active && answeredFromLockScreen) {
+                    answeredFromLockScreen = false
+                    finishAndRemoveTask()
+                }
+            }
+        }
+
         setContent {
             CompositionLocalProvider(LocalActivity provides this) {
                 FPVideoCallsTheme {
@@ -47,6 +68,20 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         currentIntent = intent
+        checkLockScreenAnswer(intent)
+        // Clear missed call notification when returning via notification tap
+        if (intent.getBooleanExtra("clearMissedCall", false)) {
+            com.fpvideocalls.service.NotificationHelper.cancelMissedCallNotification(this)
+        }
+    }
+
+    private fun checkLockScreenAnswer(intent: Intent?) {
+        if (intent?.action == "ANSWER") {
+            val km = getSystemService(KeyguardManager::class.java)
+            if (km.isKeyguardLocked) {
+                answeredFromLockScreen = true
+            }
+        }
     }
 
     override fun onUserLeaveHint() {

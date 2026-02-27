@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import com.fpvideocalls.MainActivity
 import com.fpvideocalls.util.Constants
 
@@ -49,8 +51,17 @@ object NotificationHelper {
             enableVibration(false)
         }
 
+        val missedChannel = NotificationChannel(
+            Constants.MISSED_CALL_CHANNEL_ID,
+            "Missed Calls",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Missed call notifications"
+        }
+
         manager.createNotificationChannel(channel)
         manager.createNotificationChannel(activeChannel)
+        manager.createNotificationChannel(missedChannel)
     }
 
     fun buildRingingNotification(
@@ -107,10 +118,8 @@ object NotificationHelper {
 
         val callTypeLabel = if (callType == "group") "Group call" else "Video call"
 
-        return NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Incoming Call")
-            .setContentText("$callerName - $callTypeLabel")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
@@ -120,9 +129,21 @@ object NotificationHelper {
             .setSilent(true)
             .setContentIntent(fullScreenPendingIntent)
             .setFullScreenIntent(fullScreenPendingIntent, true)
-            .addAction(android.R.drawable.ic_menu_call, "Answer", answerPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePendingIntent)
-            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val caller = Person.Builder().setName(callerName).setImportant(true).build()
+            builder.setStyle(
+                NotificationCompat.CallStyle.forIncomingCall(caller, declinePendingIntent, answerPendingIntent)
+            )
+            builder.setContentText(callTypeLabel)
+        } else {
+            builder.setContentTitle("$callerName is calling")
+                .setContentText(callTypeLabel)
+                .addAction(android.R.drawable.ic_menu_call, "Answer", answerPendingIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePendingIntent)
+        }
+
+        return builder.build()
     }
 
     fun showCallNotification(
@@ -169,15 +190,54 @@ object NotificationHelper {
 
         val callTypeLabel = if (callType == "group") "Group call" else "Video call"
 
-        return NotificationCompat.Builder(context, Constants.ACTIVE_CALL_CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, Constants.ACTIVE_CALL_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("$callTypeLabel in progress")
-            .setContentText(callerName)
             .setOngoing(true)
             .setAutoCancel(false)
             .setContentIntent(openPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangUpPendingIntent)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val person = Person.Builder().setName(callerName).setImportant(true).build()
+            builder.setStyle(
+                NotificationCompat.CallStyle.forOngoingCall(person, hangUpPendingIntent)
+            )
+            builder.setContentText(callTypeLabel)
+        } else {
+            builder.setContentTitle("$callTypeLabel with $callerName")
+                .setContentText("Tap to return to call")
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangUpPendingIntent)
+        }
+
+        return builder.build()
+    }
+
+    fun showMissedCallNotification(context: Context, callerName: String, callType: String) {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("clearMissedCall", true)
+        }
+        val openPendingIntent = PendingIntent.getActivity(
+            context, Constants.MISSED_CALL_NOTIFICATION_ID, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val callTypeLabel = if (callType == "group") "group call" else "video call"
+        val notification = NotificationCompat.Builder(context, Constants.MISSED_CALL_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setContentTitle("Missed call from $callerName")
+            .setContentText("Missed $callTypeLabel")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(openPendingIntent)
             .build()
+
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.notify(Constants.MISSED_CALL_NOTIFICATION_ID, notification)
+    }
+
+    fun cancelMissedCallNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(Constants.MISSED_CALL_NOTIFICATION_ID)
     }
 
     fun cancelActiveCallNotification(context: Context) {
@@ -188,5 +248,13 @@ object NotificationHelper {
     fun cancelNotification(context: Context, callUUID: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(callUUID.hashCode())
+    }
+
+    /** Cancel all call-related notifications (ringing, active, per-UUID). */
+    fun cancelAllCallNotifications(context: Context, callUUID: String? = null) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(Constants.ACTIVE_CALL_NOTIFICATION_ID)
+        manager.cancel(Constants.RINGING_SERVICE_NOTIFICATION_ID)
+        callUUID?.let { manager.cancel(it.hashCode()) }
     }
 }

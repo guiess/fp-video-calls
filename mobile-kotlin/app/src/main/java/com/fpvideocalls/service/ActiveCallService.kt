@@ -146,12 +146,15 @@ class ActiveCallService : Service() {
     }
 
     private fun cleanupCall() {
+        val callUUID = CallStateManager.activeCallUUID
+        CallStateManager.endCall()
         webRTCManager?.cleanup()
         webRTCManager = null
         audioHelper?.release()
         audioHelper = null
         activeCallInfo = null
         _isCallActive.value = false
+        NotificationHelper.cancelAllCallNotifications(this, callUUID)
         Log.d(TAG, "Call ended and cleaned up")
     }
 

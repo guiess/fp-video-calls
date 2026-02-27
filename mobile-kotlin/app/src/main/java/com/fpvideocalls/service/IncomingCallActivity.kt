@@ -85,6 +85,7 @@ class IncomingCallActivity : ComponentActivity() {
                         Log.d(TAG, "Call answered")
                         CallEventBus.post(CallEvent.Answer(callData))
                         stopService(Intent(this, CallRingingService::class.java))
+                        NotificationHelper.cancelNotification(this, callData.callUUID)
 
                         // Launch MainActivity with answer action
                         val launchIntent = Intent(this, MainActivity::class.java).apply {

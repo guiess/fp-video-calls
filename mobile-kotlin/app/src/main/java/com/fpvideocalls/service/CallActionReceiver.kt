@@ -26,8 +26,9 @@ class CallActionReceiver : BroadcastReceiver() {
                 val callData = extractCallData(intent)
                 CallEventBus.post(CallEvent.Answer(callData))
 
-                // Stop ringing service
+                // Stop ringing service and cancel ringing notification
                 context.stopService(Intent(context, CallRingingService::class.java))
+                NotificationHelper.cancelNotification(context, callData.callUUID)
 
                 // Launch MainActivity with answer action
                 val launchIntent = Intent(context, MainActivity::class.java).apply {

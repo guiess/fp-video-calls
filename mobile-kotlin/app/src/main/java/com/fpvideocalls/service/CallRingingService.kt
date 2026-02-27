@@ -134,7 +134,7 @@ class CallRingingService : Service() {
             startForeground(
                 Constants.RINGING_SERVICE_NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
             )
         } else {
             startForeground(Constants.RINGING_SERVICE_NOTIFICATION_ID, notification)
@@ -220,6 +220,8 @@ class CallRingingService : Service() {
             wakeLock?.let { if (it.isHeld) it.release() }
         } catch (_: Exception) {}
         wakeLock = null
+        // Cancel the per-UUID ringing notification
+        currentCallUUID?.let { NotificationHelper.cancelNotification(this, it) }
         Log.d(TAG, "Ringing stopped")
     }
 

@@ -23,6 +23,8 @@ class FcmService : FirebaseMessagingService() {
         when (data["type"]) {
             "call_invite" -> {
                 val callUUID = data["callUUID"] ?: ""
+                val timestamp = data["timestamp"]?.toLongOrNull() ?: System.currentTimeMillis()
+
                 if (IncomingCallState.isCancelledRecently(callUUID)) {
                     Log.d(TAG, "Ignoring stale invite for cancelled callUUID=$callUUID")
                     return
@@ -37,24 +39,43 @@ class FcmService : FirebaseMessagingService() {
                     roomPassword = data["roomPassword"]?.takeIf { it.isNotEmpty() }
                 )
 
+                // Gate through CallStateManager: reject if busy or duplicate
+                if (!CallStateManager.startIncoming(callData, timestamp)) {
+                    Log.d(TAG, "Call rejected by CallStateManager (busy or duplicate): $callUUID")
+                    return
+                }
+
                 // Post to event bus for foreground ViewModel
                 CallEventBus.post(CallEvent.Invite(callData))
 
                 // Create notification channel
                 NotificationHelper.createCallChannel(applicationContext)
 
-                // Start foreground ringing service (handles notification, ringtone, vibration)
+                // Start foreground ringing service (handles notification, ringtone, vibration).
+                // The ringing notification has a fullScreenIntent that launches
+                // IncomingCallActivity — on locked devices the system auto-launches it;
+                // on unlocked devices it shows as a heads-up notification.
                 CallRingingService.start(applicationContext, callData)
 
-                // Launch fullscreen incoming call activity directly from FCM handler
-                // (FCM gives a 10-second exemption from background activity start restrictions)
-                launchIncomingCallActivity(callData)
+                // Also attempt a direct Activity launch for older Android versions
+                // where the fullscreen intent may not auto-launch reliably.
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                    launchIncomingCallActivity(callData)
+                }
             }
             "call_cancel" -> {
-                val callUUID = data["callUUID"] ?: ""
+                var callUUID = data["callUUID"] ?: ""
                 val roomId = data["roomId"] ?: ""
+                // Resolve empty callUUID from roomId
+                if (callUUID.isEmpty() && roomId.isNotEmpty()) {
+                    callUUID = CallStateManager.findCallUUIDByRoomId(roomId) ?: ""
+                }
                 Log.d(TAG, "Call cancelled: uuid=$callUUID, roomId=$roomId")
                 IncomingCallState.markCancelled(callUUID)
+
+                // Update CallStateManager — may trigger missed call
+                val record = CallStateManager.cancelCall(callUUID)
+
                 CallEventBus.post(CallEvent.Cancel(callUUID, roomId))
                 if (callUUID.isNotEmpty()) {
                     NotificationHelper.cancelNotification(applicationContext, callUUID)
@@ -62,6 +83,15 @@ class FcmService : FirebaseMessagingService() {
                 stopService(Intent(applicationContext, CallRingingService::class.java))
                 // Directly dismiss the incoming call overlay (event bus may miss it)
                 IncomingCallActivity.finishIfActive()
+
+                // Show missed call notification if caller cancelled before answer
+                if (record != null && record.status == com.fpvideocalls.model.CallRecordStatus.MISSED) {
+                    NotificationHelper.showMissedCallNotification(
+                        applicationContext,
+                        record.callerName,
+                        record.callType
+                    )
+                }
             }
         }
     }

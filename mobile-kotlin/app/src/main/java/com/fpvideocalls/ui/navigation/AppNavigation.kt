@@ -2,6 +2,7 @@ package com.fpvideocalls.ui.navigation
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -10,7 +11,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -29,6 +32,7 @@ import com.fpvideocalls.viewmodel.AuthViewModel
 import com.fpvideocalls.viewmodel.CallNavigationEvent
 import com.fpvideocalls.viewmodel.CallViewModel
 import com.fpvideocalls.viewmodel.GroupsViewModel
+import kotlinx.coroutines.delay
 
 // Shared state for passing contacts between screens
 private val pendingContacts = mutableListOf<Contact>()
@@ -141,7 +145,44 @@ fun AppNavigation(
 
     val startDestination = if (user != null) Routes.MAIN else Routes.SIGN_IN
 
-    NavHost(navController = navController, startDestination = startDestination) {
+    // Track active call for the return-to-call banner
+    val isCallActive by ActiveCallService.isCallActive.collectAsState()
+    val currentBackStack by navController.currentBackStackEntryAsState()
+    val currentRoute = currentBackStack?.destination?.route
+    val isOnCallScreen = currentRoute?.startsWith("in_call/") == true
+            || currentRoute?.startsWith("outgoing_call/") == true
+            || currentRoute == Routes.INCOMING_CALL
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Return-to-call banner
+        if (isCallActive && !isOnCallScreen) {
+            ActiveCallBanner(
+                onClick = {
+                    // Check if outgoing call screen is in the back stack (still ringing)
+                    val hasOutgoing = navController.currentBackStack.value.any {
+                        it.destination.route?.startsWith("outgoing_call/") == true
+                    }
+                    if (hasOutgoing) {
+                        // Pop back to the outgoing call screen
+                        navController.popBackStack("outgoing_call/{callType}", inclusive = false)
+                    } else {
+                        val callInfo = ActiveCallService.activeCallInfo ?: return@ActiveCallBanner
+                        navController.navigate(
+                            Routes.inCall(callInfo.roomId, callInfo.displayName, callInfo.userId, callInfo.callType, callInfo.password)
+                        ) {
+                            popUpTo(Routes.MAIN) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            )
+        }
+
+        NavHost(
+            navController = navController,
+            startDestination = startDestination,
+            modifier = Modifier.weight(1f)
+        ) {
         // Auth screens
         composable(Routes.SIGN_IN) {
             SignInScreen(
@@ -273,6 +314,7 @@ fun AppNavigation(
             )
         }
     }
+    } // Column
 }
 
 @Composable
@@ -390,5 +432,43 @@ fun MainScreen(navController: NavHostController) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ActiveCallBanner(onClick: () -> Unit) {
+    var elapsedSeconds by remember { mutableLongStateOf(0L) }
+    val startTime = remember { System.currentTimeMillis() }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
+            delay(1000)
+        }
+    }
+
+    val minutes = elapsedSeconds / 60
+    val seconds = elapsedSeconds % 60
+    val timeText = String.format("%d:%02d", minutes, seconds)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SuccessGreen)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text("🟢", fontSize = 10.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "Tap to return to call",
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(timeText, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
     }
 }

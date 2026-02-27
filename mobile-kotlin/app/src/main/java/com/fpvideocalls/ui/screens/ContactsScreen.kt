@@ -33,6 +33,45 @@ fun ContactsScreen(
     authViewModel: AuthViewModel = hiltViewModel(),
     contactsViewModel: ContactsViewModel = hiltViewModel()
 ) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Background)) {
+        TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = Surface,
+            contentColor = Purple
+        ) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text("Contacts", color = if (selectedTab == 0) Purple else TextTertiary) }
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("History", color = if (selectedTab == 1) Purple else TextTertiary) }
+            )
+        }
+
+        when (selectedTab) {
+            0 -> ContactsContent(
+                onCallContact = onCallContact,
+                onGroupCall = onGroupCall,
+                authViewModel = authViewModel,
+                contactsViewModel = contactsViewModel
+            )
+            1 -> CallHistoryScreen()
+        }
+    }
+}
+
+@Composable
+private fun ContactsContent(
+    onCallContact: (Contact) -> Unit,
+    onGroupCall: () -> Unit,
+    authViewModel: AuthViewModel,
+    contactsViewModel: ContactsViewModel
+) {
     val user by authViewModel.user.collectAsState()
     val contacts by contactsViewModel.contacts.collectAsState()
     val searchResults by contactsViewModel.searchResults.collectAsState()

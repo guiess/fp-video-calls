@@ -8,6 +8,7 @@ import com.fpvideocalls.data.CallApiService
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.User
 import com.fpvideocalls.service.ActiveCallService
+import com.fpvideocalls.service.CallStateManager
 import com.fpvideocalls.webrtc.AudioManagerHelper
 import com.fpvideocalls.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,6 +53,7 @@ class OutgoingCallViewModel @Inject constructor(
     private var lastUser: User? = null
     private var lastContacts: List<Contact>? = null
     private var lastCallType: String? = null
+    private var currentCallId: String? = null
 
     fun initCall(user: User, contacts: List<Contact>, callType: String) {
         cancelled = false
@@ -71,8 +73,8 @@ class OutgoingCallViewModel @Inject constructor(
                 roomId = room.roomId
                 _status.value = OutgoingCallStatus.CALLING
 
-                // Send invite
-                callApiService.sendCallInvite(
+                // Send invite — server generates the callUUID seen by callee
+                val callId = callApiService.sendCallInvite(
                     callerId = user.uid,
                     callerName = user.displayName,
                     callerPhoto = user.photoURL,
@@ -81,6 +83,20 @@ class OutgoingCallViewModel @Inject constructor(
                     callType = callType,
                     roomPassword = pw
                 )
+                currentCallId = callId
+                if (cancelled) return@launch
+
+                // Register outgoing call in state manager using the server's callUUID
+                CallStateManager.startOutgoing(
+                    callId = callId,
+                    callerUid = user.uid,
+                    callerName = user.displayName,
+                    callerPhoto = user.photoURL,
+                    calleeUids = contacts.map { it.uid },
+                    callType = callType,
+                    roomId = room.roomId
+                )
+
                 if (cancelled) return@launch
 
                 // Start the real call (ActiveCallService + WebRTCManager)
@@ -118,13 +134,24 @@ class OutgoingCallViewModel @Inject constructor(
                 if (joined == null) {
                     Log.d(TAG, "Outgoing call timed out after ${Constants.OUTGOING_CALL_TIMEOUT_MS}ms")
                     audioHelper.stopRingback()
+                    CallStateManager.endCall()
                     ActiveCallService.endCall(getApplication())
+                    // Notify callee(s) so they stop ringing and see a missed call
+                    val rid = roomId
+                    if (rid != null) {
+                        callApiService.cancelCall(
+                            contacts.map { it.uid },
+                            rid,
+                            callUUID = callId
+                        )
+                    }
                     _status.value = OutgoingCallStatus.TIMED_OUT
                     return@launch
                 }
 
                 Log.d(TAG, "Recipient joined, navigating to InCall")
                 audioHelper.stopRingback()
+                CallStateManager.answerCall(callId)
                 _result.value = OutgoingCallResult(room.roomId, pw)
             } catch (e: Exception) {
                 Log.e(TAG, "initCall failed", e)
@@ -145,10 +172,12 @@ class OutgoingCallViewModel @Inject constructor(
     fun cancel(contacts: List<Contact>) {
         cancelled = true
         audioHelper.stopRingback()
+        CallStateManager.endCall()
         ActiveCallService.endCall(getApplication())
         val rid = roomId ?: return
+        val cid = currentCallId
         viewModelScope.launch {
-            callApiService.cancelCall(contacts.map { it.uid }, rid)
+            callApiService.cancelCall(contacts.map { it.uid }, rid, callUUID = cid)
         }
     }
 
