@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.fpvideocalls.R
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.IncomingCallData
@@ -340,8 +342,8 @@ fun MainScreen(navController: NavHostController) {
                             launchSingleTop = true
                         }
                     },
-                    icon = { Icon(Icons.Default.Home, "Home") },
-                    label = { Text("Home") },
+                    icon = { Icon(Icons.Default.Home, stringResource(R.string.nav_home)) },
+                    label = { Text(stringResource(R.string.nav_home)) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Purple,
                         selectedTextColor = Purple,
@@ -358,8 +360,8 @@ fun MainScreen(navController: NavHostController) {
                             launchSingleTop = true
                         }
                     },
-                    icon = { Icon(Icons.Default.Contacts, "Contacts") },
-                    label = { Text("Contacts") },
+                    icon = { Icon(Icons.Default.Contacts, stringResource(R.string.nav_contacts)) },
+                    label = { Text(stringResource(R.string.nav_contacts)) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Purple,
                         selectedTextColor = Purple,
@@ -376,8 +378,8 @@ fun MainScreen(navController: NavHostController) {
                             launchSingleTop = true
                         }
                     },
-                    icon = { Icon(Icons.Default.MeetingRoom, "Room") },
-                    label = { Text("Room") },
+                    icon = { Icon(Icons.Default.MeetingRoom, stringResource(R.string.nav_room)) },
+                    label = { Text(stringResource(R.string.nav_room)) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Purple,
                         selectedTextColor = Purple,
@@ -463,7 +465,7 @@ private fun ActiveCallBanner(onClick: () -> Unit) {
         Text("🟢", fontSize = 10.sp)
         Spacer(Modifier.width(8.dp))
         Text(
-            "Tap to return to call",
+            stringResource(R.string.tap_return_to_call),
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
             fontSize = 14.sp

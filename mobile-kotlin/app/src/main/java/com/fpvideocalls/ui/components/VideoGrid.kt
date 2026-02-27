@@ -17,8 +17,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fpvideocalls.R
 import com.fpvideocalls.model.Participant
 import com.fpvideocalls.ui.theme.SurfaceVariant
 import org.webrtc.EglBase
@@ -108,7 +110,7 @@ fun VideoGrid(
                             Modifier.fillMaxSize().background(SurfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.VideocamOff, "Camera off", tint = Color.Gray, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
                         }
                     }
                 }
@@ -133,7 +135,7 @@ fun VideoGrid(
                         }
                         if (!camEnabled) {
                             Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.VideocamOff, "Camera off", tint = Color.Gray, modifier = Modifier.size(32.dp))
+                                Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
                             }
                         }
                     }
@@ -153,7 +155,7 @@ fun VideoGrid(
                             }
                             if (!camEnabled) {
                                 Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.VideocamOff, "Camera off", tint = Color.Gray, modifier = Modifier.size(32.dp))
+                                    Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
                                 }
                             }
                             // Name label
@@ -164,7 +166,7 @@ fun VideoGrid(
                                     .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
-                                Text("You", color = Color.White, fontSize = 11.sp, maxLines = 1)
+                                Text(stringResource(R.string.you_label), color = Color.White, fontSize = 11.sp, maxLines = 1)
                             }
                         }
                     }

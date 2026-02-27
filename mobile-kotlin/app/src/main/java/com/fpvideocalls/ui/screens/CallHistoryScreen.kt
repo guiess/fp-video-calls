@@ -13,10 +13,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fpvideocalls.R
 import com.fpvideocalls.model.CallRecord
 import com.fpvideocalls.model.CallRecordStatus
 import com.fpvideocalls.ui.theme.*
@@ -40,13 +42,13 @@ fun CallHistoryScreen(
     ) {
         Spacer(Modifier.height(16.dp))
         Text(
-            "Call History",
+            stringResource(R.string.call_history_title),
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
             color = OnBackground
         )
         Spacer(Modifier.height(4.dp))
-        Text("Recent calls", color = TextSecondary, fontSize = 14.sp)
+        Text(stringResource(R.string.call_history_subtitle), color = TextSecondary, fontSize = 14.sp)
         Spacer(Modifier.height(16.dp))
 
         if (loading) {
@@ -58,7 +60,7 @@ fun CallHistoryScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("\uD83D\uDCDE", fontSize = 48.sp)
                     Spacer(Modifier.height(12.dp))
-                    Text("No calls yet", color = TextSecondary, fontSize = 16.sp)
+                    Text(stringResource(R.string.call_history_empty), color = TextSecondary, fontSize = 16.sp)
                 }
             }
         } else {
@@ -142,14 +144,15 @@ private fun statusIcon(record: CallRecord): String = when {
     else -> "\uD83D\uDCDE"                                      // 📞
 }
 
+@Composable
 private fun statusLabel(record: CallRecord): String = when (record.status) {
-    CallRecordStatus.MISSED -> "Missed"
-    CallRecordStatus.DECLINED -> "Declined"
-    CallRecordStatus.BUSY_REJECTED -> "Busy"
-    CallRecordStatus.ENDED -> if (record.direction == "outgoing") "Outgoing" else "Incoming"
-    CallRecordStatus.ACTIVE -> "Active"
-    CallRecordStatus.RINGING -> "Ringing"
-} + if (record.callType == "group") " · Group" else ""
+    CallRecordStatus.MISSED -> stringResource(R.string.status_missed)
+    CallRecordStatus.DECLINED -> stringResource(R.string.status_declined)
+    CallRecordStatus.BUSY_REJECTED -> stringResource(R.string.status_busy)
+    CallRecordStatus.ENDED -> if (record.direction == "outgoing") stringResource(R.string.status_outgoing) else stringResource(R.string.status_incoming)
+    CallRecordStatus.ACTIVE -> stringResource(R.string.status_active)
+    CallRecordStatus.RINGING -> stringResource(R.string.status_ringing)
+} + if (record.callType == "group") stringResource(R.string.status_group_suffix) else ""
 
 private fun formatTime(timestamp: Long): String {
     val now = System.currentTimeMillis()

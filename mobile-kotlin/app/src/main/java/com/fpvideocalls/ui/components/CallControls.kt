@@ -11,7 +11,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.fpvideocalls.R
 import com.fpvideocalls.ui.theme.ErrorRed
 
 @Composable
@@ -37,7 +39,7 @@ fun CallControls(
         // Mic
         ControlButton(
             icon = if (micMuted) Icons.Default.MicOff else Icons.Default.Mic,
-            contentDescription = if (micMuted) "Unmute" else "Mute",
+            contentDescription = if (micMuted) stringResource(R.string.cd_unmute) else stringResource(R.string.cd_mute),
             isActive = !micMuted,
             onClick = onToggleMic
         )
@@ -45,7 +47,7 @@ fun CallControls(
         // Camera
         ControlButton(
             icon = if (camEnabled) Icons.Default.Videocam else Icons.Default.VideocamOff,
-            contentDescription = if (camEnabled) "Disable camera" else "Enable camera",
+            contentDescription = if (camEnabled) stringResource(R.string.cd_disable_camera) else stringResource(R.string.cd_enable_camera),
             isActive = camEnabled,
             onClick = onToggleCam
         )
@@ -53,7 +55,7 @@ fun CallControls(
         // Speaker
         ControlButton(
             icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.HearingDisabled,
-            contentDescription = if (isSpeakerOn) "Earpiece" else "Speaker",
+            contentDescription = if (isSpeakerOn) stringResource(R.string.cd_earpiece) else stringResource(R.string.cd_speaker),
             isActive = isSpeakerOn,
             onClick = onToggleSpeaker
         )
@@ -65,13 +67,13 @@ fun CallControls(
                 .size(52.dp)
                 .background(ErrorRed, RoundedCornerShape(12.dp))
         ) {
-            Icon(Icons.Default.CallEnd, "End call", tint = Color.White)
+            Icon(Icons.Default.CallEnd, stringResource(R.string.cd_end_call), tint = Color.White)
         }
 
         // Switch camera
         ControlButton(
             icon = Icons.Default.Cameraswitch,
-            contentDescription = "Switch camera",
+            contentDescription = stringResource(R.string.cd_switch_camera),
             isActive = true,
             onClick = onSwitchCamera
         )

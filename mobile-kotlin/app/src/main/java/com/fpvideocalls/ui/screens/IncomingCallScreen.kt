@@ -10,10 +10,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fpvideocalls.R
 import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.service.CallRingingService
 import com.fpvideocalls.ui.theme.*
@@ -37,7 +39,7 @@ fun IncomingCallScreen(
     ) {
         Text("\uD83D\uDCDE", fontSize = 88.sp)
         Spacer(Modifier.height(8.dp))
-        Text("Incoming call", color = TextSecondary, fontSize = 14.sp, letterSpacing = 1.sp)
+        Text(stringResource(R.string.incoming_call), color = TextSecondary, fontSize = 14.sp, letterSpacing = 1.sp)
         Spacer(Modifier.height(12.dp))
         Text(
             callData.callerName,
@@ -48,7 +50,7 @@ fun IncomingCallScreen(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            if (callData.callType.value == "group") "Group call" else "Video call",
+            if (callData.callType.value == "group") stringResource(R.string.call_type_group) else stringResource(R.string.call_type_video),
             color = Purple,
             fontSize = 14.sp
         )
@@ -70,7 +72,7 @@ fun IncomingCallScreen(
                     Text("\uD83D\uDCF5", fontSize = 28.sp)
                 }
                 Spacer(Modifier.height(4.dp))
-                Text("Decline", color = OnBackground, fontSize = 12.sp)
+                Text(stringResource(R.string.decline), color = OnBackground, fontSize = 12.sp)
             }
 
             // Answer
@@ -91,7 +93,7 @@ fun IncomingCallScreen(
                     Text("\uD83D\uDCF2", fontSize = 28.sp)
                 }
                 Spacer(Modifier.height(4.dp))
-                Text("Answer", color = OnBackground, fontSize = 12.sp)
+                Text(stringResource(R.string.answer), color = OnBackground, fontSize = 12.sp)
             }
         }
     }

@@ -13,11 +13,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.fpvideocalls.R
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.ui.components.WebRTCVideoView
 import com.fpvideocalls.ui.theme.*
@@ -112,7 +114,7 @@ fun PreCallScreen(
             } else {
                 Icon(
                     Icons.Default.VideocamOff,
-                    contentDescription = "Camera off",
+                    contentDescription = stringResource(R.string.cd_camera_off),
                     tint = Color.Gray,
                     modifier = Modifier.size(48.dp)
                 )
@@ -127,7 +129,7 @@ fun PreCallScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                if (callType == "group") "Group call" else "Call",
+                if (callType == "group") stringResource(R.string.precall_group_call) else stringResource(R.string.precall_call),
                 color = TextSecondary,
                 fontSize = 14.sp
             )
@@ -149,7 +151,7 @@ fun PreCallScreen(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Cancel", color = TextSecondary, fontSize = 16.sp)
+                    Text(stringResource(R.string.cancel), color = TextSecondary, fontSize = 16.sp)
                 }
                 Button(
                     onClick = onStartCall,
@@ -157,7 +159,7 @@ fun PreCallScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Purple),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Call", fontSize = 16.sp)
+                    Text(stringResource(R.string.call_button), fontSize = 16.sp)
                 }
             }
             Spacer(Modifier.height(16.dp))

@@ -7,11 +7,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fpvideocalls.R
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
@@ -68,10 +70,10 @@ fun OutgoingCallScreen(
         Spacer(Modifier.height(16.dp))
         Text(
             when (status) {
-                OutgoingCallStatus.SETTING_UP -> "Connecting\u2026"
-                OutgoingCallStatus.CALLING -> "Calling\u2026"
-                OutgoingCallStatus.TIMED_OUT -> "No answer"
-                OutgoingCallStatus.ERROR -> "Call failed"
+                OutgoingCallStatus.SETTING_UP -> stringResource(R.string.connecting)
+                OutgoingCallStatus.CALLING -> stringResource(R.string.calling)
+                OutgoingCallStatus.TIMED_OUT -> stringResource(R.string.no_answer)
+                OutgoingCallStatus.ERROR -> stringResource(R.string.call_failed)
             },
             color = TextSecondary,
             fontSize = 15.sp
@@ -91,7 +93,7 @@ fun OutgoingCallScreen(
                 },
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Cancel", color = TextSecondary, fontSize = 16.sp)
+                Text(stringResource(R.string.cancel), color = TextSecondary, fontSize = 16.sp)
             }
         } else if (status == OutgoingCallStatus.TIMED_OUT) {
             Spacer(Modifier.height(16.dp))
@@ -100,14 +102,14 @@ fun OutgoingCallScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Purple)
             ) {
-                Text("Try Again", fontSize = 16.sp)
+                Text(stringResource(R.string.try_again), fontSize = 16.sp)
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = onBack,
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Close", color = TextSecondary, fontSize = 16.sp)
+                Text(stringResource(R.string.close), color = TextSecondary, fontSize = 16.sp)
             }
         } else {
             Spacer(Modifier.height(16.dp))
@@ -115,7 +117,7 @@ fun OutgoingCallScreen(
                 onClick = onBack,
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Close", color = TextSecondary, fontSize = 16.sp)
+                Text(stringResource(R.string.close), color = TextSecondary, fontSize = 16.sp)
             }
         }
     }

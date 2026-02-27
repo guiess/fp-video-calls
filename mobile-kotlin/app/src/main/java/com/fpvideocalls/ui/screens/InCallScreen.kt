@@ -10,11 +10,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.LocalActivity
 import com.fpvideocalls.MainActivity
+import com.fpvideocalls.R
 import com.fpvideocalls.service.ActiveCallService
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.fpvideocalls.ui.components.CallControls
@@ -94,7 +96,7 @@ fun InCallScreen(
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        if (signalingState == "connecting") "\u23F3 Connecting\u2026" else "\u26A0 Reconnecting\u2026",
+                        if (signalingState == "connecting") stringResource(R.string.incall_connecting) else stringResource(R.string.incall_reconnecting),
                         color = Color.White,
                         fontSize = 13.sp
                     )

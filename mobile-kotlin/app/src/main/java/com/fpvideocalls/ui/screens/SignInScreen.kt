@@ -9,12 +9,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.LocalActivity
+import com.fpvideocalls.R
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
 
@@ -55,14 +57,14 @@ fun SignInScreen(
         Text("\uD83D\uDCF9", fontSize = 72.sp)
         Spacer(Modifier.height(16.dp))
         Text(
-            "FP Video Calls",
+            stringResource(R.string.app_title),
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
             color = OnBackground
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Call family & friends",
+            stringResource(R.string.sign_in_subtitle),
             fontSize = 16.sp,
             color = TextSecondary
         )
@@ -85,7 +87,7 @@ fun SignInScreen(
                     strokeWidth = 2.dp
                 )
             } else {
-                Text("\uD83D\uDD35  Sign in with Google", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text(stringResource(R.string.sign_in_google), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
             }
         }
 
@@ -105,12 +107,12 @@ fun SignInScreen(
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("Continue as Guest", color = TextSecondary, fontSize = 15.sp)
+            Text(stringResource(R.string.continue_as_guest), color = TextSecondary, fontSize = 15.sp)
         }
 
         Spacer(Modifier.height(16.dp))
         Text(
-            "Guest mode: join any room by name \u2014 no account needed.",
+            stringResource(R.string.guest_mode_hint),
             color = TextTertiary,
             fontSize = 12.sp,
             textAlign = TextAlign.Center

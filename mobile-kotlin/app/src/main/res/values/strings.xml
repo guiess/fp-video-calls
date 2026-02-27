@@ -1,4 +1,143 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FP Video Calls</string>
+
+    <!-- Home Screen -->
+    <string name="home_greeting">Привет, %1$s 👋</string>
+    <string name="home_subtitle">Что бы вы хотели сделать?</string>
+    <string name="home_call_contact_title">Позвонить контакту</string>
+    <string name="home_call_contact_subtitle">Прямой или групповой звонок</string>
+    <string name="home_join_room_title">Присоединиться к комнате</string>
+    <string name="home_join_room_subtitle">Войти по имени комнаты — без регистрации</string>
+    <string name="home_new_group_call_title">Новый групповой звонок</string>
+    <string name="home_new_group_call_subtitle">Выберите контакты для группового звонка</string>
+    <string name="sign_out">Выйти</string>
+
+    <!-- Contacts Screen -->
+    <string name="contacts_tab">Контакты</string>
+    <string name="history_tab">История</string>
+    <string name="contacts_add">+ Добавить контакт</string>
+    <string name="group_call_button">Групповой звонок</string>
+    <string name="contacts_empty_title">Контактов пока нет</string>
+    <string name="contacts_empty_subtitle">Нажмите \"+ Добавить контакт\" чтобы найти людей</string>
+    <string name="remove_contact_title">Удалить контакт</string>
+    <string name="remove_contact_message">Удалить %1$s из ваших контактов?</string>
+    <string name="remove">Удалить</string>
+    <string name="cancel">Отмена</string>
+    <string name="add_contact_title">Добавить контакт</string>
+    <string name="search_by_name">Поиск по имени…</string>
+    <string name="searching">Поиск…</string>
+    <string name="add">Добавить</string>
+    <string name="no_users_found">Пользователи не найдены</string>
+
+    <!-- Call History Screen -->
+    <string name="call_history_title">История звонков</string>
+    <string name="call_history_subtitle">Последние звонки</string>
+    <string name="call_history_empty">Звонков пока нет</string>
+    <string name="status_missed">Пропущен</string>
+    <string name="status_declined">Отклонён</string>
+    <string name="status_busy">Занято</string>
+    <string name="status_outgoing">Исходящий</string>
+    <string name="status_incoming">Входящий</string>
+    <string name="status_active">Активный</string>
+    <string name="status_ringing">Вызов</string>
+    <string name="status_group_suffix">" · Группа"</string>
+
+    <!-- Sign In Screen -->
+    <string name="app_title">FP Video Calls</string>
+    <string name="sign_in_subtitle">Звоните семье и друзьям</string>
+    <string name="sign_in_google">🔵  Войти через Google</string>
+    <string name="continue_as_guest">Продолжить как гость</string>
+    <string name="guest_mode_hint">Гостевой режим: присоединяйтесь к любой комнате по имени — без аккаунта.</string>
+
+    <!-- Room Join Screen -->
+    <string name="join_room_title">Присоединиться к комнате</string>
+    <string name="join_room_subtitle">Введите имя комнаты для начала или присоединения к звонку</string>
+    <string name="display_name_placeholder">Ваше имя</string>
+    <string name="room_name_placeholder">Имя комнаты (напр. семья-воскресенье)</string>
+    <string name="join_room_button">Войти в комнату</string>
+    <string name="guest_default_name">Гость</string>
+
+    <!-- Group Call Setup Screen -->
+    <string name="save_group_title">Сохранить группу</string>
+    <string name="group_name_label">Название группы</string>
+    <string name="save">Сохранить</string>
+    <string name="back_arrow">← Назад</string>
+    <string name="new_group_call">Новый групповой звонок</string>
+    <string name="start_count">Начать (%1$d)</string>
+    <string name="select_contacts_count">Выберите контакты для приглашения (%1$d/%2$d)</string>
+    <string name="no_contacts_add_first">Контактов пока нет — сначала добавьте.</string>
+    <string name="saved_groups">Сохранённые группы</string>
+    <string name="members_count">%1$d участников</string>
+    <string name="recent_section">Недавние</string>
+    <string name="contacts_section">Контакты</string>
+
+    <!-- Outgoing Call Screen -->
+    <string name="connecting">Подключение…</string>
+    <string name="calling">Вызов…</string>
+    <string name="no_answer">Нет ответа</string>
+    <string name="call_failed">Звонок не удался</string>
+    <string name="try_again">Повторить</string>
+    <string name="close">Закрыть</string>
+
+    <!-- In Call Screen -->
+    <string name="incall_connecting">⏳ Подключение…</string>
+    <string name="incall_reconnecting">⚠ Переподключение…</string>
+
+    <!-- Pre Call Screen -->
+    <string name="precall_group_call">Групповой звонок</string>
+    <string name="precall_call">Звонок</string>
+    <string name="call_button">Позвонить</string>
+
+    <!-- Incoming Call -->
+    <string name="incoming_call">Входящий звонок</string>
+    <string name="incoming_group_call">Входящий групповой звонок</string>
+    <string name="incoming_video_call">Входящий видеозвонок</string>
+    <string name="decline">Отклонить</string>
+    <string name="answer">Ответить</string>
+    <string name="call_type_group">Групповой звонок</string>
+    <string name="call_type_video">Видеозвонок</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Главная</string>
+    <string name="nav_contacts">Контакты</string>
+    <string name="nav_room">Комната</string>
+    <string name="tap_return_to_call">Нажмите, чтобы вернуться к звонку</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_incoming">Входящие звонки</string>
+    <string name="notification_channel_incoming_desc">Уведомления о входящих видеозвонках</string>
+    <string name="notification_channel_active">Активные звонки</string>
+    <string name="notification_channel_active_desc">Уведомление текущего звонка</string>
+    <string name="notification_channel_missed">Пропущенные звонки</string>
+    <string name="notification_channel_missed_desc">Уведомления о пропущенных звонках</string>
+    <string name="notification_caller_calling">%1$s звонит</string>
+    <string name="notification_active_call_title">%1$s с %2$s</string>
+    <string name="notification_missed_call_title">Пропущенный звонок от %1$s</string>
+    <string name="notification_missed_call_text">Пропущенный %1$s</string>
+    <string name="hang_up">Завершить</string>
+
+    <!-- Call Controls -->
+    <string name="cd_unmute">Включить микрофон</string>
+    <string name="cd_mute">Выключить микрофон</string>
+    <string name="cd_disable_camera">Выключить камеру</string>
+    <string name="cd_enable_camera">Включить камеру</string>
+    <string name="cd_earpiece">Динамик телефона</string>
+    <string name="cd_speaker">Громкая связь</string>
+    <string name="cd_end_call">Завершить звонок</string>
+    <string name="cd_switch_camera">Переключить камеру</string>
+    <string name="cd_camera_off">Камера выключена</string>
+
+    <!-- Video Grid -->
+    <string name="you_label">Вы</string>
+
+    <!-- Content Descriptions -->
+    <string name="cd_close">Закрыть</string>
+    <string name="cd_call">Позвонить</string>
+    <string name="cd_remove">Удалить</string>
+    <string name="cd_back">Назад</string>
+    <string name="cd_save_group">Сохранить группу</string>
+    <string name="cd_delete_group">Удалить группу</string>
+    <string name="cd_remove_recent">Удалить недавнее</string>
+    <string name="cd_selected">Выбрано</string>
 </resources>

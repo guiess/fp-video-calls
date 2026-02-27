@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fpvideocalls.R
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
@@ -44,12 +46,12 @@ fun ContactsScreen(
             Tab(
                 selected = selectedTab == 0,
                 onClick = { selectedTab = 0 },
-                text = { Text("Contacts", color = if (selectedTab == 0) Purple else TextTertiary) }
+                text = { Text(stringResource(R.string.contacts_tab), color = if (selectedTab == 0) Purple else TextTertiary) }
             )
             Tab(
                 selected = selectedTab == 1,
                 onClick = { selectedTab = 1 },
-                text = { Text("History", color = if (selectedTab == 1) Purple else TextTertiary) }
+                text = { Text(stringResource(R.string.history_tab), color = if (selectedTab == 1) Purple else TextTertiary) }
             )
         }
 
@@ -96,7 +98,7 @@ private fun ContactsContent(
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Purple)
             ) {
-                Text("+ Add Contact", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.contacts_add), fontWeight = FontWeight.SemiBold)
             }
 
             if (contacts.size > 1) {
@@ -105,7 +107,7 @@ private fun ContactsContent(
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Purple)
                 ) {
-                    Text("Group Call", fontWeight = FontWeight.SemiBold, color = Purple)
+                    Text(stringResource(R.string.group_call_button), fontWeight = FontWeight.SemiBold, color = Purple)
                 }
             }
         }
@@ -118,9 +120,9 @@ private fun ContactsContent(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("\uD83D\uDC65", fontSize = 56.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("No contacts yet", color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.contacts_empty_title), color = OnBackground, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Tap \"+ Add Contact\" to find people", color = TextTertiary, fontSize = 14.sp)
+                    Text(stringResource(R.string.contacts_empty_subtitle), color = TextTertiary, fontSize = 14.sp)
                 }
             }
         } else {
@@ -140,19 +142,19 @@ private fun ContactsContent(
     showRemoveDialog?.let { contact ->
         AlertDialog(
             onDismissRequest = { showRemoveDialog = null },
-            title = { Text("Remove contact") },
-            text = { Text("Remove ${contact.displayName} from your contacts?") },
+            title = { Text(stringResource(R.string.remove_contact_title)) },
+            text = { Text(stringResource(R.string.remove_contact_message, contact.displayName)) },
             confirmButton = {
                 TextButton(onClick = {
                     contactsViewModel.removeContact(contact.uid)
                     showRemoveDialog = null
                 }) {
-                    Text("Remove", color = ErrorRed)
+                    Text(stringResource(R.string.remove), color = ErrorRed)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRemoveDialog = null }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -179,13 +181,13 @@ private fun ContactsContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Add Contact", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = OnBackground)
+                    Text(stringResource(R.string.add_contact_title), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = OnBackground)
                     IconButton(onClick = {
                         showSearch = false
                         searchQuery = ""
                         contactsViewModel.clearSearch()
                     }) {
-                        Icon(Icons.Default.Close, "Close", tint = TextSecondary)
+                        Icon(Icons.Default.Close, stringResource(R.string.cd_close), tint = TextSecondary)
                     }
                 }
 
@@ -198,7 +200,7 @@ private fun ContactsContent(
                         contactsViewModel.searchUsers(it)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search by name\u2026", color = TextTertiary) },
+                    placeholder = { Text(stringResource(R.string.search_by_name), color = TextTertiary) },
                     shape = RoundedCornerShape(12.dp),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -214,7 +216,7 @@ private fun ContactsContent(
                 Spacer(Modifier.height(16.dp))
 
                 if (searching) {
-                    Text("Searching\u2026", color = TextSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.searching), color = TextSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
 
                 LazyColumn {
@@ -234,7 +236,7 @@ private fun ContactsContent(
                         ) {
                             AvatarCircle(result.displayName)
                             Text(result.displayName, color = OnBackground, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                            Text("Add", color = Purple, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.add), color = Purple, fontWeight = FontWeight.SemiBold)
                         }
                         HorizontalDivider(color = Surface)
                     }
@@ -242,7 +244,7 @@ private fun ContactsContent(
                     if (searchQuery.isNotBlank() && !searching && searchResults.isEmpty()) {
                         item {
                             Text(
-                                "No users found",
+                                stringResource(R.string.no_users_found),
                                 color = TextTertiary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(top = 32.dp)
@@ -272,10 +274,10 @@ private fun ContactRow(contact: Contact, onCall: () -> Unit, onRemove: () -> Uni
             modifier = Modifier.weight(1f)
         )
         IconButton(onClick = onCall) {
-            Icon(Icons.Default.Phone, "Call", tint = Purple)
+            Icon(Icons.Default.Phone, stringResource(R.string.cd_call), tint = Purple)
         }
         IconButton(onClick = onRemove) {
-            Icon(Icons.Default.Close, "Remove", tint = TextTertiary, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Close, stringResource(R.string.cd_remove), tint = TextTertiary, modifier = Modifier.size(16.dp))
         }
     }
     HorizontalDivider(color = Surface, modifier = Modifier.padding(horizontal = 16.dp))

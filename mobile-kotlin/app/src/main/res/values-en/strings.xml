@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FP Video Calls</string>
+
+    <!-- Home Screen -->
+    <string name="home_greeting">Hey, %1$s 👋</string>
+    <string name="home_subtitle">What would you like to do?</string>
+    <string name="home_call_contact_title">Call a Contact</string>
+    <string name="home_call_contact_subtitle">Direct or group call</string>
+    <string name="home_join_room_title">Join a Room</string>
+    <string name="home_join_room_subtitle">Enter by room name — no login needed</string>
+    <string name="home_new_group_call_title">New Group Call</string>
+    <string name="home_new_group_call_subtitle">Pick contacts and start a group call</string>
+    <string name="sign_out">Sign out</string>
+
+    <!-- Contacts Screen -->
+    <string name="contacts_tab">Contacts</string>
+    <string name="history_tab">History</string>
+    <string name="contacts_add">+ Add Contact</string>
+    <string name="group_call_button">Group Call</string>
+    <string name="contacts_empty_title">No contacts yet</string>
+    <string name="contacts_empty_subtitle">Tap \"+ Add Contact\" to find people</string>
+    <string name="remove_contact_title">Remove contact</string>
+    <string name="remove_contact_message">Remove %1$s from your contacts?</string>
+    <string name="remove">Remove</string>
+    <string name="cancel">Cancel</string>
+    <string name="add_contact_title">Add Contact</string>
+    <string name="search_by_name">Search by name…</string>
+    <string name="searching">Searching…</string>
+    <string name="add">Add</string>
+    <string name="no_users_found">No users found</string>
+
+    <!-- Call History Screen -->
+    <string name="call_history_title">Call History</string>
+    <string name="call_history_subtitle">Recent calls</string>
+    <string name="call_history_empty">No calls yet</string>
+    <string name="status_missed">Missed</string>
+    <string name="status_declined">Declined</string>
+    <string name="status_busy">Busy</string>
+    <string name="status_outgoing">Outgoing</string>
+    <string name="status_incoming">Incoming</string>
+    <string name="status_active">Active</string>
+    <string name="status_ringing">Ringing</string>
+    <string name="status_group_suffix">" · Group"</string>
+
+    <!-- Sign In Screen -->
+    <string name="app_title">FP Video Calls</string>
+    <string name="sign_in_subtitle">Call family &amp; friends</string>
+    <string name="sign_in_google">🔵  Sign in with Google</string>
+    <string name="continue_as_guest">Continue as Guest</string>
+    <string name="guest_mode_hint">Guest mode: join any room by name — no account needed.</string>
+
+    <!-- Room Join Screen -->
+    <string name="join_room_title">Join a Room</string>
+    <string name="join_room_subtitle">Enter any room name to start or join a call</string>
+    <string name="display_name_placeholder">Your display name</string>
+    <string name="room_name_placeholder">Room name (e.g. family-sunday)</string>
+    <string name="join_room_button">Join Room</string>
+    <string name="guest_default_name">Guest</string>
+
+    <!-- Group Call Setup Screen -->
+    <string name="save_group_title">Save Group</string>
+    <string name="group_name_label">Group name</string>
+    <string name="save">Save</string>
+    <string name="back_arrow">← Back</string>
+    <string name="new_group_call">New Group Call</string>
+    <string name="start_count">Start (%1$d)</string>
+    <string name="select_contacts_count">Select contacts to invite (%1$d/%2$d)</string>
+    <string name="no_contacts_add_first">No contacts yet — add some first.</string>
+    <string name="saved_groups">Saved Groups</string>
+    <string name="members_count">%1$d members</string>
+    <string name="recent_section">Recent</string>
+    <string name="contacts_section">Contacts</string>
+
+    <!-- Outgoing Call Screen -->
+    <string name="connecting">Connecting…</string>
+    <string name="calling">Calling…</string>
+    <string name="no_answer">No answer</string>
+    <string name="call_failed">Call failed</string>
+    <string name="try_again">Try Again</string>
+    <string name="close">Close</string>
+
+    <!-- In Call Screen -->
+    <string name="incall_connecting">⏳ Connecting…</string>
+    <string name="incall_reconnecting">⚠ Reconnecting…</string>
+
+    <!-- Pre Call Screen -->
+    <string name="precall_group_call">Group call</string>
+    <string name="precall_call">Call</string>
+    <string name="call_button">Call</string>
+
+    <!-- Incoming Call -->
+    <string name="incoming_call">Incoming call</string>
+    <string name="incoming_group_call">Incoming group call</string>
+    <string name="incoming_video_call">Incoming video call</string>
+    <string name="decline">Decline</string>
+    <string name="answer">Answer</string>
+    <string name="call_type_group">Group call</string>
+    <string name="call_type_video">Video call</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_contacts">Contacts</string>
+    <string name="nav_room">Room</string>
+    <string name="tap_return_to_call">Tap to return to call</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_incoming">Incoming Calls</string>
+    <string name="notification_channel_incoming_desc">Notifications for incoming video calls</string>
+    <string name="notification_channel_active">Active Calls</string>
+    <string name="notification_channel_active_desc">Ongoing call notification</string>
+    <string name="notification_channel_missed">Missed Calls</string>
+    <string name="notification_channel_missed_desc">Missed call notifications</string>
+    <string name="notification_caller_calling">%1$s is calling</string>
+    <string name="notification_active_call_title">%1$s with %2$s</string>
+    <string name="notification_missed_call_title">Missed call from %1$s</string>
+    <string name="notification_missed_call_text">Missed %1$s</string>
+    <string name="hang_up">Hang up</string>
+
+    <!-- Call Controls -->
+    <string name="cd_unmute">Unmute</string>
+    <string name="cd_mute">Mute</string>
+    <string name="cd_disable_camera">Disable camera</string>
+    <string name="cd_enable_camera">Enable camera</string>
+    <string name="cd_earpiece">Earpiece</string>
+    <string name="cd_speaker">Speaker</string>
+    <string name="cd_end_call">End call</string>
+    <string name="cd_switch_camera">Switch camera</string>
+    <string name="cd_camera_off">Camera off</string>
+
+    <!-- Video Grid -->
+    <string name="you_label">You</string>
+
+    <!-- Content Descriptions -->
+    <string name="cd_close">Close</string>
+    <string name="cd_call">Call</string>
+    <string name="cd_remove">Remove</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_save_group">Save group</string>
+    <string name="cd_delete_group">Delete group</string>
+    <string name="cd_remove_recent">Remove recent</string>
+    <string name="cd_selected">Selected</string>
+</resources>

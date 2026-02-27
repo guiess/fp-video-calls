@@ -12,6 +12,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import com.fpvideocalls.MainActivity
+import com.fpvideocalls.R
 import com.fpvideocalls.util.Constants
 
 object NotificationHelper {
@@ -31,10 +32,10 @@ object NotificationHelper {
 
         val channel = NotificationChannel(
             Constants.NOTIFICATION_CHANNEL_ID,
-            "Incoming Calls",
+            context.getString(R.string.notification_channel_incoming),
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Notifications for incoming video calls"
+            description = context.getString(R.string.notification_channel_incoming_desc)
             setSound(ringtoneUri, audioAttributes)
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 1000, 500, 1000)
@@ -43,20 +44,20 @@ object NotificationHelper {
 
         val activeChannel = NotificationChannel(
             Constants.ACTIVE_CALL_CHANNEL_ID,
-            "Active Calls",
+            context.getString(R.string.notification_channel_active),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Ongoing call notification"
+            description = context.getString(R.string.notification_channel_active_desc)
             setSound(null, null)
             enableVibration(false)
         }
 
         val missedChannel = NotificationChannel(
             Constants.MISSED_CALL_CHANNEL_ID,
-            "Missed Calls",
+            context.getString(R.string.notification_channel_missed),
             NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "Missed call notifications"
+            description = context.getString(R.string.notification_channel_missed_desc)
         }
 
         manager.createNotificationChannel(channel)
@@ -116,7 +117,9 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val callTypeLabel = if (callType == "group") "Group call" else "Video call"
+        val callTypeLabel = context.getString(
+            if (callType == "group") R.string.call_type_group else R.string.call_type_video
+        )
 
         val builder = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
@@ -137,10 +140,10 @@ object NotificationHelper {
             )
             builder.setContentText(callTypeLabel)
         } else {
-            builder.setContentTitle("$callerName is calling")
+            builder.setContentTitle(context.getString(R.string.notification_caller_calling, callerName))
                 .setContentText(callTypeLabel)
-                .addAction(android.R.drawable.ic_menu_call, "Answer", answerPendingIntent)
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePendingIntent)
+                .addAction(android.R.drawable.ic_menu_call, context.getString(R.string.answer), answerPendingIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, context.getString(R.string.decline), declinePendingIntent)
         }
 
         return builder.build()
@@ -188,7 +191,9 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val callTypeLabel = if (callType == "group") "Group call" else "Video call"
+        val callTypeLabel = context.getString(
+            if (callType == "group") R.string.call_type_group else R.string.call_type_video
+        )
 
         val builder = NotificationCompat.Builder(context, Constants.ACTIVE_CALL_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
@@ -203,9 +208,9 @@ object NotificationHelper {
             )
             builder.setContentText(callTypeLabel)
         } else {
-            builder.setContentTitle("$callTypeLabel with $callerName")
-                .setContentText("Tap to return to call")
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangUpPendingIntent)
+            builder.setContentTitle(context.getString(R.string.notification_active_call_title, callTypeLabel, callerName))
+                .setContentText(context.getString(R.string.tap_return_to_call))
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, context.getString(R.string.hang_up), hangUpPendingIntent)
         }
 
         return builder.build()
@@ -221,11 +226,13 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val callTypeLabel = if (callType == "group") "group call" else "video call"
+        val callTypeLabel = context.getString(
+            if (callType == "group") R.string.call_type_group else R.string.call_type_video
+        ).replaceFirstChar { it.lowercase() }
         val notification = NotificationCompat.Builder(context, Constants.MISSED_CALL_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Missed call from $callerName")
-            .setContentText("Missed $callTypeLabel")
+            .setContentTitle(context.getString(R.string.notification_missed_call_title, callerName))
+            .setContentText(context.getString(R.string.notification_missed_call_text, callTypeLabel))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(openPendingIntent)

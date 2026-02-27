@@ -19,11 +19,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fpvideocalls.MainActivity
+import com.fpvideocalls.R
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.ui.theme.*
@@ -232,7 +234,7 @@ private fun IncomingCallOverlay(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (callData.callType.value == "group") "Incoming group call" else "Incoming video call",
+                if (callData.callType.value == "group") stringResource(R.string.incoming_group_call) else stringResource(R.string.incoming_video_call),
                 color = Purple,
                 fontSize = 16.sp
             )
@@ -256,7 +258,7 @@ private fun IncomingCallOverlay(
                     Text("\uD83D\uDCF5", fontSize = 28.sp)
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Decline", color = OnBackground, fontSize = 14.sp)
+                Text(stringResource(R.string.decline), color = OnBackground, fontSize = 14.sp)
             }
 
             // Answer
@@ -270,7 +272,7 @@ private fun IncomingCallOverlay(
                     Text("\uD83D\uDCF2", fontSize = 28.sp)
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Answer", color = OnBackground, fontSize = 14.sp)
+                Text(stringResource(R.string.answer), color = OnBackground, fontSize = 14.sp)
             }
         }
     }

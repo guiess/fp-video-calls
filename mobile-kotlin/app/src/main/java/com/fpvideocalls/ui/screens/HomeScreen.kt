@@ -12,10 +12,12 @@ import androidx.compose.runtime.getValue
 import com.fpvideocalls.ui.components.RequestCallPermissions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fpvideocalls.R
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
 
@@ -39,33 +41,33 @@ fun HomeScreen(
     ) {
         Spacer(Modifier.height(16.dp))
         Text(
-            "Hey, ${user?.displayName?.split(" ")?.firstOrNull() ?: ""} \uD83D\uDC4B",
+            stringResource(R.string.home_greeting, user?.displayName?.split(" ")?.firstOrNull() ?: ""),
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
             color = OnBackground
         )
         Spacer(Modifier.height(4.dp))
-        Text("What would you like to do?", color = TextSecondary, fontSize = 14.sp)
+        Text(stringResource(R.string.home_subtitle), color = TextSecondary, fontSize = 14.sp)
         Spacer(Modifier.height(32.dp))
 
         HomeCard(
             icon = "\uD83D\uDC65",
-            title = "Call a Contact",
-            subtitle = "Direct or group call",
+            title = stringResource(R.string.home_call_contact_title),
+            subtitle = stringResource(R.string.home_call_contact_subtitle),
             onClick = onNavigateToContacts
         )
         Spacer(Modifier.height(16.dp))
         HomeCard(
             icon = "\uD83D\uDEAA",
-            title = "Join a Room",
-            subtitle = "Enter by room name \u2014 no login needed",
+            title = stringResource(R.string.home_join_room_title),
+            subtitle = stringResource(R.string.home_join_room_subtitle),
             onClick = onNavigateToRooms
         )
         Spacer(Modifier.height(16.dp))
         HomeCard(
             icon = "\uD83D\uDCDE",
-            title = "New Group Call",
-            subtitle = "Pick contacts and start a group call",
+            title = stringResource(R.string.home_new_group_call_title),
+            subtitle = stringResource(R.string.home_new_group_call_subtitle),
             onClick = onNavigateToGroupCall
         )
 
@@ -75,7 +77,7 @@ fun HomeScreen(
             onClick = { authViewModel.signOut() },
             modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
-            Text("Sign out", color = TextTertiary, fontSize = 14.sp)
+            Text(stringResource(R.string.sign_out), color = TextTertiary, fontSize = 14.sp)
         }
     }
 }

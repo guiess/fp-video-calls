@@ -15,12 +15,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fpvideocalls.R
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.util.Constants
@@ -58,12 +60,12 @@ fun GroupCallSetupScreen(
                 showSaveDialog = false
                 groupName = ""
             },
-            title = { Text("Save Group", color = OnBackground) },
+            title = { Text(stringResource(R.string.save_group_title), color = OnBackground) },
             text = {
                 OutlinedTextField(
                     value = groupName,
                     onValueChange = { groupName = it },
-                    label = { Text("Group name") },
+                    label = { Text(stringResource(R.string.group_name_label)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = OnBackground,
@@ -88,7 +90,7 @@ fun GroupCallSetupScreen(
                     },
                     enabled = groupName.isNotBlank()
                 ) {
-                    Text("Save", color = if (groupName.isNotBlank()) Purple else TextTertiary)
+                    Text(stringResource(R.string.save), color = if (groupName.isNotBlank()) Purple else TextTertiary)
                 }
             },
             dismissButton = {
@@ -96,7 +98,7 @@ fun GroupCallSetupScreen(
                     showSaveDialog = false
                     groupName = ""
                 }) {
-                    Text("Cancel", color = TextTertiary)
+                    Text(stringResource(R.string.cancel), color = TextTertiary)
                 }
             },
             containerColor = Surface,
@@ -113,10 +115,10 @@ fun GroupCallSetupScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             TextButton(onClick = onBack) {
-                Text("\u2190 Back", color = Purple, fontSize = 16.sp)
+                Text(stringResource(R.string.back_arrow), color = Purple, fontSize = 16.sp)
             }
             Text(
-                "New Group Call",
+                stringResource(R.string.new_group_call),
                 color = OnBackground,
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
@@ -129,7 +131,7 @@ fun GroupCallSetupScreen(
             ) {
                 Icon(
                     Icons.Default.Save,
-                    contentDescription = "Save group",
+                    contentDescription = stringResource(R.string.cd_save_group),
                     tint = if (selected.isNotEmpty()) Purple else TextTertiary
                 )
             }
@@ -145,12 +147,12 @@ fun GroupCallSetupScreen(
                     disabledContainerColor = Purple.copy(alpha = 0.4f)
                 )
             ) {
-                Text("Start (${selected.size})", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.start_count, selected.size), fontWeight = FontWeight.SemiBold)
             }
         }
 
         Text(
-            "Select contacts to invite (${selected.size}/${Constants.MAX_GROUP_CALL_MEMBERS})",
+            stringResource(R.string.select_contacts_count, selected.size, Constants.MAX_GROUP_CALL_MEMBERS),
             color = if (selected.size >= Constants.MAX_GROUP_CALL_MEMBERS) ErrorRed else TextTertiary,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)
@@ -161,7 +163,7 @@ fun GroupCallSetupScreen(
                 modifier = Modifier.fillMaxSize().padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No contacts yet \u2014 add some first.", color = TextTertiary, textAlign = TextAlign.Center)
+                Text(stringResource(R.string.no_contacts_add_first), color = TextTertiary, textAlign = TextAlign.Center)
             }
         } else {
             LazyColumn {
@@ -169,7 +171,7 @@ fun GroupCallSetupScreen(
                 if (savedGroups.isNotEmpty()) {
                     item {
                         Text(
-                            "Saved Groups",
+                            stringResource(R.string.saved_groups),
                             color = TextSecondary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -209,7 +211,7 @@ fun GroupCallSetupScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    "${group.memberNames.size} members",
+                                    stringResource(R.string.members_count, group.memberNames.size),
                                     color = TextTertiary,
                                     fontSize = 12.sp
                                 )
@@ -220,7 +222,7 @@ fun GroupCallSetupScreen(
                             ) {
                                 Icon(
                                     Icons.Default.Delete,
-                                    contentDescription = "Delete group",
+                                    contentDescription = stringResource(R.string.cd_delete_group),
                                     tint = TextTertiary,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -234,7 +236,7 @@ fun GroupCallSetupScreen(
                 if (recentGroups.isNotEmpty()) {
                     item {
                         Text(
-                            "Recent",
+                            stringResource(R.string.recent_section),
                             color = TextSecondary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -279,7 +281,7 @@ fun GroupCallSetupScreen(
                             ) {
                                 Icon(
                                     Icons.Default.Delete,
-                                    contentDescription = "Remove recent",
+                                    contentDescription = stringResource(R.string.cd_remove_recent),
                                     tint = TextTertiary,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -292,7 +294,7 @@ fun GroupCallSetupScreen(
                 // Contacts section header
                 item {
                     Text(
-                        "Contacts",
+                        stringResource(R.string.contacts_section),
                         color = TextSecondary,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -338,7 +340,7 @@ fun GroupCallSetupScreen(
                         if (isSelected) {
                             Icon(
                                 Icons.Default.Check,
-                                contentDescription = "Selected",
+                                contentDescription = stringResource(R.string.cd_selected),
                                 tint = Purple,
                                 modifier = Modifier.size(18.dp)
                             )
