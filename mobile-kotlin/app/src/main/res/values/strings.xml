@@ -102,6 +102,7 @@
     <string name="nav_home">Главная</string>
     <string name="nav_contacts">Контакты</string>
     <string name="nav_room">Комната</string>
+    <string name="nav_options">Настройки</string>
     <string name="tap_return_to_call">Нажмите, чтобы вернуться к звонку</string>
 
     <!-- Notifications -->
@@ -140,4 +141,8 @@
     <string name="cd_delete_group">Удалить группу</string>
     <string name="cd_remove_recent">Удалить недавнее</string>
     <string name="cd_selected">Выбрано</string>
+
+    <!-- Options Screen -->
+    <string name="options_title">Настройки</string>
+    <string name="options_language">Язык приложения</string>
 </resources>

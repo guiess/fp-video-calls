@@ -388,6 +388,24 @@ fun MainScreen(navController: NavHostController) {
                         indicatorColor = Color.Transparent
                     )
                 )
+                NavigationBarItem(
+                    selected = currentRoute == Routes.TAB_OPTIONS,
+                    onClick = {
+                        tabNavController.navigate(Routes.TAB_OPTIONS) {
+                            popUpTo(Routes.TAB_HOME)
+                            launchSingleTop = true
+                        }
+                    },
+                    icon = { Icon(Icons.Default.Settings, stringResource(R.string.nav_options)) },
+                    label = { Text(stringResource(R.string.nav_options)) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Purple,
+                        selectedTextColor = Purple,
+                        unselectedIconColor = TextTertiary,
+                        unselectedTextColor = TextTertiary,
+                        indicatorColor = Color.Transparent
+                    )
+                )
             }
         }
     ) { innerPadding ->
@@ -432,6 +450,9 @@ fun MainScreen(navController: NavHostController) {
                         navController.navigate(Routes.inCall(roomId, displayName, userId, "room"))
                     }
                 )
+            }
+            composable(Routes.TAB_OPTIONS) {
+                OptionsScreen()
             }
         }
     }

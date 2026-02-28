@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,13 +71,6 @@ fun HomeScreen(
         )
 
         Spacer(Modifier.weight(1f))
-
-        TextButton(
-            onClick = { authViewModel.signOut() },
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        ) {
-            Text(stringResource(R.string.sign_out), color = TextTertiary, fontSize = 14.sp)
-        }
     }
 }
 

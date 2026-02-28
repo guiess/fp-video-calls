@@ -2,6 +2,7 @@ package com.fpvideocalls
 
 import android.app.KeyguardManager
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
@@ -17,6 +18,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.ui.navigation.AppNavigation
 import com.fpvideocalls.ui.theme.FPVideoCallsTheme
+import com.fpvideocalls.util.LocaleHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +38,10 @@ class MainActivity : ComponentActivity() {
     /** True when the call was answered from the lock screen */
     var answeredFromLockScreen = false
         private set
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LocaleHelper.applyLocale(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

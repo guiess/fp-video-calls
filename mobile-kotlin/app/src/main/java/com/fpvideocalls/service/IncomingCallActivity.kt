@@ -49,6 +49,10 @@ class IncomingCallActivity : ComponentActivity() {
         }
     }
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(com.fpvideocalls.util.LocaleHelper.applyLocale(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activeInstance = this

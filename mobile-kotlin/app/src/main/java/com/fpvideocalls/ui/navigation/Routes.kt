@@ -16,6 +16,7 @@ object Routes {
     const val TAB_HOME = "tab_home"
     const val TAB_CONTACTS = "tab_contacts"
     const val TAB_ROOMS = "tab_rooms"
+    const val TAB_OPTIONS = "tab_options"
 
     fun inCall(roomId: String, displayName: String, userId: String, callType: String = "room", password: String? = null): String {
         val encName = URLEncoder.encode(displayName, "UTF-8")

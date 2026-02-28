@@ -102,6 +102,7 @@
     <string name="nav_home">Home</string>
     <string name="nav_contacts">Contacts</string>
     <string name="nav_room">Room</string>
+    <string name="nav_options">Settings</string>
     <string name="tap_return_to_call">Tap to return to call</string>
 
     <!-- Notifications -->
@@ -140,4 +141,8 @@
     <string name="cd_delete_group">Delete group</string>
     <string name="cd_remove_recent">Remove recent</string>
     <string name="cd_selected">Selected</string>
+
+    <!-- Options Screen -->
+    <string name="options_title">Settings</string>
+    <string name="options_language">App Language</string>
 </resources>
