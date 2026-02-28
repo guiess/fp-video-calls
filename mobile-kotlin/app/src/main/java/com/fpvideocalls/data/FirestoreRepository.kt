@@ -50,7 +50,8 @@ class FirestoreRepository @Inject constructor(
             .orderBy("displayName", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    android.util.Log.w("FirestoreRepository", "subscribeToContacts error", error)
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
                 val contacts = snapshot?.documents?.map { doc ->
@@ -141,7 +142,8 @@ class FirestoreRepository @Inject constructor(
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    android.util.Log.w("FirestoreRepository", "subscribeToGroups error", error)
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
                 val groups = snapshot?.documents?.map { doc ->
@@ -191,7 +193,8 @@ class FirestoreRepository @Inject constructor(
             .limit(20)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    android.util.Log.w("FirestoreRepository", "subscribeToRecentGroups error", error)
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
                 val groups = snapshot?.documents?.map { doc ->

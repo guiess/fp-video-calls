@@ -18,6 +18,16 @@ service cloud.firestore {
       match /callHistory/{callId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Saved groups subcollection — private to the owner
+      match /groups/{groupId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Recent groups subcollection — private to the owner
+      match /recentGroups/{groupId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
   }
 }
