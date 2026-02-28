@@ -145,4 +145,7 @@
     <!-- Options Screen -->
     <string name="options_title">Настройки</string>
     <string name="options_language">Язык приложения</string>
+
+    <!-- Room Screen -->
+    <string name="recent_rooms_title">Недавние комнаты</string>
 </resources>
