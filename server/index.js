@@ -8,6 +8,8 @@ import { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
 import cors from "cors";
 import admin from "firebase-admin";
+import chatRoutes from "./chat-routes.js";
+import chatDb from "./chat-db.js";
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
 // Set FIREBASE_SERVICE_ACCOUNT_JSON to a base64-encoded service-account JSON,
@@ -255,6 +257,10 @@ app.post("/api/call/cancel", async (req, res) => {
   }
 });
 
+// ── Chat API routes (authenticated via Firebase ID tokens) ──────────────────
+chatRoutes._io = io; // Share Socket.IO instance for real-time broadcast
+app.use("/api/chat", chatRoutes);
+
 // Create room (returns human-readable slug). Password can only be set at creation.
 app.post("/room", (req, res) => {
   const { videoQuality = "720p", passwordEnabled = false, passwordHint, password } = req.body || {};
@@ -287,6 +293,31 @@ app.get("/room/:roomId/meta", (req, res) => {
 });
 
 io.on("connection", (socket) => {
+  // Chat: user identifies themselves so we can deliver chat messages
+  socket.on("chat_auth", ({ uid }) => {
+    if (uid) {
+      socket.join(`user:${uid}`);
+      socket._chatUid = uid;
+      console.log(`[chat] ${uid} joined user room via socket ${socket.id}`);
+    }
+  });
+
+  // Chat: typing indicator
+  socket.on("chat_typing", ({ conversationId, typing }) => {
+    const uid = socket._chatUid;
+    if (!uid || !conversationId) return;
+    try {
+      const participants = chatDb.prepare(
+        "SELECT user_uid FROM conversation_participants WHERE conversation_id = ?"
+      ).all(conversationId);
+      for (const p of participants) {
+        if (p.user_uid !== uid) {
+          io.to(`user:${p.user_uid}`).emit("chat_typing", { conversationId, uid, typing: !!typing });
+        }
+      }
+    } catch {}
+  });
+
   // join_room { roomId, userId, displayName, password?, videoQuality? }
   socket.on("join_room", ({ roomId, userId, displayName, password, videoQuality }) => {
     if (!roomId || !userId) return socket.emit("error", { code: "BAD_REQUEST" });

@@ -9,6 +9,9 @@ web/dist/
 
 # Server
 server/node_modules/
+server/chat.db
+server/chat.db-shm
+server/chat.db-wal
 
 # Env/secrets
 .env

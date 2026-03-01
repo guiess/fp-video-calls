@@ -9,6 +9,7 @@
     "dev": "NODE_ENV=development node index.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
     "cors": "2.8.5",
     "express": "^4.22.1",
     "firebase-admin": "^13.0.0",
