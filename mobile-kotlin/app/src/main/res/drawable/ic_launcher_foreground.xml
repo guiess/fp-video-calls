@@ -5,19 +5,19 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Chat bubble shape -->
+    <!-- Chat bubble shape (main body centered at Y=54) -->
     <path
-        android:pathData="M30,32 C30,28.7 32.7,26 36,26 L72,26 C75.3,26 78,28.7 78,32 L78,60 C78,63.3 75.3,66 72,66 L50,66 L40,76 L40,66 L36,66 C32.7,66 30,63.3 30,60 Z"
+        android:pathData="M30,40 C30,36.7 32.7,34 36,34 L72,34 C75.3,34 78,36.7 78,40 L78,68 C78,71.3 75.3,74 72,74 L50,74 L40,84 L40,74 L36,74 C32.7,74 30,71.3 30,68 Z"
         android:fillColor="#6C63FF" />
 
-    <!-- Video camera body (rounded rect) -->
+    <!-- Video camera body (centered in bubble body) -->
     <path
-        android:pathData="M38,38 L58,38 C59.66,38 61,39.34 61,41 L61,55 C61,56.66 59.66,58 58,58 L38,58 C36.34,58 35,56.66 35,55 L35,41 C35,39.34 36.34,38 38,38 Z"
+        android:pathData="M39,44 L59,44 C60.66,44 62,45.34 62,47 L62,61 C62,62.66 60.66,64 59,64 L39,64 C37.34,64 36,62.66 36,61 L36,47 C36,45.34 37.34,44 39,44 Z"
         android:fillColor="#FFFFFF" />
 
     <!-- Video camera lens/triangle -->
     <path
-        android:pathData="M63,42 L72,37 L72,59 L63,54 Z"
+        android:pathData="M64,48 L73,43 L73,65 L64,60 Z"
         android:fillColor="#FFFFFF" />
 
 </vector>
