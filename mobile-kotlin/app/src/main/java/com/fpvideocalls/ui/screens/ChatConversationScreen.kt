@@ -1,5 +1,8 @@
 package com.fpvideocalls.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,15 @@ fun ChatConversationScreen(
     var inputText by remember { mutableStateOf("") }
     val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
     val myName = FirebaseAuth.getInstance().currentUser?.displayName
+    val context = LocalContext.current
+
+    // Media picker
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { viewModel.sendMedia(context, it, "image", myName) }
+    }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { viewModel.sendMedia(context, it, "file", myName) }
+    }
 
     LaunchedEffect(conversationId) {
         viewModel.init(conversationId, participantUids, displayName)
@@ -108,6 +121,13 @@ fun ChatConversationScreen(
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Attach button
+            IconButton(
+                onClick = { imagePicker.launch("image/*") },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Default.AttachFile, contentDescription = null, tint = TextTertiary)
+            }
             OutlinedTextField(
                 value = inputText,
                 onValueChange = {

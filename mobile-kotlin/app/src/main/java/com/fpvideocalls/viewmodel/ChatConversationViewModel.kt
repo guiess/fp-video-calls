@@ -1,9 +1,13 @@
 package com.fpvideocalls.viewmodel
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.crypto.ChatCryptoManager
 import com.fpvideocalls.data.ChatRepository
+import com.fpvideocalls.data.ChatStorageService
 import com.fpvideocalls.model.ChatMessage
 import com.fpvideocalls.service.ChatSocketManager
 import com.fpvideocalls.util.ChatEventBus
@@ -18,7 +22,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ChatConversationViewModel @Inject constructor(
-    private val chatRepository: ChatRepository
+    private val chatRepository: ChatRepository,
+    private val chatStorageService: ChatStorageService
 ) : ViewModel() {
 
     init {
@@ -143,6 +148,44 @@ class ChatConversationViewModel @Inject constructor(
             }
             _sending.value = false
         }
+    }
+
+    fun sendMedia(context: Context, uri: Uri, type: String, senderName: String?) {
+        val convoId = currentConversationId ?: return
+        if (convoId.startsWith("new")) return // Must send text first to create conversation
+        val fileName = getFileName(context, uri) ?: "file"
+        viewModelScope.launch {
+            _sending.value = true
+            val result = chatStorageService.encryptAndUpload(context, uri, convoId, participantUids, fileName)
+            if (result != null) {
+                val msg = chatRepository.sendMessage(
+                    conversationId = convoId,
+                    plaintext = if (type == "image") "📷" else "📎 $fileName",
+                    participantUids = participantUids,
+                    senderName = senderName,
+                    type = type,
+                    mediaUrl = result.downloadUrl,
+                    fileName = result.fileName,
+                    fileSize = result.fileSize
+                )
+                if (msg != null) {
+                    val label = if (type == "image") "📷" else "📎 $fileName"
+                    _messages.value = listOf(msg.copy(decryptedText = label)) + _messages.value
+                }
+            }
+            _sending.value = false
+        }
+    }
+
+    private fun getFileName(context: Context, uri: Uri): String? {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) return it.getString(idx)
+            }
+        }
+        return uri.lastPathSegment
     }
 
     override fun onCleared() {
