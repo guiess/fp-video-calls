@@ -57,6 +57,21 @@ object ChatSocketManager {
                     onTyping?.invoke(convoId, typingUid, typing)
                 }
 
+                on("message_deleted") { args ->
+                    try {
+                        val raw = args.getOrNull(0) ?: return@on
+                        val data = if (raw is JSONObject) raw else JSONObject(raw.toString())
+                        val convoId = data.optString("conversationId", "")
+                        val msgId = data.optString("messageId", "")
+                        Log.d(TAG, "message_deleted: convo=$convoId msg=$msgId")
+                        if (convoId.isNotEmpty() && msgId.isNotEmpty()) {
+                            ChatEventBus.postDelete(ChatEventBus.DeleteEvent(convoId, msgId))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "message_deleted parse error", e)
+                    }
+                }
+
                 on(Socket.EVENT_DISCONNECT) {
                     Log.d(TAG, "Disconnected")
                 }

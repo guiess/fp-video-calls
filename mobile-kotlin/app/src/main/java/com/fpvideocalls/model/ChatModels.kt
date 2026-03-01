@@ -31,6 +31,7 @@ data class ChatMessage(
     val fileName: String? = null,
     val fileSize: Long? = null,
     val timestamp: Long = 0,
+    val replyToId: String? = null,
     // Decrypted content (populated client-side after decryption)
     val decryptedText: String? = null
 )

@@ -34,6 +34,13 @@ class ChatConversationViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            ChatEventBus.deleteEvents.collect { event ->
+                if (event.conversationId == currentConversationId) {
+                    _messages.value = _messages.value.filter { it.id != event.messageId }
+                }
+            }
+        }
     }
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -47,6 +54,9 @@ class ChatConversationViewModel @Inject constructor(
 
     private val _typingUsers = MutableStateFlow<Set<String>>(emptySet())
     val typingUsers: StateFlow<Set<String>> = _typingUsers.asStateFlow()
+
+    private val _replyingTo = MutableStateFlow<ChatMessage?>(null)
+    val replyingTo: StateFlow<ChatMessage?> = _replyingTo.asStateFlow()
 
     private var currentConversationId: String? = null
     private var participantUids: List<String> = emptyList()
@@ -109,10 +119,23 @@ class ChatConversationViewModel @Inject constructor(
         }
     }
 
+    fun setReplyTo(message: ChatMessage) { _replyingTo.value = message }
+    fun clearReply() { _replyingTo.value = null }
+
+    fun deleteMessage(messageId: String) {
+        val convoId = currentConversationId ?: return
+        _messages.value = _messages.value.filter { it.id != messageId }
+        viewModelScope.launch {
+            chatRepository.deleteMessage(convoId, messageId)
+        }
+    }
+
     fun sendMessage(text: String, senderName: String?) {
         var convoId = currentConversationId ?: return
         if (text.isBlank()) return
         onTypingChanged(false)
+        val replyId = _replyingTo.value?.id
+        _replyingTo.value = null
         viewModelScope.launch {
             _sending.value = true
             if (convoId.startsWith("new")) {
@@ -145,7 +168,8 @@ class ChatConversationViewModel @Inject constructor(
                 conversationId = convoId,
                 plaintext = text.trim(),
                 participantUids = participantUids,
-                senderName = senderName
+                senderName = senderName,
+                replyToId = replyId
             )
             if (msg != null) {
                 val decrypted = msg.copy(decryptedText = text.trim())
@@ -161,7 +185,7 @@ class ChatConversationViewModel @Inject constructor(
         val fileName = getFileName(context, uri) ?: "file"
         viewModelScope.launch {
             _sending.value = true
-            val result = chatStorageService.encryptAndUpload(context, uri, convoId, participantUids, fileName)
+            val result = chatStorageService.uploadFile(context, uri, convoId, fileName)
             if (result != null) {
                 val msg = chatRepository.sendMessage(
                     conversationId = convoId,

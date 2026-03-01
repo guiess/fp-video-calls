@@ -9,6 +9,7 @@ import crypto from "crypto";
 import cors from "cors";
 import admin from "firebase-admin";
 import chatRoutes from "./chat-routes.js";
+import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
@@ -85,7 +86,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "20mb" }));
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -255,6 +256,15 @@ app.post("/api/call/cancel", async (req, res) => {
     console.error("[call/cancel] failed", e);
     return res.status(500).json({ ok: false, error: "SEND_FAILED" });
   }
+});
+
+// ── Public file serving (no auth — UUID filenames are unguessable) ──────────
+app.get("/api/chat/files/:name", (req, res) => {
+  const filePath = path.join(UPLOAD_DIR, path.basename(req.params.name));
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  }
+  return res.sendFile(filePath);
 });
 
 // ── Chat API routes (authenticated via Firebase ID tokens) ──────────────────

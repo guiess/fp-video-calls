@@ -126,7 +126,8 @@ class ChatRepository @Inject constructor(
         type: String = "text",
         mediaUrl: String? = null,
         fileName: String? = null,
-        fileSize: Long? = null
+        fileSize: Long? = null,
+        replyToId: String? = null
     ): ChatMessage? = withContext(Dispatchers.IO) {
         val token = getAuthToken() ?: return@withContext null
 
@@ -147,6 +148,7 @@ class ChatRepository @Inject constructor(
             if (mediaUrl != null) put("mediaUrl", mediaUrl)
             if (fileName != null) put("fileName", fileName)
             if (fileSize != null) put("fileSize", fileSize)
+            if (replyToId != null) put("replyToId", replyToId)
         }
         val request = Request.Builder()
             .url("$baseUrl/api/chat/conversations/$conversationId/messages")
@@ -262,6 +264,23 @@ class ChatRepository @Inject constructor(
         }
     }
 
+    suspend fun deleteMessage(conversationId: String, messageId: String): Boolean = withContext(Dispatchers.IO) {
+        val token = getAuthToken() ?: return@withContext false
+        val request = Request.Builder()
+            .url("$baseUrl/api/chat/conversations/$conversationId/messages/$messageId")
+            .addHeader("Authorization", "Bearer $token")
+            .delete()
+            .build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val json = JSONObject(response.body?.string() ?: "{}")
+            json.optBoolean("ok")
+        } catch (e: Exception) {
+            Log.e(TAG, "deleteMessage failed", e)
+            false
+        }
+    }
+
     // ── Parsing ────────────────────────────────────────────────────────────
 
     private fun parseConversation(json: JSONObject): Conversation {
@@ -312,6 +331,7 @@ class ChatRepository @Inject constructor(
             fileName = json.optString("fileName", json.optString("file_name", null)),
             fileSize = json.optLong("fileSize", json.optLong("file_size", 0)).takeIf { it > 0 },
             timestamp = json.optLong("timestamp", 0),
+            replyToId = json.optString("replyToId", json.optString("reply_to_id", null))?.takeIf { it.isNotEmpty() },
             decryptedText = serverPlaintext
         )
     }

@@ -68,6 +68,14 @@ try {
   console.log("[chat-db] Added plaintext column to messages table");
 }
 
+// Add reply_to_id column if not exists (migration)
+try {
+  db.prepare("SELECT reply_to_id FROM messages LIMIT 0").get();
+} catch (_) {
+  db.exec("ALTER TABLE messages ADD COLUMN reply_to_id TEXT");
+  console.log("[chat-db] Added reply_to_id column to messages table");
+}
+
 console.log("[chat-db] SQLite database initialized at", DB_PATH);
 
 export default db;

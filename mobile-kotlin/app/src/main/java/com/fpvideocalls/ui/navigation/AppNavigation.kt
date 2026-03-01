@@ -33,6 +33,7 @@ import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
 import com.fpvideocalls.viewmodel.CallNavigationEvent
 import com.fpvideocalls.viewmodel.CallViewModel
+import com.fpvideocalls.viewmodel.ChatListViewModel
 import com.fpvideocalls.viewmodel.GroupsViewModel
 import kotlinx.coroutines.delay
 
@@ -451,6 +452,9 @@ fun MainScreen(navController: NavHostController) {
     val authViewModel: AuthViewModel = hiltViewModel()
     val user by authViewModel.user.collectAsState()
 
+    val chatListViewModel: ChatListViewModel = hiltViewModel()
+    val totalUnread by chatListViewModel.totalUnreadCount.collectAsState()
+
     Scaffold(
         bottomBar = {
             NavigationBar(
@@ -483,7 +487,17 @@ fun MainScreen(navController: NavHostController) {
                             launchSingleTop = true
                         }
                     },
-                    icon = { Icon(Icons.Default.Chat, stringResource(R.string.nav_chats)) },
+                    icon = {
+                        BadgedBox(
+                            badge = {
+                                if (totalUnread > 0) {
+                                    Badge { Text(if (totalUnread > 99) "99+" else totalUnread.toString()) }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Chat, stringResource(R.string.nav_chats))
+                        }
+                    },
                     label = { Text(stringResource(R.string.nav_chats)) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Purple,
@@ -556,6 +570,7 @@ fun MainScreen(navController: NavHostController) {
             }
             composable(Routes.TAB_CHATS) {
                 ChatsScreen(
+                    chatListViewModel = chatListViewModel,
                     onOpenConversation = { convoId, displayName, uids, type ->
                         navController.navigate(Routes.chatConversation(convoId, displayName, uids, type))
                     },

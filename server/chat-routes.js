@@ -1,8 +1,16 @@
 import { Router } from "express";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import admin from "firebase-admin";
 import db from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
+
+const __filename2 = fileURLToPath(import.meta.url);
+const __dirname2 = path.dirname(__filename2);
+const UPLOAD_DIR = process.env.CHAT_UPLOAD_DIR || path.join(process.env.CHAT_DB_PATH ? path.dirname(process.env.CHAT_DB_PATH) : __dirname2, "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const router = Router();
 router.use(requireAuth);
@@ -193,7 +201,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize, plaintext } = req.body || {};
+  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize, plaintext, replyToId } = req.body || {};
 
   if (!type || !["text", "image", "file"].includes(type)) {
     return res.status(400).json({ ok: false, error: "BAD_TYPE" });
@@ -206,9 +214,9 @@ router.post("/conversations/:id/messages", async (req, res) => {
   const now = Date.now();
 
   db.prepare(`
-    INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, media_url, file_name, file_size, plaintext, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, plaintext || null, now);
+    INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, media_url, file_name, file_size, plaintext, reply_to_id, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, plaintext || null, replyToId || null, now);
 
   db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(now, id);
 
@@ -225,6 +233,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     mediaUrl: mediaUrl || null,
     fileName: fileName || null,
     fileSize: fileSize || null,
+    replyToId: replyToId || null,
     timestamp: now,
   };
 
@@ -263,7 +272,7 @@ router.get("/conversations/:id/messages", (req, res) => {
 
   const rows = db.prepare(`
     SELECT id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys,
-           media_url, file_name, file_size, plaintext, timestamp
+           media_url, file_name, file_size, plaintext, reply_to_id, timestamp
     FROM messages
     WHERE conversation_id = ? AND timestamp < ?
     ORDER BY timestamp DESC
@@ -279,9 +288,46 @@ router.get("/conversations/:id/messages", (req, res) => {
     mediaUrl: r.media_url,
     fileName: r.file_name,
     fileSize: r.file_size,
+    replyToId: r.reply_to_id,
   }));
 
   return res.json({ ok: true, messages, hasMore: rows.length === limit });
+});
+
+// ── DELETE /api/chat/conversations/:id/messages/:msgId — Delete a message ───
+
+router.delete("/conversations/:id/messages/:msgId", (req, res) => {
+  const { id, msgId } = req.params;
+  if (!isParticipant(id, req.uid)) {
+    return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+  }
+
+  const row = db.prepare("SELECT media_url FROM messages WHERE id = ? AND conversation_id = ?").get(msgId, id);
+  if (!row) {
+    return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  }
+
+  // Delete file from disk if exists
+  if (row.media_url) {
+    try {
+      const fileName = row.media_url.split("/").pop();
+      const filePath = path.join(UPLOAD_DIR, fileName);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (_) { /* ignore cleanup errors */ }
+  }
+
+  db.prepare("DELETE FROM messages WHERE id = ? AND conversation_id = ?").run(msgId, id);
+
+  // Notify all participants via Socket.IO
+  const participants = db.prepare("SELECT user_uid FROM conversation_participants WHERE conversation_id = ?").all(id);
+  console.log(`[DELETE MSG] Notifying ${participants.length} participants about deleted message ${msgId} in ${id}, io=${!!router._io}`);
+  if (router._io) {
+    participants.forEach(p => {
+      router._io.to(`user:${p.user_uid}`).emit("message_deleted", { conversationId: id, messageId: msgId });
+    });
+  }
+
+  return res.json({ ok: true });
 });
 
 // ── PUT /api/chat/conversations/:id/read — Mark messages as read ────────────
@@ -416,5 +462,37 @@ router.delete("/conversations/:id", (req, res) => {
 
   return res.json({ ok: true });
 });
+
+// ── POST /api/chat/upload — Upload a file (base64 in JSON body) ─────────────
+
+router.post("/upload", (req, res) => {
+  const uid = req.uid;
+  const { conversationId, fileName, data } = req.body || {};
+
+  if (!conversationId || !fileName || !data) {
+    return res.status(400).json({ ok: false, error: "MISSING_FIELDS" });
+  }
+  if (!isParticipant(conversationId, uid)) {
+    return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+  }
+
+  try {
+    const fileId = crypto.randomUUID();
+    const ext = path.extname(fileName) || "";
+    const storedName = fileId + ext;
+    const filePath = path.join(UPLOAD_DIR, storedName);
+    const buffer = Buffer.from(data, "base64");
+    fs.writeFileSync(filePath, buffer);
+
+    const downloadUrl = `/api/chat/files/${storedName}`;
+    return res.json({ ok: true, downloadUrl, fileSize: buffer.length });
+  } catch (e) {
+    console.error("[chat/upload] failed", e);
+    return res.status(500).json({ ok: false, error: "UPLOAD_FAILED" });
+  }
+});
+
+// Kept in router but skips auth — handled by unguessable UUID filenames
+export { UPLOAD_DIR };
 
 export default router;

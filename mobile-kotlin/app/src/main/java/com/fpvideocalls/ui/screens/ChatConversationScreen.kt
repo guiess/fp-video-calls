@@ -1,10 +1,18 @@
 package com.fpvideocalls.ui.screens
 
+import android.app.DownloadManager
+import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,12 +26,25 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.fpvideocalls.R
 import com.fpvideocalls.model.ChatMessage
 import com.fpvideocalls.model.ChatParticipant
@@ -33,6 +54,7 @@ import com.fpvideocalls.viewmodel.ChatConversationViewModel
 import com.fpvideocalls.viewmodel.ContactsViewModel
 import com.fpvideocalls.viewmodel.GroupInfoViewModel
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -52,6 +74,7 @@ fun ChatConversationScreen(
     val messages by viewModel.messages.collectAsState()
     val sending by viewModel.sending.collectAsState()
     val typingUsers by viewModel.typingUsers.collectAsState()
+    val replyingTo by viewModel.replyingTo.collectAsState()
     val participants by groupInfoViewModel.participants.collectAsState()
     val groupLoading by groupInfoViewModel.loading.collectAsState()
     val contacts by contactsViewModel.contacts.collectAsState()
@@ -59,9 +82,12 @@ fun ChatConversationScreen(
     val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
     val myName = FirebaseAuth.getInstance().currentUser?.displayName
     val context = LocalContext.current
+    var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     var showMembersSheet by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf<ChatParticipant?>(null) }
+
+    var showAttachMenu by remember { mutableStateOf(false) }
 
     // Media picker
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -122,6 +148,16 @@ fun ChatConversationScreen(
 
         // Messages
         val listState = rememberLazyListState()
+        val coroutineScope = rememberCoroutineScope()
+
+        // Auto-scroll to bottom when new messages arrive
+        val messageCount = messages.size
+        LaunchedEffect(messageCount) {
+            if (messageCount > 0) {
+                listState.animateScrollToItem(0)
+            }
+        }
+
         LazyColumn(
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
             state = listState,
@@ -130,7 +166,26 @@ fun ChatConversationScreen(
         ) {
             items(messages, key = { it.id }) { msg ->
                 val isMine = msg.senderUid == myUid
-                MessageBubble(message = msg, isMine = isMine)
+                val repliedMsg = if (msg.replyToId != null) messages.find { it.id == msg.replyToId } else null
+                SwipeToReplyWrapper(
+                    onReply = { viewModel.setReplyTo(msg) }
+                ) {
+                    MessageBubble(
+                        message = msg,
+                        isMine = isMine,
+                        repliedMessage = repliedMsg,
+                        onImageClick = { url -> fullscreenImageUrl = url },
+                        onDownload = { url, name -> downloadFile(context, url, name) },
+                        onQuoteClick = {
+                            val idx = messages.indexOfFirst { it.id == msg.replyToId }
+                            if (idx >= 0) {
+                                coroutineScope.launch { listState.animateScrollToItem(idx) }
+                            }
+                        },
+                        onReply = { viewModel.setReplyTo(msg) },
+                        onDelete = if (isMine) {{ viewModel.deleteMessage(msg.id) }} else null
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -145,6 +200,46 @@ fun ChatConversationScreen(
             )
         }
 
+        // Reply preview bar
+        if (replyingTo != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Surface)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(36.dp)
+                        .background(Purple, RoundedCornerShape(2.dp))
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        replyingTo!!.senderName ?: "",
+                        color = Purple,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        replyingTo!!.decryptedText ?: "🔒",
+                        color = TextTertiary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = { viewModel.clearReply() }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(18.dp))
+                }
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = SurfaceVariant)
+        }
+
         // Input bar
         Row(
             modifier = Modifier
@@ -153,11 +248,28 @@ fun ChatConversationScreen(
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = { imagePicker.launch("image/*") },
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(Icons.Default.AttachFile, contentDescription = null, tint = TextTertiary)
+            Box {
+                IconButton(
+                    onClick = { showAttachMenu = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(Icons.Default.AttachFile, contentDescription = null, tint = TextTertiary)
+                }
+                DropdownMenu(
+                    expanded = showAttachMenu,
+                    onDismissRequest = { showAttachMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("📷 " + stringResource(R.string.chat_photo)) },
+                        onClick = { showAttachMenu = false; imagePicker.launch("image/*") },
+                        leadingIcon = { Icon(Icons.Default.Image, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("📎 " + stringResource(R.string.chat_file)) },
+                        onClick = { showAttachMenu = false; filePicker.launch("*/*") },
+                        leadingIcon = { Icon(Icons.Default.InsertDriveFile, null) }
+                    )
+                }
             }
             OutlinedTextField(
                 value = inputText,
@@ -194,6 +306,15 @@ fun ChatConversationScreen(
                 Icon(Icons.Default.Send, contentDescription = stringResource(R.string.chat_send), tint = OnPrimary)
             }
         }
+    }
+
+    // Fullscreen image viewer
+    fullscreenImageUrl?.let { url ->
+        FullscreenImageViewer(
+            imageUrl = url,
+            onDismiss = { fullscreenImageUrl = null },
+            onDownload = { downloadFile(context, url, "image_${System.currentTimeMillis()}.jpg") }
+        )
     }
 
     // Add member dialog
@@ -364,21 +485,64 @@ private fun AddMemberDialog(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, isMine: Boolean) {
+private fun SwipeToReplyWrapper(
+    onReply: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val animatedOffset by animateFloatAsState(targetValue = offsetX, label = "swipe")
+    val threshold = with(LocalDensity.current) { 72.dp.toPx() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset { IntOffset(animatedOffset.toInt(), 0) }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (offsetX > threshold) onReply()
+                        offsetX = 0f
+                    },
+                    onDragCancel = { offsetX = 0f },
+                    onHorizontalDrag = { _, dragAmount ->
+                        offsetX = (offsetX + dragAmount).coerceIn(0f, threshold * 1.3f)
+                    }
+                )
+            }
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun MessageBubble(
+    message: ChatMessage,
+    isMine: Boolean,
+    repliedMessage: ChatMessage? = null,
+    onImageClick: (String) -> Unit,
+    onDownload: (String, String) -> Unit,
+    onQuoteClick: () -> Unit = {},
+    onReply: () -> Unit = {},
+    onDelete: (() -> Unit)? = null
+) {
     val text = message.decryptedText ?: "🔒"
     val timeText = remember(message.timestamp) {
         if (message.timestamp == 0L) ""
         else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
+    val hasMedia = message.mediaUrl != null && message.mediaUrl.isNotEmpty()
+    var showMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
     ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .background(
+        Box {
+            @OptIn(ExperimentalFoundationApi::class)
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .background(
                     if (isMine) Purple.copy(alpha = 0.85f) else Surface,
                     RoundedCornerShape(
                         topStart = 16.dp,
@@ -386,6 +550,10 @@ private fun MessageBubble(message: ChatMessage, isMine: Boolean) {
                         bottomStart = if (isMine) 16.dp else 4.dp,
                         bottomEnd = if (isMine) 4.dp else 16.dp
                     )
+                )
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { showMenu = true }
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
@@ -400,12 +568,107 @@ private fun MessageBubble(message: ChatMessage, isMine: Boolean) {
                     Spacer(Modifier.height(2.dp))
                 }
 
-                when (message.type) {
-                    "image" -> {
-                        Text("📷 " + stringResource(R.string.chat_photo), color = if (isMine) OnPrimary else OnBackground, fontSize = 14.sp)
+                // Quoted reply
+                if (repliedMessage != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isMine) OnPrimary.copy(alpha = 0.12f) else SurfaceVariant.copy(alpha = 0.5f))
+                            .clickable { onQuoteClick() }
+                            .padding(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .height(28.dp)
+                                .background(Purple, RoundedCornerShape(2.dp))
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Column {
+                            Text(
+                                repliedMessage.senderName ?: "",
+                                color = Purple,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                repliedMessage.decryptedText ?: "🔒",
+                                color = if (isMine) OnPrimary.copy(alpha = 0.7f) else TextTertiary,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                    "file" -> {
-                        Text("📎 ${message.fileName ?: stringResource(R.string.chat_file)}", color = if (isMine) OnPrimary else OnBackground, fontSize = 14.sp)
+                    Spacer(Modifier.height(4.dp))
+                }
+
+                when {
+                    message.type == "image" && hasMedia -> {
+                        // Image preview
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(message.mediaUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = stringResource(R.string.chat_photo),
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 80.dp, max = 200.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onImageClick(message.mediaUrl!!) }
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        // Download link
+                        Row(
+                            modifier = Modifier.clickable { onDownload(message.mediaUrl!!, message.fileName ?: "image.jpg") },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Download, null, tint = if (isMine) OnPrimary.copy(alpha = 0.8f) else Purple, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                stringResource(R.string.chat_download),
+                                color = if (isMine) OnPrimary.copy(alpha = 0.8f) else Purple,
+                                fontSize = 12.sp,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        }
+                    }
+                    message.type == "file" && hasMedia -> {
+                        // File with download
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isMine) OnPrimary.copy(alpha = 0.1f) else SurfaceVariant.copy(alpha = 0.5f))
+                                .clickable { onDownload(message.mediaUrl!!, message.fileName ?: "file") }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, null, tint = if (isMine) OnPrimary else Purple, modifier = Modifier.size(28.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    message.fileName ?: stringResource(R.string.chat_file),
+                                    color = if (isMine) OnPrimary else OnBackground,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                if (message.fileSize != null && message.fileSize > 0) {
+                                    Text(
+                                        formatFileSize(message.fileSize),
+                                        color = if (isMine) OnPrimary.copy(alpha = 0.6f) else TextTertiary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            Icon(Icons.Default.Download, null, tint = if (isMine) OnPrimary else Purple, modifier = Modifier.size(20.dp))
+                        }
                     }
                     else -> {
                         Text(text, color = if (isMine) OnPrimary else OnBackground, fontSize = 14.sp)
@@ -421,5 +684,110 @@ private fun MessageBubble(message: ChatMessage, isMine: Boolean) {
                 )
             }
         }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.chat_reply)) },
+                    onClick = { showMenu = false; onReply() },
+                    leadingIcon = { Icon(Icons.Default.Reply, null) }
+                )
+                if (onDelete != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_delete), color = Color.Red) },
+                        onClick = { showMenu = false; onDelete() },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color.Red) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FullscreenImageViewer(
+    imageUrl: String,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit
+) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y
+                    )
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            if (scale > 1f) {
+                                offset = Offset(offset.x + pan.x, offset.y + pan.y)
+                            } else {
+                                offset = Offset.Zero
+                            }
+                        }
+                    }
+            )
+            // Top bar with close and download
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = Color.White)
+                }
+                IconButton(onClick = onDownload) {
+                    Icon(Icons.Default.Download, contentDescription = null, tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+private fun downloadFile(context: Context, url: String, fileName: String) {
+    try {
+        val request = DownloadManager.Request(Uri.parse(url))
+            .setTitle(fileName)
+            .setDescription("Downloading...")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            .setAllowedOverMetered(true)
+
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        dm.enqueue(request)
+    } catch (e: Exception) {
+        android.util.Log.e("ChatConversation", "Download failed", e)
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
     }
 }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.crypto.ChatCryptoManager
 import com.fpvideocalls.data.ChatRepository
 import com.fpvideocalls.model.Conversation
+import com.fpvideocalls.util.ChatEventBus
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,8 +25,19 @@ class ChatListViewModel @Inject constructor(
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
+    val totalUnreadCount: StateFlow<Int>
+        get() = _totalUnread
+    private val _totalUnread = MutableStateFlow(0)
+
     init {
         loadConversations()
+        // Refresh list when any new message or deletion arrives
+        viewModelScope.launch {
+            ChatEventBus.events.collect { loadConversations() }
+        }
+        viewModelScope.launch {
+            ChatEventBus.deleteEvents.collect { loadConversations() }
+        }
     }
 
     fun loadConversations() {
@@ -45,6 +57,7 @@ class ChatListViewModel @Inject constructor(
                 } else convo
             }
             _conversations.value = withPreviews
+            _totalUnread.value = withPreviews.sumOf { it.unreadCount }
             _loading.value = false
         }
     }

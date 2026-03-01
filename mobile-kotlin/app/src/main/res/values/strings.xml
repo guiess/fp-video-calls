@@ -160,6 +160,9 @@
     <string name="chat_send">Отправить</string>
     <string name="chat_photo">Фото</string>
     <string name="chat_file">Файл</string>
+    <string name="chat_download">Скачать</string>
+    <string name="chat_reply">Ответить</string>
+    <string name="chat_delete">Удалить</string>
     <string name="notification_channel_chat">Сообщения чата</string>
     <string name="notification_channel_chat_desc">Уведомления о новых сообщениях</string>
     <string name="search_users_placeholder">Поиск пользователей…</string>
