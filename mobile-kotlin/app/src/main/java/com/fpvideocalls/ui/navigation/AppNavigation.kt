@@ -462,28 +462,10 @@ fun MainScreen(navController: NavHostController) {
                 contentColor = OnSurface
             ) {
                 NavigationBarItem(
-                    selected = currentRoute == Routes.TAB_HOME,
-                    onClick = {
-                        tabNavController.navigate(Routes.TAB_HOME) {
-                            popUpTo(Routes.TAB_HOME) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Home, stringResource(R.string.nav_home)) },
-                    label = { Text(stringResource(R.string.nav_home)) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Purple,
-                        selectedTextColor = Purple,
-                        unselectedIconColor = TextTertiary,
-                        unselectedTextColor = TextTertiary,
-                        indicatorColor = Color.Transparent
-                    )
-                )
-                NavigationBarItem(
                     selected = currentRoute == Routes.TAB_CHATS,
                     onClick = {
                         tabNavController.navigate(Routes.TAB_CHATS) {
-                            popUpTo(Routes.TAB_HOME)
+                            popUpTo(Routes.TAB_CHATS) { inclusive = true }
                             launchSingleTop = true
                         }
                     },
@@ -511,7 +493,7 @@ fun MainScreen(navController: NavHostController) {
                     selected = currentRoute == Routes.TAB_ROOMS,
                     onClick = {
                         tabNavController.navigate(Routes.TAB_ROOMS) {
-                            popUpTo(Routes.TAB_HOME)
+                            popUpTo(Routes.TAB_CHATS)
                             launchSingleTop = true
                         }
                     },
@@ -529,7 +511,7 @@ fun MainScreen(navController: NavHostController) {
                     selected = currentRoute == Routes.TAB_OPTIONS,
                     onClick = {
                         tabNavController.navigate(Routes.TAB_OPTIONS) {
-                            popUpTo(Routes.TAB_HOME)
+                            popUpTo(Routes.TAB_CHATS)
                             launchSingleTop = true
                         }
                     },
@@ -548,26 +530,9 @@ fun MainScreen(navController: NavHostController) {
     ) { innerPadding ->
         NavHost(
             navController = tabNavController,
-            startDestination = Routes.TAB_HOME,
+            startDestination = Routes.TAB_CHATS,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Routes.TAB_HOME) {
-                HomeScreen(
-                    onNavigateToContacts = {
-                        tabNavController.navigate(Routes.TAB_CHATS) {
-                            launchSingleTop = true
-                        }
-                    },
-                    onNavigateToRooms = {
-                        tabNavController.navigate(Routes.TAB_ROOMS) {
-                            launchSingleTop = true
-                        }
-                    },
-                    onNavigateToGroupCall = {
-                        navController.navigate(Routes.GROUP_CALL_SETUP)
-                    }
-                )
-            }
             composable(Routes.TAB_CHATS) {
                 ChatsScreen(
                     chatListViewModel = chatListViewModel,
