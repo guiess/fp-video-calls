@@ -164,4 +164,16 @@
     <string name="search_users_placeholder">Search users…</string>
     <string name="no_results">No results found</string>
     <string name="contacts_empty_hint">Add contacts to start chatting</string>
+    <string name="new_group_chat">New Group Chat</string>
+    <string name="group_min_hint">At least 2 members to create a group</string>
+    <string name="next_button">Next</string>
+    <string name="create_button">Create</string>
+    <string name="group_name_placeholder">Enter group name</string>
+    <string name="typing_indicator">typing…</string>
+    <string name="options_notifications">Notifications</string>
+    <string name="options_notif_calls">Calls</string>
+    <string name="options_notif_chat">Messages</string>
+    <string name="notif_always">Always</string>
+    <string name="notif_when_inactive">When inactive</string>
+    <string name="notif_never">Never</string>
 </resources>

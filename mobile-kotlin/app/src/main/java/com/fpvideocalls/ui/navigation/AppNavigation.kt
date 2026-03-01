@@ -365,13 +365,34 @@ fun AppNavigation(
             NewChatScreen(
                 onContactSelected = { contact ->
                     val myUid = user?.uid ?: return@NewChatScreen
-                    val myName = user?.displayName ?: "Me"
-                    // Navigate to conversation (will create if needed via ViewModel)
                     navController.navigate(
                         Routes.chatConversation(
                             conversationId = "new_${contact.uid}",
                             displayName = contact.displayName,
                             participantUids = listOf(myUid, contact.uid)
+                        )
+                    ) {
+                        popUpTo(Routes.NEW_CHAT) { inclusive = true }
+                    }
+                },
+                onNewGroup = {
+                    navController.navigate(Routes.NEW_GROUP_CHAT)
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        // New group chat — multi-contact picker + name
+        composable(Routes.NEW_GROUP_CHAT) {
+            NewGroupChatScreen(
+                onGroupCreated = { groupName, selectedContacts ->
+                    val myUid = user?.uid ?: return@NewGroupChatScreen
+                    val allUids = listOf(myUid) + selectedContacts.map { it.uid }
+                    navController.navigate(
+                        Routes.chatConversation(
+                            conversationId = "newgroup_${System.currentTimeMillis()}",
+                            displayName = groupName,
+                            participantUids = allUids
                         )
                     ) {
                         popUpTo(Routes.NEW_CHAT) { inclusive = true }

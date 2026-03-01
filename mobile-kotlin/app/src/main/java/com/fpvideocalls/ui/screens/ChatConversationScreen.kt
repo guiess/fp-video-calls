@@ -40,12 +40,13 @@ fun ChatConversationScreen(
 ) {
     val messages by viewModel.messages.collectAsState()
     val sending by viewModel.sending.collectAsState()
+    val typingUsers by viewModel.typingUsers.collectAsState()
     var inputText by remember { mutableStateOf("") }
     val myUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
     val myName = FirebaseAuth.getInstance().currentUser?.displayName
 
     LaunchedEffect(conversationId) {
-        viewModel.init(conversationId, participantUids)
+        viewModel.init(conversationId, participantUids, displayName)
     }
 
     Column(
@@ -89,6 +90,16 @@ fun ChatConversationScreen(
             }
         }
 
+        // Typing indicator
+        if (typingUsers.isNotEmpty()) {
+            Text(
+                stringResource(R.string.typing_indicator),
+                color = TextTertiary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+        }
+
         // Input bar
         Row(
             modifier = Modifier
@@ -99,7 +110,10 @@ fun ChatConversationScreen(
         ) {
             OutlinedTextField(
                 value = inputText,
-                onValueChange = { inputText = it },
+                onValueChange = {
+                    inputText = it
+                    viewModel.onTypingChanged(it.isNotBlank())
+                },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text(stringResource(R.string.chat_input_placeholder), color = TextTertiary) },
                 shape = RoundedCornerShape(24.dp),

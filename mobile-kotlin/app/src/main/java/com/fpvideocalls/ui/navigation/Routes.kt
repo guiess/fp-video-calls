@@ -21,6 +21,7 @@ object Routes {
     // Chat
     const val CHAT_CONVERSATION = "chat_conversation/{conversationId}/{displayName}/{participantUids}"
     const val NEW_CHAT = "new_chat"
+    const val NEW_GROUP_CHAT = "new_group_chat"
 
     fun inCall(roomId: String, displayName: String, userId: String, callType: String = "room", password: String? = null): String {
         val encName = URLEncoder.encode(displayName, "UTF-8")

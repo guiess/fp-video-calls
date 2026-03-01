@@ -30,6 +30,7 @@ import com.google.firebase.auth.FirebaseAuth
 @Composable
 fun NewChatScreen(
     onContactSelected: (contact: Contact) -> Unit,
+    onNewGroup: () -> Unit,
     onBack: () -> Unit,
     contactsViewModel: ContactsViewModel = hiltViewModel()
 ) {
@@ -93,6 +94,31 @@ fun NewChatScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
+                // "New Group" option at top
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onNewGroup)
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier.size(44.dp).clip(CircleShape).background(Purple.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("👥", fontSize = 20.sp)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            stringResource(R.string.new_group_chat),
+                            color = Purple,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp
+                        )
+                    }
+                    HorizontalDivider(color = SurfaceVariant, thickness = 0.5.dp)
+                }
                 items(displayList, key = { it.uid }) { contact ->
                     ContactItem(contact = contact, onClick = { onContactSelected(contact) })
                 }

@@ -4,9 +4,11 @@ import android.content.Intent
 import android.util.Log
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.util.AppLifecycle
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
 import com.fpvideocalls.util.ChatEventBus
+import com.fpvideocalls.util.NotifPrefs
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -29,6 +31,12 @@ class FcmService : FirebaseMessagingService() {
     }
 
     private fun handleCallInvite(data: Map<String, String>) {
+        val callSetting = NotifPrefs.getCalls(applicationContext)
+        if (!NotifPrefs.shouldNotify(callSetting, AppLifecycle.isAppInForeground)) {
+            Log.d(TAG, "Call notification suppressed by settings: $callSetting")
+            return
+        }
+
         val callUUID = data["callUUID"] ?: ""
         val timestamp = data["timestamp"]?.toLongOrNull() ?: System.currentTimeMillis()
 
@@ -93,7 +101,13 @@ class FcmService : FirebaseMessagingService() {
         // Post to event bus for foreground conversation screen
         ChatEventBus.post(ChatEventBus.ChatEvent(conversationId, messageId))
 
-        // Show notification
+        // Check notification settings
+        val chatSetting = NotifPrefs.getChat(applicationContext)
+        if (!NotifPrefs.shouldNotify(chatSetting, AppLifecycle.isAppInForeground)) {
+            Log.d(TAG, "Chat notification suppressed by settings: $chatSetting")
+            return
+        }
+
         NotificationHelper.showChatNotification(
             applicationContext, senderName, applicationContext.getString(com.fpvideocalls.R.string.chats_encrypted_message), conversationId
         )

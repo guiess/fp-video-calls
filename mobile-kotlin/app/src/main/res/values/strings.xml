@@ -164,4 +164,16 @@
     <string name="search_users_placeholder">Поиск пользователей…</string>
     <string name="no_results">Ничего не найдено</string>
     <string name="contacts_empty_hint">Добавьте контакты, чтобы начать общение</string>
+    <string name="new_group_chat">Новый групповой чат</string>
+    <string name="group_min_hint">Минимум 2 участника для создания группы</string>
+    <string name="next_button">Далее</string>
+    <string name="create_button">Создать</string>
+    <string name="group_name_placeholder">Введите название группы</string>
+    <string name="typing_indicator">печатает…</string>
+    <string name="options_notifications">Уведомления</string>
+    <string name="options_notif_calls">Звонки</string>
+    <string name="options_notif_chat">Сообщения</string>
+    <string name="notif_always">Всегда</string>
+    <string name="notif_when_inactive">Когда неактивно</string>
+    <string name="notif_never">Никогда</string>
 </resources>

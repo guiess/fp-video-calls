@@ -5,8 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.crypto.ChatCryptoManager
 import com.fpvideocalls.data.ChatRepository
 import com.fpvideocalls.model.ChatMessage
+import com.fpvideocalls.service.ChatSocketManager
 import com.fpvideocalls.util.ChatEventBus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,11 +22,10 @@ class ChatConversationViewModel @Inject constructor(
 ) : ViewModel() {
 
     init {
-        // Listen for real-time chat events (from FCM or Socket.IO)
         viewModelScope.launch {
             ChatEventBus.events.collect { event ->
                 if (event.conversationId == currentConversationId) {
-                    loadMessages() // Refresh messages
+                    loadMessages()
                 }
             }
         }
@@ -38,15 +40,44 @@ class ChatConversationViewModel @Inject constructor(
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending.asStateFlow()
 
+    private val _typingUsers = MutableStateFlow<Set<String>>(emptySet())
+    val typingUsers: StateFlow<Set<String>> = _typingUsers.asStateFlow()
+
     private var currentConversationId: String? = null
     private var participantUids: List<String> = emptyList()
+    private var displayName: String = ""
+    private var typingJob: Job? = null
+    private var myTypingCallback: ((String, String, Boolean) -> Unit)? = null
 
-    fun init(conversationId: String, participants: List<String>) {
+    fun init(conversationId: String, participants: List<String>, name: String = "") {
         currentConversationId = conversationId
         participantUids = participants
-        // Don't load messages for new (uncreated) conversations
-        if (!conversationId.startsWith("new_")) {
+        displayName = name
+
+        myTypingCallback = { convoId, uid, typing ->
+            if (convoId == currentConversationId) {
+                val current = _typingUsers.value.toMutableSet()
+                if (typing) current.add(uid) else current.remove(uid)
+                _typingUsers.value = current
+            }
+        }
+        ChatSocketManager.onTyping = myTypingCallback
+
+        if (!conversationId.startsWith("new")) {
             loadMessages()
+        }
+    }
+
+    fun onTypingChanged(isTyping: Boolean) {
+        val convoId = currentConversationId ?: return
+        if (convoId.startsWith("new")) return
+        typingJob?.cancel()
+        ChatSocketManager.sendTyping(convoId, isTyping)
+        if (isTyping) {
+            typingJob = viewModelScope.launch {
+                delay(3000)
+                ChatSocketManager.sendTyping(convoId, false)
+            }
         }
     }
 
@@ -69,8 +100,6 @@ class ChatConversationViewModel @Inject constructor(
                 _messages.value = decrypted
             }
             _loading.value = false
-
-            // Mark as read
             msgs.firstOrNull()?.let { chatRepository.markAsRead(convoId, it.id) }
         }
     }
@@ -78,19 +107,21 @@ class ChatConversationViewModel @Inject constructor(
     fun sendMessage(text: String, senderName: String?) {
         var convoId = currentConversationId ?: return
         if (text.isBlank()) return
+        onTypingChanged(false)
         viewModelScope.launch {
             _sending.value = true
-            // Create conversation if this is the first message
-            if (convoId.startsWith("new_")) {
+            if (convoId.startsWith("new")) {
                 val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val myName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Me"
+                val isGroup = participantUids.size > 2
                 val names = mutableMapOf<String, String>()
                 names[myUid] = myName
-                participantUids.filter { it != myUid }.forEach { uid -> names[uid] = senderName ?: "User" }
+                participantUids.filter { it != myUid }.forEach { uid -> names[uid] = "User" }
                 val newId = chatRepository.createConversation(
-                    type = if (participantUids.size > 2) "group" else "direct",
+                    type = if (isGroup) "group" else "direct",
                     participantUids = participantUids,
-                    participantNames = names
+                    participantNames = names,
+                    groupName = if (isGroup) displayName else null
                 )
                 if (newId != null) {
                     convoId = newId
@@ -114,24 +145,11 @@ class ChatConversationViewModel @Inject constructor(
         }
     }
 
-    /** Called when a real-time message arrives via Socket.IO */
-    fun onMessageReceived(msg: ChatMessage) {
-        if (msg.conversationId != currentConversationId) return
-        // Decrypt
-        val decrypted = try {
-            val result = ChatCryptoManager.decryptMessage(
-                msg.ciphertext, msg.iv, msg.encryptedKeys, msg.senderUid
-            )
-            msg.copy(decryptedText = result?.plaintext)
-        } catch (_: Exception) { msg }
-
-        // Deduplicate
-        if (_messages.value.none { it.id == msg.id }) {
-            _messages.value = listOf(decrypted) + _messages.value
-        }
-        // Mark as read
-        viewModelScope.launch {
-            chatRepository.markAsRead(msg.conversationId, msg.id)
+    override fun onCleared() {
+        super.onCleared()
+        currentConversationId?.let { ChatSocketManager.sendTyping(it, false) }
+        if (ChatSocketManager.onTyping == myTypingCallback) {
+            ChatSocketManager.onTyping = null
         }
     }
 }
