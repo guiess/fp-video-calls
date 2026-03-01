@@ -177,4 +177,9 @@
     <string name="notif_always">Всегда</string>
     <string name="notif_when_inactive">Когда неактивно</string>
     <string name="notif_never">Никогда</string>
+    <string name="group_add_member">Добавить участника</string>
+    <string name="group_remove_member_title">Удалить участника</string>
+    <string name="group_remove_member_msg">Удалить %1$s из группы?</string>
+    <string name="group_no_contacts_to_add">Нет контактов для добавления</string>
+    <string name="group_info">Инфо группы</string>
 </resources>

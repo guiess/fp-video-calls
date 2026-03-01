@@ -347,18 +347,22 @@ fun AppNavigation(
             arguments = listOf(
                 navArgument("conversationId") { type = NavType.StringType },
                 navArgument("displayName") { type = NavType.StringType },
-                navArgument("participantUids") { type = NavType.StringType }
+                navArgument("participantUids") { type = NavType.StringType },
+                navArgument("type") { type = NavType.StringType; defaultValue = "direct" }
             )
         ) { backStackEntry ->
             val convoId = backStackEntry.arguments?.getString("conversationId") ?: ""
             val displayName = backStackEntry.arguments?.getString("displayName") ?: ""
             val uidsStr = backStackEntry.arguments?.getString("participantUids") ?: ""
             val uids = uidsStr.split(",").filter { it.isNotEmpty() }
+            val convoType = backStackEntry.arguments?.getString("type") ?: "direct"
+            val isGroup = convoType == "group" || convoId.startsWith("newgroup_")
             val currentUser by authViewModel.user.collectAsState()
             ChatConversationScreen(
                 conversationId = convoId,
                 displayName = displayName,
                 participantUids = uids,
+                isGroup = isGroup,
                 onBack = { navController.popBackStack() },
                 onVideoCall = {
                     val otherUids = uids.filter { it != currentUser?.uid }
@@ -406,12 +410,31 @@ fun AppNavigation(
                         Routes.chatConversation(
                             conversationId = "newgroup_${System.currentTimeMillis()}",
                             displayName = groupName,
-                            participantUids = allUids
+                            participantUids = allUids,
+                            type = "group"
                         )
                     ) {
                         popUpTo(Routes.NEW_CHAT) { inclusive = true }
                     }
                 },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        // Group info screen
+        composable(
+            route = Routes.GROUP_INFO,
+            arguments = listOf(
+                navArgument("conversationId") { type = NavType.StringType },
+                navArgument("groupName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val convoId = backStackEntry.arguments?.getString("conversationId") ?: ""
+            val groupName = backStackEntry.arguments?.getString("groupName") ?: ""
+            GroupInfoScreen(
+                conversationId = convoId,
+                groupName = groupName,
+                initialParticipants = emptyList(),
                 onBack = { navController.popBackStack() }
             )
         }
@@ -533,8 +556,8 @@ fun MainScreen(navController: NavHostController) {
             }
             composable(Routes.TAB_CHATS) {
                 ChatsScreen(
-                    onOpenConversation = { convoId, displayName, uids ->
-                        navController.navigate(Routes.chatConversation(convoId, displayName, uids))
+                    onOpenConversation = { convoId, displayName, uids, type ->
+                        navController.navigate(Routes.chatConversation(convoId, displayName, uids, type))
                     },
                     onNewChat = {
                         navController.navigate(Routes.NEW_CHAT)

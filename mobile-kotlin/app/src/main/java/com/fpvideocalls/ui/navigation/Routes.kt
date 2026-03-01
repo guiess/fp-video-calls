@@ -19,9 +19,10 @@ object Routes {
     const val TAB_OPTIONS = "tab_options"
 
     // Chat
-    const val CHAT_CONVERSATION = "chat_conversation/{conversationId}/{displayName}/{participantUids}"
+    const val CHAT_CONVERSATION = "chat_conversation/{conversationId}/{displayName}/{participantUids}?type={type}"
     const val NEW_CHAT = "new_chat"
     const val NEW_GROUP_CHAT = "new_group_chat"
+    const val GROUP_INFO = "group_info/{conversationId}/{groupName}"
 
     fun inCall(roomId: String, displayName: String, userId: String, callType: String = "room", password: String? = null): String {
         val encName = URLEncoder.encode(displayName, "UTF-8")
@@ -34,9 +35,13 @@ object Routes {
 
     fun outgoingCall(callType: String): String = "outgoing_call/$callType"
     fun preCall(callType: String): String = "pre_call/$callType"
-    fun chatConversation(conversationId: String, displayName: String, participantUids: List<String>): String {
+    fun chatConversation(conversationId: String, displayName: String, participantUids: List<String>, type: String = "direct"): String {
         val encName = URLEncoder.encode(displayName, "UTF-8")
         val encUids = URLEncoder.encode(participantUids.joinToString(","), "UTF-8")
-        return "chat_conversation/$conversationId/$encName/$encUids"
+        return "chat_conversation/$conversationId/$encName/$encUids?type=$type"
+    }
+    fun groupInfo(conversationId: String, groupName: String): String {
+        val encName = URLEncoder.encode(groupName, "UTF-8")
+        return "group_info/$conversationId/$encName"
     }
 }

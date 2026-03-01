@@ -325,6 +325,70 @@ router.put("/conversations/:id/mute", (req, res) => {
   return res.json({ ok: true, muted: !!muted });
 });
 
+// ── POST /api/chat/conversations/:id/members — Add members to group ─────────
+
+router.post("/conversations/:id/members", (req, res) => {
+  const { id } = req.params;
+  const uid = req.uid;
+
+  if (!isParticipant(id, uid)) {
+    return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+  }
+
+  const convo = db.prepare("SELECT type FROM conversations WHERE id = ?").get(id);
+  if (!convo || convo.type !== "group") {
+    return res.status(400).json({ ok: false, error: "NOT_GROUP" });
+  }
+
+  const { members } = req.body || {};
+  if (!Array.isArray(members) || members.length === 0) {
+    return res.status(400).json({ ok: false, error: "NO_MEMBERS" });
+  }
+
+  const now = Date.now();
+  const insert = db.prepare(
+    "INSERT OR IGNORE INTO conversation_participants (conversation_id, user_uid, user_name, joined_at) VALUES (?, ?, ?, ?)"
+  );
+  const txn = db.transaction(() => {
+    for (const m of members) {
+      insert.run(id, m.uid, m.name || null, now);
+    }
+  });
+  txn();
+
+  const participants = db.prepare(
+    "SELECT user_uid, user_name, muted FROM conversation_participants WHERE conversation_id = ?"
+  ).all(id);
+
+  return res.json({ ok: true, participants });
+});
+
+// ── DELETE /api/chat/conversations/:id/members/:uid — Remove member ─────────
+
+router.delete("/conversations/:id/members/:memberUid", (req, res) => {
+  const { id, memberUid } = req.params;
+  const uid = req.uid;
+
+  if (!isParticipant(id, uid)) {
+    return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+  }
+
+  const convo = db.prepare("SELECT type FROM conversations WHERE id = ?").get(id);
+  if (!convo || convo.type !== "group") {
+    return res.status(400).json({ ok: false, error: "NOT_GROUP" });
+  }
+
+  db.prepare(
+    "DELETE FROM conversation_participants WHERE conversation_id = ? AND user_uid = ?"
+  ).run(id, memberUid);
+
+  const participants = db.prepare(
+    "SELECT user_uid, user_name, muted FROM conversation_participants WHERE conversation_id = ?"
+  ).all(id);
+
+  return res.json({ ok: true, participants });
+});
+
 // ── DELETE /api/chat/conversations/:id — Leave conversation ─────────────────
 
 router.delete("/conversations/:id", (req, res) => {

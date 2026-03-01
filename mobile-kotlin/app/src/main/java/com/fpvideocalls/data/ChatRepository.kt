@@ -195,6 +195,73 @@ class ChatRepository @Inject constructor(
         try { okHttpClient.newCall(request).execute() } catch (_: Exception) {}
     }
 
+    suspend fun addMembers(conversationId: String, members: List<Pair<String, String>>): List<ChatParticipant>? = withContext(Dispatchers.IO) {
+        val token = getAuthToken() ?: return@withContext null
+        val arr = JSONArray()
+        members.forEach { (uid, name) ->
+            arr.put(JSONObject().apply { put("uid", uid); put("name", name) })
+        }
+        val body = JSONObject().apply { put("members", arr) }
+        val request = Request.Builder()
+            .url("$baseUrl/api/chat/conversations/$conversationId/members")
+            .addHeader("Authorization", "Bearer $token")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val json = JSONObject(response.body?.string() ?: "{}")
+            if (!json.optBoolean("ok")) return@withContext null
+            val pArr = json.getJSONArray("participants")
+            (0 until pArr.length()).map { i ->
+                val p = pArr.getJSONObject(i)
+                ChatParticipant(p.getString("user_uid"), p.optString("user_name", null), p.optInt("muted", 0) == 1)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "addMembers failed", e)
+            null
+        }
+    }
+
+    suspend fun removeMember(conversationId: String, memberUid: String): List<ChatParticipant>? = withContext(Dispatchers.IO) {
+        val token = getAuthToken() ?: return@withContext null
+        val request = Request.Builder()
+            .url("$baseUrl/api/chat/conversations/$conversationId/members/$memberUid")
+            .addHeader("Authorization", "Bearer $token")
+            .delete()
+            .build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val json = JSONObject(response.body?.string() ?: "{}")
+            if (!json.optBoolean("ok")) return@withContext null
+            val pArr = json.getJSONArray("participants")
+            (0 until pArr.length()).map { i ->
+                val p = pArr.getJSONObject(i)
+                ChatParticipant(p.getString("user_uid"), p.optString("user_name", null), p.optInt("muted", 0) == 1)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "removeMember failed", e)
+            null
+        }
+    }
+
+    suspend fun getConversationDetails(conversationId: String): Conversation? = withContext(Dispatchers.IO) {
+        val token = getAuthToken() ?: return@withContext null
+        val request = Request.Builder()
+            .url("$baseUrl/api/chat/conversations/$conversationId")
+            .addHeader("Authorization", "Bearer $token")
+            .get()
+            .build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val json = JSONObject(response.body?.string() ?: "{}")
+            if (!json.optBoolean("ok")) return@withContext null
+            parseConversation(json.getJSONObject("conversation"))
+        } catch (e: Exception) {
+            Log.e(TAG, "getConversationDetails failed", e)
+            null
+        }
+    }
+
     // ── Parsing ────────────────────────────────────────────────────────────
 
     private fun parseConversation(json: JSONObject): Conversation {
