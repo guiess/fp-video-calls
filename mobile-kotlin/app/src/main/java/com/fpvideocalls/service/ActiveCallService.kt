@@ -44,6 +44,7 @@ class ActiveCallService : Service() {
             private set
         var activeCallInfo: ActiveCallInfo? = null
             private set
+        var pendingCameraOff = false
 
         fun startCall(
             context: Context,
@@ -129,6 +130,10 @@ class ActiveCallService : Service() {
 
         val manager = WebRTCManager(applicationContext, callApiService, serviceScope)
         webRTCManager = manager
+        if (pendingCameraOff) {
+            manager.setInitialCameraOff()
+            pendingCameraOff = false
+        }
         manager.setup(roomId, userId, displayName, password)
 
         // Signal readiness AFTER webRTCManager is assigned — callers using

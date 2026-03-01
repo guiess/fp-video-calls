@@ -38,7 +38,6 @@ fun ChatConversationScreen(
     displayName: String,
     participantUids: List<String>,
     onBack: () -> Unit,
-    onVoiceCall: () -> Unit,
     onVideoCall: () -> Unit,
     viewModel: ChatConversationViewModel = hiltViewModel()
 ) {
@@ -66,6 +65,8 @@ fun ChatConversationScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Background)
+            .navigationBarsPadding()
+            .imePadding()
     ) {
         // Top bar
         TopAppBar(
@@ -78,9 +79,6 @@ fun ChatConversationScreen(
                 }
             },
             actions = {
-                IconButton(onClick = onVoiceCall) {
-                    Icon(Icons.Default.Call, contentDescription = null, tint = OnBackground)
-                }
                 IconButton(onClick = onVideoCall) {
                     Icon(Icons.Default.Videocam, contentDescription = null, tint = OnBackground)
                 }

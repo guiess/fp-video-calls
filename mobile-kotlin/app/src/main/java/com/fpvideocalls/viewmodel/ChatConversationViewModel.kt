@@ -96,11 +96,11 @@ class ChatConversationViewModel @Inject constructor(
                     val result = ChatCryptoManager.decryptMessage(
                         msg.ciphertext, msg.iv, msg.encryptedKeys, msg.senderUid
                     )
-                    msg.copy(decryptedText = result?.plaintext)
+                    msg.copy(decryptedText = result?.plaintext ?: msg.decryptedText)
                 } catch (_: Exception) { msg }
             }
             if (before != null) {
-                _messages.value = _messages.value + decrypted
+                _messages.value = (_messages.value + decrypted).distinctBy { it.id }
             } else {
                 _messages.value = decrypted
             }
@@ -118,10 +118,15 @@ class ChatConversationViewModel @Inject constructor(
             if (convoId.startsWith("new")) {
                 val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val myName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Me"
-                val isGroup = participantUids.size > 2
+                val isGroup = convoId.startsWith("newgroup_") || participantUids.size > 2
                 val names = mutableMapOf<String, String>()
                 names[myUid] = myName
-                participantUids.filter { it != myUid }.forEach { uid -> names[uid] = "User" }
+                val otherUids = participantUids.filter { it != myUid }
+                if (!isGroup && otherUids.size == 1) {
+                    names[otherUids[0]] = displayName
+                } else {
+                    otherUids.forEach { uid -> names[uid] = displayName }
+                }
                 val newId = chatRepository.createConversation(
                     type = if (isGroup) "group" else "direct",
                     participantUids = participantUids,
@@ -144,7 +149,7 @@ class ChatConversationViewModel @Inject constructor(
             )
             if (msg != null) {
                 val decrypted = msg.copy(decryptedText = text.trim())
-                _messages.value = listOf(decrypted) + _messages.value
+                _messages.value = (listOf(decrypted) + _messages.value).distinctBy { it.id }
             }
             _sending.value = false
         }
@@ -170,7 +175,7 @@ class ChatConversationViewModel @Inject constructor(
                 )
                 if (msg != null) {
                     val label = if (type == "image") "📷" else "📎 $fileName"
-                    _messages.value = listOf(msg.copy(decryptedText = label)) + _messages.value
+                    _messages.value = (listOf(msg.copy(decryptedText = label)) + _messages.value).distinctBy { it.id }
                 }
             }
             _sending.value = false

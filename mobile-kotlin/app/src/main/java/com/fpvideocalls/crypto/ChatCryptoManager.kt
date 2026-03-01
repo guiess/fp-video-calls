@@ -204,7 +204,7 @@ object ChatCryptoManager {
     /**
      * Decrypt a message using our encrypted key from the encryptedKeys map.
      */
-    fun decryptMessage(
+    suspend fun decryptMessage(
         ciphertextB64: String,
         ivB64: String,
         encryptedKeys: Map<String, String>,
@@ -216,8 +216,8 @@ object ChatCryptoManager {
         val ourWrappedKeyB64 = encryptedKeys[myUid] ?: return null
         val ourWrappedKey = Base64.decode(ourWrappedKeyB64, Base64.NO_WRAP)
 
-        // We need the sender's public key to compute shared secret
-        val senderPubKey = publicKeyCache[senderUid] ?: return null
+        // We need the sender's public key to compute shared secret (fetch if not cached)
+        val senderPubKey = getPublicKey(senderUid) ?: return null
         val sharedSecret = computeSharedSecret(senderPubKey)
 
         // Unwrap the message key

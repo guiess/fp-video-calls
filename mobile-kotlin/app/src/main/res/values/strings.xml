@@ -95,6 +95,7 @@
     <string name="incoming_video_call">Входящий видеозвонок</string>
     <string name="decline">Отклонить</string>
     <string name="answer">Ответить</string>
+    <string name="answer_no_video">Без видео</string>
     <string name="call_type_group">Групповой звонок</string>
     <string name="call_type_video">Видеозвонок</string>
 

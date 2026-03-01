@@ -66,6 +66,11 @@ class WebRTCManager(
 
     fun getEglBase(): EglBase? = eglBase
 
+    /** Set initial camera state before setup() is called. */
+    fun setInitialCameraOff() {
+        _camEnabled.value = false
+    }
+
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
         localUserId = userId
         Log.d(TAG, "setup() called: room=$roomId user=$userId")
@@ -231,8 +236,12 @@ class WebRTCManager(
         videoCapturer!!.startCapture(1280, 720, 30)
 
         localVideoTrack = f.createVideoTrack("video0", videoSource)
-        localVideoTrack?.setEnabled(true)
+        localVideoTrack?.setEnabled(_camEnabled.value)
         _localVideoTrackFlow.value = localVideoTrack
+
+        if (!_camEnabled.value) {
+            try { videoCapturer?.stopCapture() } catch (_: Exception) {}
+        }
     }
 
     private fun createPeerConnection(targetId: String): PeerConnection {
@@ -405,6 +414,11 @@ class WebRTCManager(
     fun toggleCam() {
         val newEnabled = !_camEnabled.value
         localVideoTrack?.setEnabled(newEnabled)
+        if (newEnabled) {
+            try { videoCapturer?.startCapture(1280, 720, 30) } catch (_: Exception) {}
+        } else {
+            try { videoCapturer?.stopCapture() } catch (_: Exception) {}
+        }
         _camEnabled.value = newEnabled
     }
 

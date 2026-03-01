@@ -4,11 +4,17 @@ import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -23,7 +29,7 @@ import com.fpvideocalls.ui.theme.*
 @Composable
 fun IncomingCallScreen(
     callData: IncomingCallData,
-    onAnswer: (roomId: String, callType: String, password: String?) -> Unit,
+    onAnswer: (roomId: String, callType: String, password: String?, cameraOff: Boolean) -> Unit,
     onDecline: () -> Unit
 ) {
     val context = LocalContext.current
@@ -57,7 +63,7 @@ fun IncomingCallScreen(
 
         Spacer(Modifier.height(48.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             // Decline
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(
@@ -66,16 +72,16 @@ fun IncomingCallScreen(
                         onDecline()
                     },
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(72.dp)
                         .background(DeclineRed, CircleShape)
                 ) {
-                    Text("\uD83D\uDCF5", fontSize = 28.sp)
+                    Icon(Icons.Default.CallEnd, contentDescription = stringResource(R.string.decline), tint = Color.White, modifier = Modifier.size(32.dp))
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(stringResource(R.string.decline), color = OnBackground, fontSize = 12.sp)
             }
 
-            // Answer
+            // Answer (camera off)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(
                     onClick = {
@@ -83,14 +89,37 @@ fun IncomingCallScreen(
                         onAnswer(
                             callData.roomId,
                             callData.callType.value,
-                            callData.roomPassword
+                            callData.roomPassword,
+                            true
                         )
                     },
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(72.dp)
+                        .background(SuccessGreen.copy(alpha = 0.7f), CircleShape)
+                ) {
+                    Icon(Icons.Default.Phone, contentDescription = stringResource(R.string.answer_no_video), tint = Color.White, modifier = Modifier.size(32.dp))
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(stringResource(R.string.answer_no_video), color = OnBackground, fontSize = 12.sp)
+            }
+
+            // Answer (with camera)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(
+                    onClick = {
+                        context.stopService(Intent(context, CallRingingService::class.java))
+                        onAnswer(
+                            callData.roomId,
+                            callData.callType.value,
+                            callData.roomPassword,
+                            false
+                        )
+                    },
+                    modifier = Modifier
+                        .size(72.dp)
                         .background(SuccessGreen, CircleShape)
                 ) {
-                    Text("\uD83D\uDCF2", fontSize = 28.sp)
+                    Icon(Icons.Default.Videocam, contentDescription = stringResource(R.string.answer), tint = Color.White, modifier = Modifier.size(32.dp))
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(stringResource(R.string.answer), color = OnBackground, fontSize = 12.sp)

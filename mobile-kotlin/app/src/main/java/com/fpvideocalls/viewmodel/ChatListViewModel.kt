@@ -40,7 +40,7 @@ class ChatListViewModel @Inject constructor(
                         val decrypted = ChatCryptoManager.decryptMessage(
                             lastMsg.ciphertext, lastMsg.iv, lastMsg.encryptedKeys, lastMsg.senderUid
                         )
-                        convo.copy(lastMessage = lastMsg.copy(decryptedText = decrypted?.plaintext))
+                        convo.copy(lastMessage = lastMsg.copy(decryptedText = decrypted?.plaintext ?: lastMsg.decryptedText))
                     } catch (_: Exception) { convo }
                 } else convo
             }

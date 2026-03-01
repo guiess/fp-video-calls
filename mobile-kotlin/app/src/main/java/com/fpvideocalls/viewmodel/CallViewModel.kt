@@ -31,7 +31,8 @@ sealed class CallNavigationEvent {
 @HiltViewModel
 class CallViewModel @Inject constructor(
     application: Application,
-    private val firestoreRepository: FirestoreRepository
+    private val firestoreRepository: FirestoreRepository,
+    private val callApiService: com.fpvideocalls.data.CallApiService
 ) : AndroidViewModel(application) {
 
     private val _incomingCall = MutableStateFlow<IncomingCallData?>(null)
@@ -63,9 +64,24 @@ class CallViewModel @Inject constructor(
                     }
                     is CallEvent.Decline -> {
                         Log.d("CallViewModel", "Call declined: ${event.callUUID}")
+                        val callData = _incomingCall.value
                         CallStateManager.declineCall(event.callUUID)
                         _incomingCall.value = null
                         _navigationEvents.emit(CallNavigationEvent.DismissIncomingCall)
+                        // Notify caller that we declined
+                        if (callData != null) {
+                            viewModelScope.launch {
+                                try {
+                                    callApiService.cancelCall(
+                                        calleeUids = listOf(callData.callerId),
+                                        roomId = callData.roomId,
+                                        callUUID = callData.callUUID
+                                    )
+                                } catch (e: Exception) {
+                                    Log.w("CallViewModel", "Failed to send decline to caller", e)
+                                }
+                            }
+                        }
                         saveCallHistory(event.callUUID)
                     }
                     is CallEvent.Timeout -> {

@@ -130,7 +130,12 @@ class ChatRepository @Inject constructor(
     ): ChatMessage? = withContext(Dispatchers.IO) {
         val token = getAuthToken() ?: return@withContext null
 
-        val encrypted = ChatCryptoManager.encryptMessage(plaintext, participantUids)
+        val encrypted = try {
+            ChatCryptoManager.encryptMessage(plaintext, participantUids)
+        } catch (e: Exception) {
+            Log.e(TAG, "encryptMessage failed", e)
+            return@withContext null
+        }
 
         val body = JSONObject().apply {
             put("type", type)
@@ -138,6 +143,7 @@ class ChatRepository @Inject constructor(
             put("iv", encrypted.iv)
             put("encryptedKeys", JSONObject(encrypted.encryptedKeys))
             put("senderName", senderName ?: "")
+            put("plaintext", plaintext)
             if (mediaUrl != null) put("mediaUrl", mediaUrl)
             if (fileName != null) put("fileName", fileName)
             if (fileSize != null) put("fileSize", fileSize)
@@ -224,6 +230,8 @@ class ChatRepository @Inject constructor(
         val encryptedKeys = mutableMapOf<String, String>()
         encKeysJson.keys().forEach { key -> encryptedKeys[key] = encKeysJson.getString(key) }
 
+        val serverPlaintext = json.optString("plaintext", null)?.takeIf { it.isNotEmpty() }
+
         return ChatMessage(
             id = json.getString("id"),
             conversationId = json.optString("conversationId", json.optString("conversation_id", "")),
@@ -236,7 +244,8 @@ class ChatRepository @Inject constructor(
             mediaUrl = json.optString("mediaUrl", json.optString("media_url", null)),
             fileName = json.optString("fileName", json.optString("file_name", null)),
             fileSize = json.optLong("fileSize", json.optLong("file_size", 0)).takeIf { it > 0 },
-            timestamp = json.optLong("timestamp", 0)
+            timestamp = json.optLong("timestamp", 0),
+            decryptedText = serverPlaintext
         )
     }
 }

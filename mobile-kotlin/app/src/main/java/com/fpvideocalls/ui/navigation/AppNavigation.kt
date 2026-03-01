@@ -87,6 +87,14 @@ fun AppNavigation(
         val action = intent.getStringExtra("action")
 
         if (type == "call_invite") {
+            // Wait for nav graph to be ready (Activity may have just restarted)
+            var retries = 0
+            while (retries < 20) {
+                try { navController.graph; break } catch (_: Exception) { }
+                kotlinx.coroutines.delay(50)
+                retries++
+            }
+
             val callData = IncomingCallData(
                 callUUID = intent.getStringExtra("callUUID") ?: "",
                 roomId = intent.getStringExtra("roomId") ?: "",
@@ -101,18 +109,33 @@ fun AppNavigation(
                 // Answered from notification — go directly to InCall, skip IncomingCallScreen
                 val displayName = user?.displayName ?: callData.callerName
                 val userId = user?.uid ?: callData.callerId
-                navController.navigate(
-                    Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
-                ) {
-                    popUpTo(0) { inclusive = true }
-                    launchSingleTop = true
+                try {
+                    navController.navigate(
+                        Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
+                    ) {
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("AppNavigation", "Nav failed for ANSWER intent, retrying", e)
+                    kotlinx.coroutines.delay(200)
+                    try {
+                        navController.navigate(
+                            Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
+                        ) {
+                            popUpTo(0) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    } catch (_: Exception) {}
                 }
             } else {
                 // Tapped notification (not a specific action) — show IncomingCallScreen
                 pendingCallData = callData
-                navController.navigate(Routes.INCOMING_CALL) {
-                    launchSingleTop = true
-                }
+                try {
+                    navController.navigate(Routes.INCOMING_CALL) {
+                        launchSingleTop = true
+                    }
+                } catch (_: Exception) {}
             }
 
             // Clear the intent extras so we don't re-handle on recomposition
@@ -265,8 +288,9 @@ fun AppNavigation(
 
             IncomingCallScreen(
                 callData = callData,
-                onAnswer = { roomId, callType, password ->
+                onAnswer = { roomId, callType, password, cameraOff ->
                     callViewModel.clearIncomingCall()
+                    ActiveCallService.pendingCameraOff = cameraOff
                     navController.navigate(
                         Routes.inCall(roomId, currentUser?.displayName ?: "Me", currentUser?.uid ?: callData.callerId, callType, password)
                     ) {
@@ -307,7 +331,8 @@ fun AppNavigation(
             PreCallScreen(
                 contacts = contacts,
                 callType = callType,
-                onStartCall = {
+                onStartCall = { cameraOff ->
+                    ActiveCallService.pendingCameraOff = cameraOff
                     navController.navigate(Routes.outgoingCall(callType)) {
                         popUpTo(Routes.PRE_CALL) { inclusive = true }
                     }
@@ -335,17 +360,6 @@ fun AppNavigation(
                 displayName = displayName,
                 participantUids = uids,
                 onBack = { navController.popBackStack() },
-                onVoiceCall = {
-                    val otherUids = uids.filter { it != currentUser?.uid }
-                    if (otherUids.isNotEmpty()) {
-                        val contacts = otherUids.map { uid ->
-                            Contact(uid = uid, displayName = displayName)
-                        }
-                        pendingContacts.clear()
-                        pendingContacts.addAll(contacts)
-                        navController.navigate(Routes.preCall("direct"))
-                    }
-                },
                 onVideoCall = {
                     val otherUids = uids.filter { it != currentUser?.uid }
                     if (otherUids.isNotEmpty()) {

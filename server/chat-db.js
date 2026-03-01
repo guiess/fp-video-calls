@@ -60,6 +60,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_participants_user ON conversation_participants(user_uid);
 `);
 
+// Add plaintext column if not exists (migration)
+try {
+  db.prepare("SELECT plaintext FROM messages LIMIT 0").get();
+} catch (_) {
+  db.exec("ALTER TABLE messages ADD COLUMN plaintext TEXT");
+  console.log("[chat-db] Added plaintext column to messages table");
+}
+
 console.log("[chat-db] SQLite database initialized at", DB_PATH);
 
 export default db;

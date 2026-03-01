@@ -51,7 +51,7 @@ fun NewGroupChatScreen(
                 }
             },
             actions = {
-                if (selected.size >= 2) {
+                if (selected.isNotEmpty()) {
                     TextButton(onClick = { showNameDialog = true }) {
                         Text(stringResource(R.string.next_button), color = Purple, fontWeight = FontWeight.Bold)
                     }

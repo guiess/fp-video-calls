@@ -127,7 +127,7 @@ router.get("/conversations", (req, res) => {
 
     // Get last message
     const lastMsg = db.prepare(
-      "SELECT id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, timestamp FROM messages WHERE conversation_id = ? ORDER BY timestamp DESC LIMIT 1"
+      "SELECT id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, plaintext, timestamp FROM messages WHERE conversation_id = ? ORDER BY timestamp DESC LIMIT 1"
     ).get(row.id);
 
     // Get unread count
@@ -193,7 +193,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize } = req.body || {};
+  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize, plaintext } = req.body || {};
 
   if (!type || !["text", "image", "file"].includes(type)) {
     return res.status(400).json({ ok: false, error: "BAD_TYPE" });
@@ -206,9 +206,9 @@ router.post("/conversations/:id/messages", async (req, res) => {
   const now = Date.now();
 
   db.prepare(`
-    INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, media_url, file_name, file_size, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, now);
+    INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, media_url, file_name, file_size, plaintext, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, plaintext || null, now);
 
   db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(now, id);
 
@@ -221,6 +221,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     ciphertext,
     iv,
     encryptedKeys,
+    plaintext: plaintext || null,
     mediaUrl: mediaUrl || null,
     fileName: fileName || null,
     fileSize: fileSize || null,
@@ -262,7 +263,7 @@ router.get("/conversations/:id/messages", (req, res) => {
 
   const rows = db.prepare(`
     SELECT id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys,
-           media_url, file_name, file_size, timestamp
+           media_url, file_name, file_size, plaintext, timestamp
     FROM messages
     WHERE conversation_id = ? AND timestamp < ?
     ORDER BY timestamp DESC

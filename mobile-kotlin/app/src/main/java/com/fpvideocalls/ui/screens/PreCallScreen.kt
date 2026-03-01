@@ -6,11 +6,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -29,7 +31,7 @@ import org.webrtc.*
 fun PreCallScreen(
     contacts: List<Contact>,
     callType: String,
-    onStartCall: () -> Unit,
+    onStartCall: (cameraOff: Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -37,6 +39,7 @@ fun PreCallScreen(
     val hasCameraPermission = remember {
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     }
+    var cameraOn by remember { mutableStateOf(true) }
 
     // Local camera preview state
     var eglBase by remember { mutableStateOf<EglBase?>(null) }
@@ -105,7 +108,7 @@ fun PreCallScreen(
                 .background(Color.Black, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
-            if (videoTrack != null && eglBase != null) {
+            if (cameraOn && videoTrack != null && eglBase != null) {
                 WebRTCVideoView(
                     videoTrack = videoTrack!!,
                     eglBase = eglBase,
@@ -117,6 +120,22 @@ fun PreCallScreen(
                     contentDescription = stringResource(R.string.cd_camera_off),
                     tint = Color.Gray,
                     modifier = Modifier.size(48.dp)
+                )
+            }
+            // Camera toggle button
+            IconButton(
+                onClick = { cameraOn = !cameraOn },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp)
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (cameraOn) Color.White.copy(alpha = 0.2f) else ErrorRed)
+            ) {
+                Icon(
+                    if (cameraOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
+                    contentDescription = if (cameraOn) stringResource(R.string.cd_disable_camera) else stringResource(R.string.cd_enable_camera),
+                    tint = Color.White
                 )
             }
         }
@@ -154,7 +173,7 @@ fun PreCallScreen(
                     Text(stringResource(R.string.cancel), color = TextSecondary, fontSize = 16.sp)
                 }
                 Button(
-                    onClick = onStartCall,
+                    onClick = { onStartCall(!cameraOn) },
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Purple),
                     modifier = Modifier.weight(1f)
