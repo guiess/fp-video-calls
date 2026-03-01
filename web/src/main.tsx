@@ -2,8 +2,47 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import DevApp from "./DevApp";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import { LanguageProvider } from "./i18n/LanguageContext";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import LoginScreen from "./screens/LoginScreen";
+import AppShell from "./screens/AppShell";
+import HomeScreen from "./screens/HomeScreen";
+import ChatsScreen from "./screens/ChatsScreen";
+import ChatConversationScreen from "./screens/ChatConversationScreen";
+import NewChatScreen from "./screens/NewChatScreen";
+import NewGroupChatScreen from "./screens/NewGroupChatScreen";
+import RoomJoinScreen from "./screens/RoomJoinScreen";
+import OptionsScreen from "./screens/OptionsScreen";
+
+/**
+ * Root page: if the URL has ?room= param, show existing guest join (App).
+ * Otherwise, if user is authenticated redirect to /app; if not, show App as before.
+ */
+function RootPage() {
+  const { user, loading } = useAuth();
+  const params = new URLSearchParams(window.location.search);
+  const hasRoom = params.has("room");
+
+  // Always show existing App for guest room join URLs
+  if (hasRoom) return <App />;
+
+  if (loading) return null;
+
+  // Authenticated users go to the main app
+  if (user) return <Navigate to="/app" replace />;
+
+  // Non-authenticated users see the original room join page
+  return <App />;
+}
+
+/** Guard: redirect to /login if not authenticated */
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
 
 const container = document.getElementById("root");
 if (!container) {
@@ -12,14 +51,30 @@ if (!container) {
 const root = createRoot(container);
 
 const router = createBrowserRouter([
-  { path: "/", element: <App /> },
+  { path: "/", element: <RootPage /> },
   { path: "/room/:roomId", element: <App /> },
   { path: "/dev", element: <DevApp /> },
-  { path: "/dev/room/:roomId", element: <DevApp /> }
+  { path: "/dev/room/:roomId", element: <DevApp /> },
+  { path: "/login", element: <LoginScreen /> },
+  {
+    path: "/app",
+    element: <AuthGuard><AppShell /></AuthGuard>,
+    children: [
+      { index: true, element: <HomeScreen /> },
+      { path: "chats", element: <ChatsScreen /> },
+      { path: "chats/new", element: <NewChatScreen /> },
+      { path: "chats/new-group", element: <NewGroupChatScreen /> },
+      { path: "chats/:id", element: <ChatConversationScreen /> },
+      { path: "rooms", element: <RoomJoinScreen /> },
+      { path: "options", element: <OptionsScreen /> },
+    ],
+  },
 ]);
 
 root.render(
-  <LanguageProvider>
-    <RouterProvider router={router} />
-  </LanguageProvider>
+  <AuthProvider>
+    <LanguageProvider>
+      <RouterProvider router={router} />
+    </LanguageProvider>
+  </AuthProvider>
 );

@@ -1094,8 +1094,23 @@ export default function App() {
             marginTop: "24px",
             paddingTop: "24px",
             borderTop: "1px solid #e2e8f0",
-            textAlign: "center"
+            textAlign: "center",
+            display: "flex",
+            justifyContent: "center",
+            gap: "16px"
           }}>
+            <a
+              href="/login"
+              style={{
+                color: "#667eea",
+                textDecoration: "none",
+                fontSize: "14px",
+                fontWeight: "600"
+              }}
+            >
+              {t.signIn || "Sign In"}
+            </a>
+            <span style={{ color: "#e2e8f0" }}>|</span>
             <a
               href="/dev"
               style={{

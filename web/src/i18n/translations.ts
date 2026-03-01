@@ -70,6 +70,58 @@ export interface Translations {
   failedToCloseRoom: string;
   roomClosedForEveryone: string;
   closeRoomRequestFailed: string;
+
+  // Auth
+  signIn: string;
+  signInSubtitle: string;
+  signInWithGoogle: string;
+  signUpTitle: string;
+  email: string;
+  passwordLabel: string;
+  displayNameLabel: string;
+  noAccountSignUp: string;
+  alreadyHaveAccount: string;
+  joinAsGuest: string;
+  signOutButton: string;
+  signInToAccess: string;
+
+  // App Shell / Tabs
+  homeTab: string;
+  chatsTab: string;
+  roomsTab: string;
+  optionsTab: string;
+
+  // Home
+  greeting: string;
+  homeSubtitle: string;
+  newChat: string;
+  joinRoomAction: string;
+  newGroupChat: string;
+  callContact: string;
+
+  // Chats
+  chatsTitle: string;
+  noConversations: string;
+  startConversation: string;
+  noMessages: string;
+  loading: string;
+
+  // Rooms
+  roomsTitle: string;
+
+  // Options
+  profile: string;
+
+  // Chat conversation
+  typeMessage: string;
+  typing: string;
+  members: string;
+  confirmDelete: string;
+  searchContacts: string;
+  noContactsFound: string;
+  groupNamePlaceholder: string;
+  selectMembers: string;
+  createGroup: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -143,6 +195,58 @@ export const translations: Record<Language, Translations> = {
     failedToCloseRoom: 'Не удалось закрыть комнату',
     roomClosedForEveryone: 'Комната закрыта для всех',
     closeRoomRequestFailed: 'Не удалось отправить запрос на закрытие комнаты',
+
+    // Auth
+    signIn: 'Войти',
+    signInSubtitle: 'Войдите для доступа к чатам, контактам и другим функциям',
+    signInWithGoogle: 'Войти через Google',
+    signUpTitle: 'Создать аккаунт',
+    email: 'Email',
+    passwordLabel: 'Пароль',
+    displayNameLabel: 'Имя',
+    noAccountSignUp: 'Нет аккаунта? Зарегистрируйтесь',
+    alreadyHaveAccount: 'Уже есть аккаунт? Войти',
+    joinAsGuest: 'Войти в комнату как гость',
+    signOutButton: 'Выйти',
+    signInToAccess: 'Войдите для доступа',
+
+    // App Shell / Tabs
+    homeTab: 'Главная',
+    chatsTab: 'Чаты',
+    roomsTab: 'Комнаты',
+    optionsTab: 'Настройки',
+
+    // Home
+    greeting: 'Привет',
+    homeSubtitle: 'Что вы хотите сделать?',
+    newChat: 'Новый чат',
+    joinRoomAction: 'Войти в комнату',
+    newGroupChat: 'Новая группа',
+    callContact: 'Позвонить',
+
+    // Chats
+    chatsTitle: 'Чаты',
+    noConversations: 'Нет диалогов',
+    startConversation: 'Начать диалог',
+    noMessages: 'Нет сообщений',
+    loading: 'Загрузка...',
+
+    // Rooms
+    roomsTitle: 'Комнаты',
+
+    // Options
+    profile: 'Профиль',
+
+    // Chat conversation
+    typeMessage: 'Введите сообщение...',
+    typing: 'печатает...',
+    members: 'Участники',
+    confirmDelete: 'Удалить это сообщение?',
+    searchContacts: 'Поиск контактов...',
+    noContactsFound: 'Контакты не найдены',
+    groupNamePlaceholder: 'Название группы...',
+    selectMembers: 'Выберите участников',
+    createGroup: 'Создать группу',
   },
   en: {
     // Pre-join view
@@ -214,5 +318,57 @@ export const translations: Record<Language, Translations> = {
     failedToCloseRoom: 'Failed to close room',
     roomClosedForEveryone: 'Room closed for everyone',
     closeRoomRequestFailed: 'Close room request failed',
+
+    // Auth
+    signIn: 'Sign In',
+    signInSubtitle: 'Sign in to access chats, contacts, and more',
+    signInWithGoogle: 'Sign in with Google',
+    signUpTitle: 'Create Account',
+    email: 'Email',
+    passwordLabel: 'Password',
+    displayNameLabel: 'Display Name',
+    noAccountSignUp: "Don't have an account? Sign Up",
+    alreadyHaveAccount: 'Already have an account? Sign In',
+    joinAsGuest: 'Join a room as guest',
+    signOutButton: 'Sign Out',
+    signInToAccess: 'Sign in to access',
+
+    // App Shell / Tabs
+    homeTab: 'Home',
+    chatsTab: 'Chats',
+    roomsTab: 'Rooms',
+    optionsTab: 'Options',
+
+    // Home
+    greeting: 'Hello',
+    homeSubtitle: 'What would you like to do?',
+    newChat: 'New Chat',
+    joinRoomAction: 'Join Room',
+    newGroupChat: 'New Group',
+    callContact: 'Call Contact',
+
+    // Chats
+    chatsTitle: 'Chats',
+    noConversations: 'No conversations yet',
+    startConversation: 'Start a conversation',
+    noMessages: 'No messages yet',
+    loading: 'Loading...',
+
+    // Rooms
+    roomsTitle: 'Rooms',
+
+    // Options
+    profile: 'Profile',
+
+    // Chat conversation
+    typeMessage: 'Type a message...',
+    typing: 'typing...',
+    members: 'Members',
+    confirmDelete: 'Delete this message?',
+    searchContacts: 'Search contacts...',
+    noContactsFound: 'No contacts found',
+    groupNamePlaceholder: 'Group name...',
+    selectMembers: 'Select members',
+    createGroup: 'Create Group',
   },
 };
