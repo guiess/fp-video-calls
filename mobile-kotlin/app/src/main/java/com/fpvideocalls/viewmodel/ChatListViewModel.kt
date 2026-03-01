@@ -1,0 +1,58 @@
+package com.fpvideocalls.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.fpvideocalls.crypto.ChatCryptoManager
+import com.fpvideocalls.data.ChatRepository
+import com.fpvideocalls.model.Conversation
+import com.google.firebase.auth.FirebaseAuth
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class ChatListViewModel @Inject constructor(
+    private val chatRepository: ChatRepository
+) : ViewModel() {
+
+    private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
+    val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
+
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    init {
+        loadConversations()
+    }
+
+    fun loadConversations() {
+        viewModelScope.launch {
+            _loading.value = true
+            val convos = chatRepository.getConversations()
+            // Decrypt last message previews
+            val withPreviews = convos.map { convo ->
+                val lastMsg = convo.lastMessage
+                if (lastMsg != null && lastMsg.ciphertext.isNotEmpty()) {
+                    try {
+                        val decrypted = ChatCryptoManager.decryptMessage(
+                            lastMsg.ciphertext, lastMsg.iv, lastMsg.encryptedKeys, lastMsg.senderUid
+                        )
+                        convo.copy(lastMessage = lastMsg.copy(decryptedText = decrypted?.plaintext))
+                    } catch (_: Exception) { convo }
+                } else convo
+            }
+            _conversations.value = withPreviews
+            _loading.value = false
+        }
+    }
+
+    fun getDisplayName(convo: Conversation): String {
+        if (convo.type == "group") return convo.groupName ?: "Group"
+        val myUid = FirebaseAuth.getInstance().currentUser?.uid
+        val other = convo.participants.firstOrNull { it.userUid != myUid }
+        return other?.userName ?: "Chat"
+    }
+}

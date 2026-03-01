@@ -101,6 +101,7 @@
     <!-- Navigation -->
     <string name="nav_home">Home</string>
     <string name="nav_contacts">Contacts</string>
+    <string name="nav_chats">Chats</string>
     <string name="nav_room">Room</string>
     <string name="nav_options">Settings</string>
     <string name="tap_return_to_call">Tap to return to call</string>
@@ -148,4 +149,14 @@
 
     <!-- Room Screen -->
     <string name="recent_rooms_title">Recent Rooms</string>
+
+    <!-- Chat -->
+    <string name="new_chat">New Chat</string>
+    <string name="chats_empty">No chats yet</string>
+    <string name="chats_empty_hint">Tap + to start a conversation</string>
+    <string name="chats_encrypted_message">🔒 Encrypted message</string>
+    <string name="chat_input_placeholder">Message…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_photo">Photo</string>
+    <string name="chat_file">File</string>
 </resources>

@@ -315,6 +315,33 @@ fun AppNavigation(
                 onBack = { navController.popBackStack() }
             )
         }
+
+        // Chat conversation
+        composable(
+            route = Routes.CHAT_CONVERSATION,
+            arguments = listOf(
+                navArgument("conversationId") { type = NavType.StringType },
+                navArgument("displayName") { type = NavType.StringType },
+                navArgument("participantUids") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val convoId = backStackEntry.arguments?.getString("conversationId") ?: ""
+            val displayName = backStackEntry.arguments?.getString("displayName") ?: ""
+            val uidsStr = backStackEntry.arguments?.getString("participantUids") ?: ""
+            val uids = uidsStr.split(",").filter { it.isNotEmpty() }
+            ChatConversationScreen(
+                conversationId = convoId,
+                displayName = displayName,
+                participantUids = uids,
+                onBack = { navController.popBackStack() },
+                onVoiceCall = {
+                    // TODO: initiate voice call with participants
+                },
+                onVideoCall = {
+                    // TODO: initiate video call with participants
+                }
+            )
+        }
     }
     } // Column
 }
@@ -353,15 +380,15 @@ fun MainScreen(navController: NavHostController) {
                     )
                 )
                 NavigationBarItem(
-                    selected = currentRoute == Routes.TAB_CONTACTS,
+                    selected = currentRoute == Routes.TAB_CHATS,
                     onClick = {
-                        tabNavController.navigate(Routes.TAB_CONTACTS) {
+                        tabNavController.navigate(Routes.TAB_CHATS) {
                             popUpTo(Routes.TAB_HOME)
                             launchSingleTop = true
                         }
                     },
-                    icon = { Icon(Icons.Default.Contacts, stringResource(R.string.nav_contacts)) },
-                    label = { Text(stringResource(R.string.nav_contacts)) },
+                    icon = { Icon(Icons.Default.Chat, stringResource(R.string.nav_chats)) },
+                    label = { Text(stringResource(R.string.nav_chats)) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Purple,
                         selectedTextColor = Purple,
@@ -417,7 +444,7 @@ fun MainScreen(navController: NavHostController) {
             composable(Routes.TAB_HOME) {
                 HomeScreen(
                     onNavigateToContacts = {
-                        tabNavController.navigate(Routes.TAB_CONTACTS) {
+                        tabNavController.navigate(Routes.TAB_CHATS) {
                             launchSingleTop = true
                         }
                     },
@@ -431,14 +458,14 @@ fun MainScreen(navController: NavHostController) {
                     }
                 )
             }
-            composable(Routes.TAB_CONTACTS) {
-                ContactsScreen(
-                    onCallContact = { contact ->
-                        pendingContacts.clear()
-                        pendingContacts.add(contact)
-                        navController.navigate(Routes.preCall("direct"))
+            composable(Routes.TAB_CHATS) {
+                ChatsScreen(
+                    onOpenConversation = { convoId ->
+                        // For now navigate to chat; TODO: pass display name and uids
+                        navController.navigate(Routes.chatConversation(convoId, "Chat", emptyList()))
                     },
-                    onGroupCall = {
+                    onNewChat = {
+                        // Open contacts screen for picking a contact to chat with
                         navController.navigate(Routes.GROUP_CALL_SETUP)
                     }
                 )

@@ -9,6 +9,7 @@ val Surface = Color(0xFF1A1A2E)
 val SurfaceVariant = Color(0xFF2A2A3E)
 val OnBackground = Color.White
 val OnSurface = Color.White
+val OnPrimary = Color.White
 val TextSecondary = Color(0xFF888888)
 val TextTertiary = Color(0xFF555555)
 val ErrorRed = Color(0xFFEF4444)

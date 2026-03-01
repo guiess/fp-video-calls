@@ -101,6 +101,7 @@
     <!-- Navigation -->
     <string name="nav_home">Главная</string>
     <string name="nav_contacts">Контакты</string>
+    <string name="nav_chats">Чаты</string>
     <string name="nav_room">Комната</string>
     <string name="nav_options">Настройки</string>
     <string name="tap_return_to_call">Нажмите, чтобы вернуться к звонку</string>
@@ -148,4 +149,14 @@
 
     <!-- Room Screen -->
     <string name="recent_rooms_title">Недавние комнаты</string>
+
+    <!-- Chat -->
+    <string name="new_chat">Новый чат</string>
+    <string name="chats_empty">Нет чатов</string>
+    <string name="chats_empty_hint">Нажмите + чтобы начать разговор</string>
+    <string name="chats_encrypted_message">🔒 Зашифрованное сообщение</string>
+    <string name="chat_input_placeholder">Сообщение…</string>
+    <string name="chat_send">Отправить</string>
+    <string name="chat_photo">Фото</string>
+    <string name="chat_file">Файл</string>
 </resources>

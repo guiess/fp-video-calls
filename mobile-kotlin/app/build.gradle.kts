@@ -72,6 +72,10 @@ dependencies {
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
+    implementation("com.google.firebase:firebase-storage-ktx")
+
+    // Tink (E2E encryption)
+    implementation("com.google.crypto.tink:tink-android:1.12.0")
 
     // Google Sign-In (legacy, works reliably on emulators)
     implementation("com.google.android.gms:play-services-auth:21.0.0")

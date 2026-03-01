@@ -14,9 +14,12 @@ object Routes {
 
     // Main tabs
     const val TAB_HOME = "tab_home"
-    const val TAB_CONTACTS = "tab_contacts"
+    const val TAB_CHATS = "tab_chats"
     const val TAB_ROOMS = "tab_rooms"
     const val TAB_OPTIONS = "tab_options"
+
+    // Chat
+    const val CHAT_CONVERSATION = "chat_conversation/{conversationId}/{displayName}/{participantUids}"
 
     fun inCall(roomId: String, displayName: String, userId: String, callType: String = "room", password: String? = null): String {
         val encName = URLEncoder.encode(displayName, "UTF-8")
@@ -29,4 +32,9 @@ object Routes {
 
     fun outgoingCall(callType: String): String = "outgoing_call/$callType"
     fun preCall(callType: String): String = "pre_call/$callType"
+    fun chatConversation(conversationId: String, displayName: String, participantUids: List<String>): String {
+        val encName = URLEncoder.encode(displayName, "UTF-8")
+        val encUids = URLEncoder.encode(participantUids.joinToString(","), "UTF-8")
+        return "chat_conversation/$conversationId/$encName/$encUids"
+    }
 }
