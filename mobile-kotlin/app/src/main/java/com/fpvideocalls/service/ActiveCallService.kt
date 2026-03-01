@@ -121,7 +121,12 @@ class ActiveCallService : Service() {
             userId = userId,
             password = password
         )
-        startForeground(Constants.ACTIVE_CALL_NOTIFICATION_ID, notification)
+        startForeground(
+            Constants.ACTIVE_CALL_NOTIFICATION_ID,
+            notification,
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
 
         // Create WebRTC manager and audio helper
         val audio = AudioManagerHelper(this)

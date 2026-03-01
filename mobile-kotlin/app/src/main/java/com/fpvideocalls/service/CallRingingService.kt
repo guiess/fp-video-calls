@@ -134,7 +134,7 @@ class CallRingingService : Service() {
             startForeground(
                 Constants.RINGING_SERVICE_NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
         } else {
             startForeground(Constants.RINGING_SERVICE_NOTIFICATION_ID, notification)

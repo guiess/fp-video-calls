@@ -9,7 +9,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -61,12 +63,12 @@
 
         <service
             android:name=".service.CallRingingService"
-            android:foregroundServiceType="phoneCall"
+            android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
 
         <service
             android:name=".service.ActiveCallService"
-            android:foregroundServiceType="phoneCall"
+            android:foregroundServiceType="camera|microphone"
             android:exported="false" />
 
         <receiver
