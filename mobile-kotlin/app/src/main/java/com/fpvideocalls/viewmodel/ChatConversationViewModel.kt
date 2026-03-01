@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.crypto.ChatCryptoManager
 import com.fpvideocalls.data.ChatRepository
 import com.fpvideocalls.model.ChatMessage
+import com.fpvideocalls.util.ChatEventBus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,17 @@ import javax.inject.Inject
 class ChatConversationViewModel @Inject constructor(
     private val chatRepository: ChatRepository
 ) : ViewModel() {
+
+    init {
+        // Listen for real-time chat events (from FCM or Socket.IO)
+        viewModelScope.launch {
+            ChatEventBus.events.collect { event ->
+                if (event.conversationId == currentConversationId) {
+                    loadMessages() // Refresh messages
+                }
+            }
+        }
+    }
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -32,7 +44,10 @@ class ChatConversationViewModel @Inject constructor(
     fun init(conversationId: String, participants: List<String>) {
         currentConversationId = conversationId
         participantUids = participants
-        loadMessages()
+        // Don't load messages for new (uncreated) conversations
+        if (!conversationId.startsWith("new_")) {
+            loadMessages()
+        }
     }
 
     fun loadMessages(before: Long? = null) {
@@ -61,10 +76,30 @@ class ChatConversationViewModel @Inject constructor(
     }
 
     fun sendMessage(text: String, senderName: String?) {
-        val convoId = currentConversationId ?: return
+        var convoId = currentConversationId ?: return
         if (text.isBlank()) return
         viewModelScope.launch {
             _sending.value = true
+            // Create conversation if this is the first message
+            if (convoId.startsWith("new_")) {
+                val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                val myName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Me"
+                val names = mutableMapOf<String, String>()
+                names[myUid] = myName
+                participantUids.filter { it != myUid }.forEach { uid -> names[uid] = senderName ?: "User" }
+                val newId = chatRepository.createConversation(
+                    type = if (participantUids.size > 2) "group" else "direct",
+                    participantUids = participantUids,
+                    participantNames = names
+                )
+                if (newId != null) {
+                    convoId = newId
+                    currentConversationId = newId
+                } else {
+                    _sending.value = false
+                    return@launch
+                }
+            }
             val msg = chatRepository.sendMessage(
                 conversationId = convoId,
                 plaintext = text.trim(),

@@ -159,4 +159,9 @@
     <string name="chat_send">Send</string>
     <string name="chat_photo">Photo</string>
     <string name="chat_file">File</string>
+    <string name="notification_channel_chat">Chat Messages</string>
+    <string name="notification_channel_chat_desc">Notifications for new chat messages</string>
+    <string name="search_users_placeholder">Search users…</string>
+    <string name="no_results">No results found</string>
+    <string name="contacts_empty_hint">Add contacts to start chatting</string>
 </resources>

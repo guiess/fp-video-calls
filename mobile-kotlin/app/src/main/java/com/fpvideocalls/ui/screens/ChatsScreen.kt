@@ -29,7 +29,7 @@ import java.util.*
 
 @Composable
 fun ChatsScreen(
-    onOpenConversation: (conversationId: String) -> Unit,
+    onOpenConversation: (conversationId: String, displayName: String, participantUids: List<String>) -> Unit,
     onNewChat: () -> Unit,
     chatListViewModel: ChatListViewModel = hiltViewModel()
 ) {
@@ -70,10 +70,12 @@ fun ChatsScreen(
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(conversations, key = { it.id }) { convo ->
+                    val displayName = chatListViewModel.getDisplayName(convo)
+                    val uids = convo.participants.map { it.userUid }
                     ConversationItem(
                         conversation = convo,
-                        displayName = chatListViewModel.getDisplayName(convo),
-                        onClick = { onOpenConversation(convo.id) }
+                        displayName = displayName,
+                        onClick = { onOpenConversation(convo.id, displayName, uids) }
                     )
                 }
             }

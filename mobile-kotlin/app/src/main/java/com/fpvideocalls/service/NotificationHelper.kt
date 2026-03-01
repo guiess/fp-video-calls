@@ -252,6 +252,48 @@ object NotificationHelper {
         manager.cancel(Constants.ACTIVE_CALL_NOTIFICATION_ID)
     }
 
+    fun createChatChannel(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            Constants.CHAT_CHANNEL_ID,
+            context.getString(R.string.notification_channel_chat),
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = context.getString(R.string.notification_channel_chat_desc)
+            enableVibration(true)
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    fun showChatNotification(
+        context: Context,
+        senderName: String,
+        messagePreview: String,
+        conversationId: String
+    ) {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("type", "chat_message")
+            putExtra("conversationId", conversationId)
+        }
+        val openPendingIntent = PendingIntent.getActivity(
+            context, conversationId.hashCode(), openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, Constants.CHAT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(senderName)
+            .setContentText(messagePreview)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(openPendingIntent)
+            .build()
+
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.notify(Constants.CHAT_NOTIFICATION_ID_BASE + conversationId.hashCode().and(0xFFF), notification)
+    }
+
     fun cancelNotification(context: Context, callUUID: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(callUUID.hashCode())

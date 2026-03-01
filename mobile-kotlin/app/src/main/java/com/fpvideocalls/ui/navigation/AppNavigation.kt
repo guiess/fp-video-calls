@@ -329,17 +329,55 @@ fun AppNavigation(
             val displayName = backStackEntry.arguments?.getString("displayName") ?: ""
             val uidsStr = backStackEntry.arguments?.getString("participantUids") ?: ""
             val uids = uidsStr.split(",").filter { it.isNotEmpty() }
+            val currentUser by authViewModel.user.collectAsState()
             ChatConversationScreen(
                 conversationId = convoId,
                 displayName = displayName,
                 participantUids = uids,
                 onBack = { navController.popBackStack() },
                 onVoiceCall = {
-                    // TODO: initiate voice call with participants
+                    val otherUids = uids.filter { it != currentUser?.uid }
+                    if (otherUids.isNotEmpty()) {
+                        val contacts = otherUids.map { uid ->
+                            Contact(uid = uid, displayName = displayName)
+                        }
+                        pendingContacts.clear()
+                        pendingContacts.addAll(contacts)
+                        navController.navigate(Routes.preCall("direct"))
+                    }
                 },
                 onVideoCall = {
-                    // TODO: initiate video call with participants
+                    val otherUids = uids.filter { it != currentUser?.uid }
+                    if (otherUids.isNotEmpty()) {
+                        val contacts = otherUids.map { uid ->
+                            Contact(uid = uid, displayName = displayName)
+                        }
+                        pendingContacts.clear()
+                        pendingContacts.addAll(contacts)
+                        navController.navigate(Routes.preCall(if (otherUids.size > 1) "group" else "direct"))
+                    }
                 }
+            )
+        }
+
+        // New chat — contact picker
+        composable(Routes.NEW_CHAT) {
+            NewChatScreen(
+                onContactSelected = { contact ->
+                    val myUid = user?.uid ?: return@NewChatScreen
+                    val myName = user?.displayName ?: "Me"
+                    // Navigate to conversation (will create if needed via ViewModel)
+                    navController.navigate(
+                        Routes.chatConversation(
+                            conversationId = "new_${contact.uid}",
+                            displayName = contact.displayName,
+                            participantUids = listOf(myUid, contact.uid)
+                        )
+                    ) {
+                        popUpTo(Routes.NEW_CHAT) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
             )
         }
     }
@@ -460,13 +498,11 @@ fun MainScreen(navController: NavHostController) {
             }
             composable(Routes.TAB_CHATS) {
                 ChatsScreen(
-                    onOpenConversation = { convoId ->
-                        // For now navigate to chat; TODO: pass display name and uids
-                        navController.navigate(Routes.chatConversation(convoId, "Chat", emptyList()))
+                    onOpenConversation = { convoId, displayName, uids ->
+                        navController.navigate(Routes.chatConversation(convoId, displayName, uids))
                     },
                     onNewChat = {
-                        // Open contacts screen for picking a contact to chat with
-                        navController.navigate(Routes.GROUP_CALL_SETUP)
+                        navController.navigate(Routes.NEW_CHAT)
                     }
                 )
             }

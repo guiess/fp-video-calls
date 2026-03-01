@@ -159,4 +159,9 @@
     <string name="chat_send">Отправить</string>
     <string name="chat_photo">Фото</string>
     <string name="chat_file">Файл</string>
+    <string name="notification_channel_chat">Сообщения чата</string>
+    <string name="notification_channel_chat_desc">Уведомления о новых сообщениях</string>
+    <string name="search_users_placeholder">Поиск пользователей…</string>
+    <string name="no_results">Ничего не найдено</string>
+    <string name="contacts_empty_hint">Добавьте контакты, чтобы начать общение</string>
 </resources>
