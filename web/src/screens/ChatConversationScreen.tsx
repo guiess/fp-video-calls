@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
@@ -40,17 +40,27 @@ export default function ChatConversationScreen() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [showMembers, setShowMembers] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialScrollDone = useRef(false);
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = useCallback((instant = false) => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    if (instant) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, []);
 
   // Load conversation details + messages
   useEffect(() => {
     if (!id) return;
+    initialScrollDone.current = false;
     loadConversation();
     loadMessages();
     markAsRead();
@@ -89,9 +99,16 @@ export default function ChatConversationScreen() {
     return unsub;
   }, [id, user?.uid]);
 
-  // Auto-scroll when messages change
-  useEffect(() => {
-    scrollToBottom();
+  // Auto-scroll: instant (before paint) on first load, smooth on new messages
+  const prevMsgCount = useRef(0);
+  useLayoutEffect(() => {
+    if (!initialScrollDone.current && messages.length > 0) {
+      initialScrollDone.current = true;
+      scrollToBottom(true);
+    } else if (messages.length > prevMsgCount.current) {
+      scrollToBottom();
+    }
+    prevMsgCount.current = messages.length;
   }, [messages.length]);
 
   async function loadConversation() {
@@ -122,11 +139,20 @@ export default function ChatConversationScreen() {
 
   async function markAsRead() {
     try {
-      await apiFetch(`/api/chat/conversations/${id}/read`, {
-        method: "PUT",
+      const res = await apiFetch(`/api/chat/conversations/${id}/read`, {
+        method: "POST",
         body: JSON.stringify({}),
       });
-    } catch {}
+      const body = await res.text();
+      console.log("[chat] markAsRead response:", res.status, body);
+      if (!res.ok) {
+        console.warn("[chat] markAsRead server error:", res.status, body);
+      }
+    } catch (err) {
+      console.warn("[chat] markAsRead failed:", err);
+    }
+    // Always notify sidebar to clear badge optimistically
+    window.dispatchEvent(new CustomEvent("chat-read", { detail: { chatId: id } }));
   }
 
   async function sendMessage() {
@@ -368,7 +394,7 @@ export default function ChatConversationScreen() {
       )}
 
       {/* Messages — Telegram wallpaper style */}
-      <div style={{
+      <div ref={messagesContainerRef} style={{
         flex: 1,
         overflowY: "auto",
         padding: "8px 16px",
@@ -441,7 +467,7 @@ export default function ChatConversationScreen() {
                         src={getMediaFullUrl(m.mediaUrl)}
                         alt="Photo"
                         style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 6, cursor: "pointer" }}
-                        onClick={() => window.open(getMediaFullUrl(m.mediaUrl!), "_blank")}
+                        onClick={() => setPreviewImage(getMediaFullUrl(m.mediaUrl!))}
                       />
                     </div>
                   )}
@@ -635,6 +661,37 @@ export default function ChatConversationScreen() {
         div:hover > .reply-btn { opacity: 0.5 !important; }
         div:hover > .reply-btn:hover { opacity: 1 !important; }
       `}</style>
+
+      {/* Fullscreen image preview overlay */}
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.9)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 9999, cursor: "zoom-out",
+          }}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}
+            style={{
+              position: "absolute", top: 16, right: 16,
+              background: "none", border: "none", cursor: "pointer",
+              color: "#fff", fontSize: 32, lineHeight: 1, padding: 8,
+            }}
+          >×</button>
+          <img
+            src={previewImage}
+            alt="Preview"
+            style={{
+              maxWidth: "90vw", maxHeight: "90vh",
+              objectFit: "contain", borderRadius: 4,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

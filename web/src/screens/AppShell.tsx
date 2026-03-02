@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useLanguage } from "../i18n/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { apiFetch } from "../services/api";
-import { subscribeChatEvents, ensureChatSocket, authenticateSocket, ChatMessageEvent } from "../services/chatSocket";
+import { subscribeChatEvents, ensureChatSocket, authenticateSocket } from "../services/chatSocket";
 
 interface Conversation {
   id: string;
@@ -67,13 +67,12 @@ export default function AppShell() {
     return () => clearInterval(interval);
   }, [user]);
 
-  // Refresh sidebar when navigating to a chat (to clear unread after mark-as-read)
+  // Refresh sidebar when a chat marks messages as read
   useEffect(() => {
-    if (activeChatId) {
-      const timer = setTimeout(loadConversations, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [activeChatId]);
+    const handler = () => { setTimeout(loadConversations, 500); };
+    window.addEventListener("chat-read", handler);
+    return () => window.removeEventListener("chat-read", handler);
+  }, [loadConversations]);
 
   // Real-time: refresh sidebar on any new message or deletion
   useEffect(() => {

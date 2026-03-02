@@ -50,7 +50,7 @@ const corsOptions = {
     if (allowlist.length === 0) return cb(null, true);
     cb(null, allowlist.includes(origin));
   },
-  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   credentials: allowCredentials
 };
 app.use(cors(corsOptions));
@@ -73,7 +73,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
 
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   const allowHeaders = process.env.CORS_ALLOW_HEADERS || "Content-Type, Authorization";
   res.setHeader("Access-Control-Allow-Headers", allowHeaders);
   res.setHeader("Access-Control-Max-Age", "86400");

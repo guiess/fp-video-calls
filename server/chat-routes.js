@@ -332,7 +332,10 @@ router.delete("/conversations/:id/messages/:msgId", (req, res) => {
 
 // ── PUT /api/chat/conversations/:id/read — Mark messages as read ────────────
 
-router.put("/conversations/:id/read", (req, res) => {
+router.put("/conversations/:id/read", markAsReadHandler);
+router.post("/conversations/:id/read", markAsReadHandler);
+
+function markAsReadHandler(req, res) {
   const { id } = req.params;
   const uid = req.uid;
 
@@ -351,7 +354,7 @@ router.put("/conversations/:id/read", (req, res) => {
   `).run(id, uid, messageId || null, now);
 
   return res.json({ ok: true });
-});
+}
 
 // ── PUT /api/chat/conversations/:id/mute — Mute/unmute conversation ─────────
 
