@@ -413,6 +413,26 @@ export default function ChatConversationScreen() {
             <div style={{ fontSize: 13, opacity: 0.7 }}>{conversation.participants.length} members</div>
           ) : null}
         </div>
+        {/* Call button */}
+        <button
+          onClick={() => {
+            const participantUids = conversation?.participants.map((p: any) => p.user_uid).filter((uid: string) => uid !== user?.uid) || [];
+            if (participantUids.length === 0) return;
+            const name = getConversationTitle();
+            const type = conversation?.type === "group" ? "group" : "direct";
+            window.location.href = `/app/call?callees=${participantUids.join(",")}&name=${encodeURIComponent(name)}&type=${type}`;
+          }}
+          style={{
+            padding: "6px",
+            background: "none",
+            color: "#fff",
+            border: "none",
+            cursor: "pointer",
+            borderRadius: "50%",
+          }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </button>
         {conversation?.type === "group" && (
           <button
             onClick={() => setShowMembers(!showMembers)}

@@ -12,6 +12,10 @@ import NewChatScreen from "./screens/NewChatScreen";
 import NewGroupChatScreen from "./screens/NewGroupChatScreen";
 import RoomJoinScreen from "./screens/RoomJoinScreen";
 import OptionsScreen from "./screens/OptionsScreen";
+import OutgoingCallScreen from "./screens/OutgoingCallScreen";
+import ActiveCallScreen from "./screens/ActiveCallScreen";
+import CallHistoryScreen from "./screens/CallHistoryScreen";
+import IncomingCallModal from "./components/IncomingCallModal";
 
 /**
  * Root page: if the URL has ?room= param, show existing guest join (App).
@@ -63,6 +67,8 @@ const router = createBrowserRouter([
       { path: "chats/:id", element: <ChatConversationScreen /> },
       { path: "rooms", element: <RoomJoinScreen /> },
       { path: "options", element: <OptionsScreen /> },
+      { path: "call", element: <ActiveCallScreen /> },
+      { path: "call-history", element: <CallHistoryScreen /> },
     ],
   },
 ]);
@@ -71,6 +77,7 @@ root.render(
   <AuthProvider>
     <LanguageProvider>
       <RouterProvider router={router} />
+      <IncomingCallModal />
     </LanguageProvider>
   </AuthProvider>
 );

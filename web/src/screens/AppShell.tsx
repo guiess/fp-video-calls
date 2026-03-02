@@ -4,6 +4,7 @@ import { useLanguage } from "../i18n/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { apiFetch } from "../services/api";
 import { subscribeChatEvents, ensureChatSocket, authenticateSocket } from "../services/chatSocket";
+import { subscribeToCallHistory, CallRecord } from "../services/callHistoryService";
 
 interface Conversation {
   id: string;
@@ -39,7 +40,9 @@ export default function AppShell() {
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"chats" | "rooms">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "rooms" | "calls">("chats");
+  const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
+  const [callHistoryLoading, setCallHistoryLoading] = useState(false);
 
   // Determine if a conversation is open (to highlight in sidebar)
   const activeChatId = location.pathname.match(/\/app\/chats\/([^/]+)/)?.[1];
@@ -83,6 +86,17 @@ export default function AppShell() {
     });
     return unsub;
   }, [loadConversations]);
+
+  // Subscribe to call history when calls tab is active
+  useEffect(() => {
+    if (activeTab !== "calls" || !user) return;
+    setCallHistoryLoading(true);
+    const unsub = subscribeToCallHistory((records) => {
+      setCallHistory(records);
+      setCallHistoryLoading(false);
+    });
+    return unsub;
+  }, [activeTab, user]);
 
   function getConversationName(c: Conversation): string {
     if (c.type === "group" && c.groupName) return c.groupName.replace(/\+/g, " ");
@@ -135,13 +149,19 @@ export default function AppShell() {
           label={t.chatsTab || "Chats"}
           active={activeTab === "chats"}
           badge={conversations.reduce((sum, c) => sum + c.unreadCount, 0)}
-          onClick={() => setActiveTab("chats")}
+          onClick={() => { setActiveTab("chats"); navigate("/app"); }}
         />
         <NavRailItem
           icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>}
           label={t.roomsTab || "Rooms"}
           active={activeTab === "rooms"}
-          onClick={() => setActiveTab("rooms")}
+          onClick={() => { setActiveTab("rooms"); navigate("/app"); }}
+        />
+        <NavRailItem
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>}
+          label="Calls"
+          active={activeTab === "calls"}
+          onClick={() => { setActiveTab("calls"); navigate("/app"); }}
         />
       </div>
 
@@ -374,9 +394,12 @@ export default function AppShell() {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             </button>
           </>
-        ) : (
+        ) : activeTab === "rooms" ? (
           /* ====== ROOMS PANEL ====== */
           <RoomsSidebarPanel />
+        ) : (
+          /* ====== CALLS PANEL ====== */
+          <CallsSidebarPanel records={callHistory} loading={callHistoryLoading} user={user} />
         )}
       </div>
 
@@ -394,7 +417,7 @@ export default function AppShell() {
             <Outlet />
           </div>
         ) : (
-          /* Empty state — like Telegram's "Select a chat to start messaging" */
+          /* Empty state — tab-specific placeholder */
           <div style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
           }}>
@@ -402,7 +425,11 @@ export default function AppShell() {
               background: "rgba(0,0,0,0.04)", borderRadius: 24,
               padding: "10px 20px", fontSize: 15, color: "#707579",
             }}>
-              {t.selectChat || "Select a chat to start messaging"}
+              {activeTab === "rooms"
+                ? (t.selectRoom || "Create or join a room to start a call")
+                : activeTab === "calls"
+                ? "Select a call or start a new one"
+                : (t.selectChat || "Select a chat to start messaging")}
             </div>
           </div>
         )}
@@ -553,6 +580,96 @@ function RoomsSidebarPanel() {
           {t.createNewRoom || "Create"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function CallsSidebarPanel({ records, loading, user }: { records: CallRecord[]; loading: boolean; user: any }) {
+  function formatCallTime(ts: number): string {
+    if (!ts) return "";
+    const d = new Date(ts);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+
+  function statusInfo(r: CallRecord): { icon: string; color: string; label: string } {
+    switch (r.status) {
+      case "MISSED": return { icon: "↙", color: "#e53935", label: "Missed" };
+      case "DECLINED": return { icon: "✕", color: "#e53935", label: "Declined" };
+      case "BUSY_REJECTED": return { icon: "✕", color: "#ff9800", label: "Busy" };
+      case "ENDED":
+        return r.direction === "outgoing"
+          ? { icon: "↗", color: "#4caf50", label: "Outgoing" }
+          : { icon: "↙", color: "#4caf50", label: "Incoming" };
+      case "RINGING": return { icon: "🔔", color: "#ff9800", label: "Ringing" };
+      case "ACTIVE": return { icon: "📞", color: "#4caf50", label: "Active" };
+      default: return { icon: "📞", color: "#999", label: r.status };
+    }
+  }
+
+  function formatDuration(answeredAt?: number, endedAt?: number): string {
+    if (!answeredAt || !endedAt) return "";
+    const secs = Math.floor((endedAt - answeredAt) / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    return mins < 60 ? `${mins}m ${secs % 60}s` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  }
+
+  if (loading) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#707579", fontSize: 14 }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (records.length === 0) {
+    return (
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#707579", gap: 8 }}>
+        <span style={{ fontSize: 40 }}>📞</span>
+        <span style={{ fontSize: 14 }}>No calls yet</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
+      {records.map((r) => {
+        const si = statusInfo(r);
+        const name = r.callerName || "Unknown";
+        const dur = formatDuration(r.answeredAt, r.endedAt);
+        return (
+          <div key={r.callId} style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 12px", borderRadius: 10, cursor: "default",
+          }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: "50%",
+              background: "#e3f2fd",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 20, fontWeight: 500, color: "#1976d2", flexShrink: 0,
+            }}>
+              {name.charAt(0).toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: "#000", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {name}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                <span style={{ color: si.color, fontWeight: 600 }}>{si.icon}</span>
+                <span style={{ color: "#707579" }}>{si.label}</span>
+                {dur && <span style={{ color: "#aaa" }}> · {dur}</span>}
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: "#707579", flexShrink: 0 }}>
+              {formatCallTime(r.createdAt)}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -26,6 +26,9 @@ export type ChatSocketHandlers = {
   onMessageDeleted?: (conversationId: string, messageId: string) => void;
   onTyping?: (conversationId: string, uid: string, typing: boolean) => void;
   onReadReceipt?: (conversationId: string, readerUid: string, lastReadAt: number) => void;
+  onCallInvite?: (invite: { callUUID: string; callerId: string; callerName: string; callerPhoto: string; roomId: string; callType: string; roomPassword: string }) => void;
+  onCallCancel?: (data: { roomId: string; callUUID: string }) => void;
+  onCallAnswered?: (data: { roomId: string; callUUID: string }) => void;
 };
 
 // Multiple listeners can subscribe
@@ -84,6 +87,18 @@ export function ensureChatSocket(): Socket {
 
   chatSocket.on("chat_read_receipt", ({ conversationId, readerUid, lastReadAt }: any) => {
     listeners.forEach((h) => h.onReadReceipt?.(conversationId, readerUid, lastReadAt));
+  });
+
+  chatSocket.on("call_invite", (data: any) => {
+    listeners.forEach((h) => h.onCallInvite?.(data));
+  });
+
+  chatSocket.on("call_cancel", (data: any) => {
+    listeners.forEach((h) => h.onCallCancel?.(data));
+  });
+
+  chatSocket.on("call_answered", (data: any) => {
+    listeners.forEach((h) => h.onCallAnswered?.(data));
   });
 
   return chatSocket;

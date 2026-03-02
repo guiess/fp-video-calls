@@ -184,42 +184,58 @@ async function getFcmToken(uid) {
  * Sends an FCM data message to each callee so their device rings.
  */
 app.post("/api/call/invite", async (req, res) => {
-  if (!firebaseReady) {
-    return res.status(503).json({ ok: false, error: "FIREBASE_NOT_CONFIGURED" });
-  }
   const { callerId, callerName, callerPhoto, calleeUids, roomId, callType, roomPassword } = req.body || {};
+  console.log("[call/invite] received:", { callerId, callerName, calleeUids, roomId, callType });
   if (!callerId || !callerName || !Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
+    console.log("[call/invite] BAD_REQUEST");
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   }
   const callUUID = crypto.randomUUID();
   try {
-    const results = await Promise.allSettled(
-      calleeUids.map(async (uid) => {
-        const token = await getFcmToken(uid);
-        if (!token) return;
-        // Data-only message (no "notification" field) so that
-        // onMessageReceived is ALWAYS called — even when the app is in
-        // the background.  The app's CallRingingService handles the
-        // notification display, looping ringtone, and vibration.
-        await admin.messaging().send({
-          token,
-          android: { priority: "high" },
-          data: {
-            type: "call_invite",
-            callUUID,
-            callerId: String(callerId),
-            callerName: String(callerName),
-            callerPhoto: String(callerPhoto || ""),
-            calleeUid: String(uid),
-            roomId: String(roomId),
-            callType: String(callType || "direct"),
-            roomPassword: String(roomPassword || ""),
-          },
-        });
-      })
-    );
-    const failed = results.filter(r => r.status === "rejected").length;
-    return res.json({ ok: true, callUUID, sent: calleeUids.length - failed, failed });
+    // Emit socket event for web clients (always works, even without FCM)
+    for (const uid of calleeUids) {
+      const room = `user:${uid}`;
+      const sockets = await io.in(room).fetchSockets();
+      console.log(`[call/invite] emitting call_invite to ${room}, sockets in room: ${sockets.length}`);
+      io.to(room).emit("call_invite", {
+        callUUID,
+        callerId: String(callerId),
+        callerName: String(callerName),
+        callerPhoto: String(callerPhoto || ""),
+        roomId: String(roomId),
+        callType: String(callType || "direct"),
+        roomPassword: String(roomPassword || ""),
+      });
+    }
+
+    // Send FCM push notifications (only if Firebase Admin is configured)
+    let sent = 0, failed = 0;
+    if (firebaseReady) {
+      const results = await Promise.allSettled(
+        calleeUids.map(async (uid) => {
+          const token = await getFcmToken(uid);
+          if (!token) return;
+          await admin.messaging().send({
+            token,
+            android: { priority: "high" },
+            data: {
+              type: "call_invite",
+              callUUID,
+              callerId: String(callerId),
+              callerName: String(callerName),
+              callerPhoto: String(callerPhoto || ""),
+              calleeUid: String(uid),
+              roomId: String(roomId),
+              callType: String(callType || "direct"),
+              roomPassword: String(roomPassword || ""),
+            },
+          });
+        })
+      );
+      failed = results.filter(r => r.status === "rejected").length;
+      sent = calleeUids.length - failed;
+    }
+    return res.json({ ok: true, callUUID, sent, failed });
   } catch (e) {
     console.error("[call/invite] failed", e);
     return res.status(500).json({ ok: false, error: "SEND_FAILED" });
@@ -232,30 +248,56 @@ app.post("/api/call/invite", async (req, res) => {
  * Sends a cancel FCM message so the callee's ringing screen dismisses.
  */
 app.post("/api/call/cancel", async (req, res) => {
-  if (!firebaseReady) {
-    return res.status(503).json({ ok: false, error: "FIREBASE_NOT_CONFIGURED" });
-  }
   const { calleeUids, roomId, callUUID } = req.body || {};
   if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   }
   try {
-    await Promise.allSettled(
-      calleeUids.map(async (uid) => {
-        const token = await getFcmToken(uid);
-        if (!token) return;
-        await admin.messaging().send({
-          token,
-          android: { priority: "high" },
-          data: { type: "call_cancel", roomId: String(roomId), callUUID: String(callUUID || "") },
-        });
-      })
-    );
+    // Emit socket event for web clients (always works)
+    for (const uid of calleeUids) {
+      io.to(`user:${uid}`).emit("call_cancel", {
+        roomId: String(roomId),
+        callUUID: String(callUUID || ""),
+      });
+    }
+
+    // Send FCM cancel (only if Firebase Admin is configured)
+    if (firebaseReady) {
+      await Promise.allSettled(
+        calleeUids.map(async (uid) => {
+          const token = await getFcmToken(uid);
+          if (!token) return;
+          await admin.messaging().send({
+            token,
+            android: { priority: "high" },
+            data: { type: "call_cancel", roomId: String(roomId), callUUID: String(callUUID || "") },
+          });
+        })
+      );
+    }
     return res.json({ ok: true });
   } catch (e) {
     console.error("[call/cancel] failed", e);
     return res.status(500).json({ ok: false, error: "SEND_FAILED" });
   }
+});
+
+/**
+ * POST /api/call/answer
+ * Body: { callerUid: string, roomId: string, callUUID?: string }
+ * Notifies the caller that the callee answered so the caller can join the room.
+ */
+app.post("/api/call/answer", (req, res) => {
+  const { callerUid, roomId, callUUID } = req.body || {};
+  if (!callerUid || !roomId) {
+    return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
+  }
+  io.to(`user:${callerUid}`).emit("call_answered", {
+    roomId: String(roomId),
+    callUUID: String(callUUID || ""),
+  });
+  console.log(`[call/answer] notified caller ${callerUid} for room ${roomId}`);
+  return res.json({ ok: true });
 });
 
 // ── Public file serving (no auth — UUID filenames are unguessable) ──────────
