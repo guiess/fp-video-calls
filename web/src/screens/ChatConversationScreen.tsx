@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
 import { apiFetch, getBaseUrl } from "../services/api";
-import { initChatSocket, emitTyping, ChatMessageEvent } from "../services/chatSocket";
+import { subscribeChatEvents, emitTyping, ChatMessageEvent } from "../services/chatSocket";
 
 interface Message {
   id: string;
@@ -58,7 +58,7 @@ export default function ChatConversationScreen() {
 
   // Socket.IO for real-time messages
   useEffect(() => {
-    const socket = initChatSocket({
+    const unsub = subscribeChatEvents({
       onChatMessage: (msg: ChatMessageEvent) => {
         if (msg.conversationId === id) {
           setMessages((prev) => {
@@ -86,9 +86,7 @@ export default function ChatConversationScreen() {
       },
     });
 
-    return () => {
-      // Don't disconnect — shared socket
-    };
+    return unsub;
   }, [id, user?.uid]);
 
   // Auto-scroll when messages change
@@ -277,45 +275,55 @@ export default function ChatConversationScreen() {
     <div style={{
       display: "flex",
       flexDirection: "column",
-      height: "100vh",
-      background: "#f0f2f5",
-      fontFamily: "system-ui, -apple-system, sans-serif",
+      height: "100%",
+      background: "#e6ebee",
+      fontFamily: "'Roboto', system-ui, -apple-system, sans-serif",
     }}>
-      {/* Top Bar */}
+      {/* Top Bar — Telegram teal header */}
       <div style={{
-        background: "white",
-        borderBottom: "1px solid #e2e8f0",
-        padding: "12px 16px",
+        background: "#517da2",
+        padding: "10px 16px",
         display: "flex",
         alignItems: "center",
         gap: 12,
         flexShrink: 0,
+        color: "#fff",
       }}>
-        <a href="/app/chats" style={{ color: "#667eea", textDecoration: "none", fontSize: 20 }}>←</a>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1a202c" }}>
+        <a href="/app" style={{ color: "#fff", textDecoration: "none", fontSize: 20, display: "flex", alignItems: "center" }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </a>
+        {/* Avatar */}
+        <div style={{
+          width: 40, height: 40, borderRadius: "50%",
+          background: "rgba(255,255,255,0.2)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 18, fontWeight: 500,
+        }}>
+          {getConversationTitle().charAt(0).toUpperCase()}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {getConversationTitle()}
           </div>
-          {typingUsers.size > 0 && (
-            <div style={{ fontSize: 12, color: "#667eea", fontStyle: "italic" }}>
-              {t.typing || "typing..."}
-            </div>
-          )}
+          {typingUsers.size > 0 ? (
+            <div style={{ fontSize: 13, opacity: 0.85 }}>{t.typing || "typing..."}</div>
+          ) : conversation?.type === "group" ? (
+            <div style={{ fontSize: 13, opacity: 0.7 }}>{conversation.participants.length} members</div>
+          ) : null}
         </div>
         {conversation?.type === "group" && (
           <button
             onClick={() => setShowMembers(!showMembers)}
             style={{
-              padding: "6px 12px",
-              background: showMembers ? "#667eea" : "#f7fafc",
-              color: showMembers ? "white" : "#4a5568",
-              border: "1px solid #e2e8f0",
-              borderRadius: 8,
+              padding: "6px",
+              background: "none",
+              color: "#fff",
+              border: "none",
               cursor: "pointer",
-              fontSize: 13,
+              borderRadius: "50%",
             }}
           >
-            👥 {conversation.participants.length}
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </button>
         )}
       </div>
@@ -323,53 +331,50 @@ export default function ChatConversationScreen() {
       {/* Members panel (groups only) */}
       {showMembers && conversation?.type === "group" && (
         <div style={{
-          background: "white",
-          borderBottom: "1px solid #e2e8f0",
-          padding: "12px 16px",
+          background: "#fff",
+          borderBottom: "1px solid #e0e0e0",
+          padding: "8px 16px",
           maxHeight: 200,
           overflowY: "auto",
         }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: "#4a5568", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: "#707579", margin: "4px 0 8px" }}>
             {t.members || "Members"}
           </p>
           {conversation.participants.map((p) => (
             <div key={p.user_uid} style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              padding: "4px 0",
+              gap: 10,
+              padding: "6px 0",
               fontSize: 14,
-              color: "#1a202c",
+              color: "#000",
             }}>
               <span style={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                background: "#dbeafe",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
+                width: 32, height: 32, borderRadius: "50%",
+                background: "#3390ec",
+                color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 500,
               }}>
                 {(p.user_name || "?").charAt(0).toUpperCase()}
               </span>
               {p.user_name || p.user_uid}
               {p.user_uid === user?.uid && (
-                <span style={{ fontSize: 11, color: "#a0aec0" }}>({t.you || "you"})</span>
+                <span style={{ fontSize: 12, color: "#707579" }}>({t.you || "you"})</span>
               )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Messages */}
+      {/* Messages — Telegram wallpaper style */}
       <div style={{
         flex: 1,
         overflowY: "auto",
-        padding: "16px",
+        padding: "8px 16px",
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 2,
       }}>
         {messages.map((m) => {
           const isMine = m.senderUid === user?.uid;
@@ -382,21 +387,18 @@ export default function ChatConversationScreen() {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: isMine ? "flex-end" : "flex-start",
-                marginBottom: 2,
+                marginBottom: 1,
               }}
             >
               {/* Sender name (for groups) */}
               {!isMine && conversation?.type === "group" && (
-                <span style={{ fontSize: 11, color: "#667eea", fontWeight: 600, marginBottom: 2, marginLeft: 8 }}>
+                <span style={{ fontSize: 13, color: "#3390ec", fontWeight: 500, marginBottom: 1, marginLeft: 12 }}>
                   {m.senderName || m.senderUid}
                 </span>
               )}
 
               <div
-                style={{
-                  maxWidth: "75%",
-                  position: "relative",
-                }}
+                style={{ maxWidth: "70%", position: "relative" }}
                 onContextMenu={(e) => {
                   if (isMine) {
                     e.preventDefault();
@@ -407,15 +409,15 @@ export default function ChatConversationScreen() {
                 {/* Reply quote */}
                 {replyMsg && (
                   <div style={{
-                    background: isMine ? "rgba(102,126,234,0.15)" : "rgba(0,0,0,0.06)",
-                    borderLeft: "3px solid #667eea",
-                    borderRadius: "4px 8px 8px 4px",
+                    background: isMine ? "rgba(78,166,97,0.15)" : "rgba(0,0,0,0.04)",
+                    borderLeft: "2px solid #4ea661",
+                    borderRadius: "2px 6px 6px 2px",
                     padding: "4px 8px",
-                    marginBottom: 2,
-                    fontSize: 12,
-                    color: "#4a5568",
+                    marginBottom: 1,
+                    fontSize: 13,
+                    color: "#000",
                   }}>
-                    <div style={{ fontWeight: 600, fontSize: 11, color: "#667eea" }}>
+                    <div style={{ fontWeight: 500, fontSize: 12, color: "#4ea661" }}>
                       {replyMsg.senderName || replyMsg.senderUid}
                     </div>
                     {getDisplayText(replyMsg).slice(0, 80)}
@@ -423,14 +425,12 @@ export default function ChatConversationScreen() {
                 )}
 
                 <div style={{
-                  background: isMine
-                    ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-                    : "white",
-                  color: isMine ? "white" : "#1a202c",
-                  padding: "8px 14px",
-                  borderRadius: isMine ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                  fontSize: 14,
-                  lineHeight: 1.4,
+                  background: isMine ? "#effdde" : "#fff",
+                  color: "#000",
+                  padding: "6px 10px 4px",
+                  borderRadius: isMine ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
+                  fontSize: 15,
+                  lineHeight: 1.35,
                   boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
                   wordBreak: "break-word",
                 }}>
@@ -440,12 +440,7 @@ export default function ChatConversationScreen() {
                       <img
                         src={getMediaFullUrl(m.mediaUrl)}
                         alt="Photo"
-                        style={{
-                          maxWidth: "100%",
-                          maxHeight: 300,
-                          borderRadius: 8,
-                          cursor: "pointer",
-                        }}
+                        style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 6, cursor: "pointer" }}
                         onClick={() => window.open(getMediaFullUrl(m.mediaUrl!), "_blank")}
                       />
                     </div>
@@ -460,20 +455,24 @@ export default function ChatConversationScreen() {
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
-                        padding: "8px 12px",
-                        background: isMine ? "rgba(255,255,255,0.2)" : "#f7fafc",
-                        borderRadius: 8,
+                        gap: 10,
+                        padding: "6px 0",
                         textDecoration: "none",
                         color: "inherit",
-                        marginBottom: 4,
+                        marginBottom: 2,
                       }}
                     >
-                      <span style={{ fontSize: 24 }}>📎</span>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: 8,
+                        background: "#3390ec", color: "#fff",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      </div>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{m.fileName || "File"}</div>
+                        <div style={{ fontSize: 14, fontWeight: 500, color: "#3390ec" }}>{m.fileName || "File"}</div>
                         {m.fileSize && (
-                          <div style={{ fontSize: 11, opacity: 0.7 }}>
+                          <div style={{ fontSize: 12, color: "#707579" }}>
                             {(m.fileSize / 1024).toFixed(1)} KB
                           </div>
                         )}
@@ -484,14 +483,16 @@ export default function ChatConversationScreen() {
                   {/* Text content */}
                   {m.type === "text" && getDisplayText(m)}
 
-                  {/* Timestamp */}
+                  {/* Timestamp + read status */}
                   <div style={{
-                    fontSize: 10,
-                    opacity: 0.6,
+                    fontSize: 11,
+                    color: "#5daf5e",
                     textAlign: "right",
-                    marginTop: 2,
+                    marginTop: 1,
+                    ...(isMine ? {} : { color: "#707579" }),
                   }}>
                     {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {isMine && " ✓"}
                   </div>
                 </div>
 
@@ -500,21 +501,21 @@ export default function ChatConversationScreen() {
                   onClick={() => { setReplyTo(m); inputRef.current?.focus(); }}
                   style={{
                     position: "absolute",
-                    [isMine ? "left" : "right"]: -30,
+                    [isMine ? "left" : "right"]: -32,
                     top: "50%",
                     transform: "translateY(-50%)",
                     background: "none",
                     border: "none",
                     cursor: "pointer",
-                    fontSize: 14,
                     opacity: 0,
-                    transition: "opacity 0.2s",
+                    transition: "opacity 0.15s",
                     padding: 4,
+                    color: "#707579",
                   }}
                   className="reply-btn"
                   onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
                 >
-                  ↩️
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#707579" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
                 </button>
               </div>
             </div>
@@ -526,67 +527,51 @@ export default function ChatConversationScreen() {
       {/* Reply preview */}
       {replyTo && (
         <div style={{
-          background: "white",
-          borderTop: "1px solid #e2e8f0",
+          background: "#fff",
+          borderTop: "1px solid #e0e0e0",
           padding: "8px 16px",
           display: "flex",
           alignItems: "center",
           gap: 8,
         }}>
-          <div style={{
-            width: 3,
-            height: 32,
-            background: "#667eea",
-            borderRadius: 2,
-          }} />
+          <div style={{ width: 2, height: 32, background: "#3390ec", borderRadius: 1 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#667eea" }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: "#3390ec" }}>
               {replyTo.senderName || replyTo.senderUid}
             </div>
-            <div style={{
-              fontSize: 13,
-              color: "#4a5568",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}>
+            <div style={{ fontSize: 14, color: "#707579", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {getDisplayText(replyTo).slice(0, 60)}
             </div>
           </div>
           <button
             onClick={() => setReplyTo(null)}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 16,
-              color: "#a0aec0",
-              padding: 4,
-            }}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "#707579" }}
           >
-            ✕
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#707579" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
       )}
 
-      {/* Input bar */}
+      {/* Input bar — Telegram style */}
       <div style={{
-        background: "white",
-        borderTop: "1px solid #e2e8f0",
-        padding: "8px 12px",
+        background: "#fff",
+        borderTop: "1px solid #e0e0e0",
+        padding: "6px 8px",
         display: "flex",
         alignItems: "flex-end",
-        gap: 8,
+        gap: 6,
         flexShrink: 0,
       }}>
         {/* Attach button */}
         <label style={{
           cursor: "pointer",
           padding: "8px",
-          fontSize: 20,
           flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          color: "#707579",
         }}>
-          📎
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#707579" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           <input
             type="file"
             style={{ display: "none" }}
@@ -608,18 +593,19 @@ export default function ChatConversationScreen() {
               sendMessage();
             }
           }}
-          placeholder={t.typeMessage || "Type a message..."}
+          placeholder={t.typeMessage || "Message"}
           rows={1}
           style={{
             flex: 1,
-            padding: "10px 14px",
+            padding: "10px 12px",
             fontSize: 15,
-            border: "2px solid #e2e8f0",
+            border: "none",
             borderRadius: 20,
             outline: "none",
             resize: "none",
             maxHeight: 100,
-            lineHeight: 1.4,
+            lineHeight: 1.35,
+            background: "#f4f4f5",
             boxSizing: "border-box",
           }}
         />
@@ -628,24 +614,19 @@ export default function ChatConversationScreen() {
           onClick={sendMessage}
           disabled={!input.trim() || sending}
           style={{
-            padding: "10px 16px",
-            background: input.trim() && !sending
-              ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-              : "#e2e8f0",
-            color: input.trim() && !sending ? "white" : "#a0aec0",
+            padding: 8,
+            background: "none",
+            color: input.trim() && !sending ? "#3390ec" : "#c4c9cc",
             border: "none",
-            borderRadius: "50%",
-            cursor: input.trim() && !sending ? "pointer" : "not-allowed",
-            fontSize: 18,
+            cursor: input.trim() && !sending ? "pointer" : "default",
             flexShrink: 0,
-            width: 44,
-            height: 44,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            transition: "color 0.15s",
           }}
         >
-          ➤
+          <svg width="24" height="24" viewBox="0 0 24 24" fill={input.trim() && !sending ? "#3390ec" : "#c4c9cc"}><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
       </div>
 

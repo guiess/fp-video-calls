@@ -1,79 +1,75 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const { t } = useLanguage();
+  const navigate = useNavigate();
+
+  const actions = [
+    { label: t.newChat || "New Chat", icon: "✏", href: "/app/chats/new", color: "#3390ec" },
+    { label: t.joinRoomAction || "Join Room", icon: "▶", href: "/app/rooms", color: "#3390ec" },
+    { label: t.newGroupChat || "New Group", icon: "👤+", href: "/app/chats/new-group", color: "#3390ec" },
+    { label: t.callContact || "Call Contact", icon: "📞", href: "/app/rooms", color: "#3390ec" },
+  ];
 
   return (
-    <div style={{ padding: "24px 16px", maxWidth: 600, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#1a202c", marginBottom: 4 }}>
-        {t.greeting || "Hello"}, {user?.displayName || "User"}! 👋
-      </h1>
-      <p style={{ color: "#718096", fontSize: 15, marginBottom: 32 }}>
-        {t.homeSubtitle || "What would you like to do?"}
-      </p>
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 16px" }}>
+      {/* Header */}
+      <div style={{
+        padding: "20px 0 16px",
+        borderBottom: "1px solid #e0e0e0",
+        marginBottom: 16,
+      }}>
+        <div style={{ fontSize: 20, fontWeight: 500, color: "#000" }}>
+          {t.greeting || "Hello"}, {user?.displayName || "User"}
+        </div>
+        <div style={{ fontSize: 14, color: "#707579", marginTop: 4 }}>
+          {t.homeSubtitle || "What would you like to do?"}
+        </div>
+      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <QuickCard
-          emoji="💬"
-          label={t.newChat || "New Chat"}
-          href="/app/chats/new"
-          color="#667eea"
-        />
-        <QuickCard
-          emoji="🎥"
-          label={t.joinRoomAction || "Join Room"}
-          href="/app/rooms"
-          color="#764ba2"
-        />
-        <QuickCard
-          emoji="👥"
-          label={t.newGroupChat || "New Group"}
-          href="/app/chats/new-group"
-          color="#10b981"
-        />
-        <QuickCard
-          emoji="📞"
-          label={t.callContact || "Call Contact"}
-          href="/app/rooms"
-          color="#f59e0b"
-        />
+      {/* Action items — Telegram settings-style list */}
+      <div style={{ background: "#fff" }}>
+        {actions.map((a, i) => (
+          <button
+            key={i}
+            onClick={() => navigate(a.href)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              width: "100%",
+              padding: "14px 0",
+              background: "none",
+              border: "none",
+              borderBottom: i < actions.length - 1 ? "1px solid #f0f0f0" : "none",
+              cursor: "pointer",
+              gap: 16,
+              textAlign: "left",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+          >
+            <div style={{
+              width: 40,
+              height: 40,
+              borderRadius: "50%",
+              background: a.color,
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 18,
+              flexShrink: 0,
+            }}>
+              {a.icon}
+            </div>
+            <span style={{ fontSize: 16, color: "#000", fontWeight: 400 }}>{a.label}</span>
+          </button>
+        ))}
       </div>
     </div>
-  );
-}
-
-function QuickCard({ emoji, label, href, color }: { emoji: string; label: string; href: string; color: string }) {
-  return (
-    <a
-      href={href}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px 16px",
-        background: "white",
-        borderRadius: 16,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-        textDecoration: "none",
-        color: "#1a202c",
-        transition: "transform 0.2s, box-shadow 0.2s",
-        border: `2px solid ${color}22`,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-2px)";
-        e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)";
-      }}
-    >
-      <span style={{ fontSize: 32, marginBottom: 8 }}>{emoji}</span>
-      <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
-    </a>
   );
 }

@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
@@ -15,8 +15,23 @@ const httpsConfig =
       }
     : undefined;
 
+// Node.js 22.21.0 regression (nodejs/node#60336): HTTPS servers crash on
+// WebSocket upgrade because server.shouldUpgradeCallback is undefined.
+// Patch the server instance right after Vite creates it.
+function patchNode22Https(): Plugin {
+  return {
+    name: "patch-node22-https",
+    configureServer(server) {
+      const s = server.httpServer as any;
+      if (s && typeof s.shouldUpgradeCallback !== "function") {
+        s.shouldUpgradeCallback = () => false;
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [patchNode22Https(), react()],
   server: {
     host: "0.0.0.0",
     port: 5173,

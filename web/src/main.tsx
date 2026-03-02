@@ -7,8 +7,6 @@ import { LanguageProvider } from "./i18n/LanguageContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import LoginScreen from "./screens/LoginScreen";
 import AppShell from "./screens/AppShell";
-import HomeScreen from "./screens/HomeScreen";
-import ChatsScreen from "./screens/ChatsScreen";
 import ChatConversationScreen from "./screens/ChatConversationScreen";
 import NewChatScreen from "./screens/NewChatScreen";
 import NewGroupChatScreen from "./screens/NewGroupChatScreen";
@@ -60,8 +58,6 @@ const router = createBrowserRouter([
     path: "/app",
     element: <AuthGuard><AppShell /></AuthGuard>,
     children: [
-      { index: true, element: <HomeScreen /> },
-      { path: "chats", element: <ChatsScreen /> },
       { path: "chats/new", element: <NewChatScreen /> },
       { path: "chats/new-group", element: <NewGroupChatScreen /> },
       { path: "chats/:id", element: <ChatConversationScreen /> },

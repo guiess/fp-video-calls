@@ -105,6 +105,7 @@ export interface Translations {
   startConversation: string;
   noMessages: string;
   loading: string;
+  selectChat: string;
 
   // Rooms
   roomsTitle: string;
@@ -230,6 +231,7 @@ export const translations: Record<Language, Translations> = {
     startConversation: 'Начать диалог',
     noMessages: 'Нет сообщений',
     loading: 'Загрузка...',
+    selectChat: 'Выберите чат',
 
     // Rooms
     roomsTitle: 'Комнаты',
@@ -353,6 +355,7 @@ export const translations: Record<Language, Translations> = {
     startConversation: 'Start a conversation',
     noMessages: 'No messages yet',
     loading: 'Loading...',
+    selectChat: 'Select a chat to start messaging',
 
     // Rooms
     roomsTitle: 'Rooms',

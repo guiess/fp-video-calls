@@ -8,29 +8,24 @@ export default function RoomJoinScreen() {
 
   function handleJoin() {
     if (!roomId.trim()) return;
-    // Navigate to guest room join with params (reuses existing App.tsx)
     window.location.href = `/?room=${encodeURIComponent(roomId.trim())}&cq=${quality}`;
   }
 
   function handleCreate() {
-    // Navigate to create room (existing App.tsx handles this)
     window.location.href = `/?cq=${quality}`;
   }
 
   return (
-    <div style={{ padding: "24px 16px", maxWidth: 600, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#1a202c", marginBottom: 24 }}>
-        {t.roomsTitle || "Rooms"}
-      </h1>
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 16px", fontFamily: "'Roboto', system-ui, -apple-system, sans-serif" }}>
+      <div style={{ padding: "20px 0 16px", borderBottom: "1px solid #e0e0e0", marginBottom: 16 }}>
+        <div style={{ fontSize: 20, fontWeight: 500, color: "#000" }}>
+          {t.roomsTitle || "Rooms"}
+        </div>
+      </div>
 
-      <div style={{
-        background: "white",
-        borderRadius: 16,
-        padding: 24,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-      }}>
+      <div style={{ background: "#fff" }}>
         <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#4a5568", marginBottom: 6 }}>
+          <label style={{ display: "block", fontSize: 14, color: "#707579", fontWeight: 400, marginBottom: 6 }}>
             {t.roomId || "Room ID"}
           </label>
           <input
@@ -39,18 +34,21 @@ export default function RoomJoinScreen() {
             placeholder={t.roomIdPlaceholder || "Enter room ID"}
             style={{
               width: "100%",
-              padding: "12px 16px",
+              padding: "12px 14px",
               fontSize: 15,
-              border: "2px solid #e2e8f0",
-              borderRadius: 12,
+              border: "1px solid #d9d9d9",
+              borderRadius: 10,
               outline: "none",
               boxSizing: "border-box",
+              transition: "border-color 0.15s",
             }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "#3390ec")}
+            onBlur={(e) => (e.currentTarget.style.borderColor = "#d9d9d9")}
           />
         </div>
 
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#4a5568", marginBottom: 6 }}>
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: "block", fontSize: 14, color: "#707579", fontWeight: 400, marginBottom: 6 }}>
             {t.videoQuality || "Video Quality"}
           </label>
           <select
@@ -58,12 +56,12 @@ export default function RoomJoinScreen() {
             onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
             style={{
               width: "100%",
-              padding: "12px 16px",
+              padding: "12px 14px",
               fontSize: 15,
-              border: "2px solid #e2e8f0",
-              borderRadius: 12,
+              border: "1px solid #d9d9d9",
+              borderRadius: 10,
               outline: "none",
-              backgroundColor: "white",
+              backgroundColor: "#fff",
               boxSizing: "border-box",
             }}
           >
@@ -72,22 +70,21 @@ export default function RoomJoinScreen() {
           </select>
         </div>
 
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 10 }}>
           <button
             onClick={handleJoin}
             disabled={!roomId.trim()}
             style={{
               flex: 1,
-              padding: "14px 24px",
-              fontSize: 16,
-              fontWeight: 600,
-              color: "white",
-              background: roomId.trim()
-                ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-                : "#a0aec0",
+              padding: "12px 24px",
+              fontSize: 15,
+              fontWeight: 500,
+              color: "#fff",
+              background: roomId.trim() ? "#3390ec" : "#c4c9cc",
               border: "none",
-              borderRadius: 12,
-              cursor: roomId.trim() ? "pointer" : "not-allowed",
+              borderRadius: 10,
+              cursor: roomId.trim() ? "pointer" : "default",
+              transition: "background 0.15s",
             }}
           >
             {t.joinRoom || "Join Room"}
@@ -96,14 +93,15 @@ export default function RoomJoinScreen() {
             onClick={handleCreate}
             style={{
               flex: 1,
-              padding: "14px 24px",
-              fontSize: 16,
-              fontWeight: 600,
-              color: "#667eea",
-              background: "white",
-              border: "2px solid #667eea",
-              borderRadius: 12,
+              padding: "12px 24px",
+              fontSize: 15,
+              fontWeight: 500,
+              color: "#3390ec",
+              background: "#fff",
+              border: "1px solid #3390ec",
+              borderRadius: 10,
               cursor: "pointer",
+              transition: "background 0.15s",
             }}
           >
             {t.createNewRoom || "Create Room"}
