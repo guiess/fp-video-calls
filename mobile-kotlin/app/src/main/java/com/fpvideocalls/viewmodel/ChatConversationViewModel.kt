@@ -138,6 +138,10 @@ class ChatConversationViewModel @Inject constructor(
             }
             _loading.value = false
             _loadingOlder.value = false
+            // Mark as read when loading latest messages (not older pages)
+            if (before == null) {
+                markConversationAsRead()
+            }
         }
     }
 

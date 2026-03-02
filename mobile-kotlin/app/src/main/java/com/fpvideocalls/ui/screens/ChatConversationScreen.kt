@@ -102,7 +102,6 @@ fun ChatConversationScreen(
 
     LaunchedEffect(conversationId) {
         viewModel.init(conversationId, participantUids, displayName)
-        viewModel.markConversationAsRead()
         if (isGroup && !conversationId.startsWith("new")) {
             groupInfoViewModel.init(conversationId, participantUids.map { ChatParticipant(it) })
             contactsViewModel.subscribeToContacts(myUid)
@@ -155,9 +154,9 @@ fun ChatConversationScreen(
         val coroutineScope = rememberCoroutineScope()
 
         // Auto-scroll to bottom when new messages arrive
-        val messageCount = messages.size
-        LaunchedEffect(messageCount) {
-            if (messageCount > 0) {
+        val newestMessageId = messages.firstOrNull()?.id
+        LaunchedEffect(newestMessageId) {
+            if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(0)
             }
         }
