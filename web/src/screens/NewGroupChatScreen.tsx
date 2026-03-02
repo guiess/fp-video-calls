@@ -184,7 +184,6 @@ export default function NewGroupChatScreen() {
                 </div>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 400, color: "#000" }}>{c.displayName}</div>
-                  <div style={{ fontSize: 14, color: "#707579" }}>{c.email}</div>
                 </div>
               </button>
             );

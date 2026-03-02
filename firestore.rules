@@ -7,7 +7,15 @@ service cloud.firestore {
     // only the owner can write.
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      // Only the owner can write, and sensitive fields must not be in the public doc
+      allow write: if request.auth != null && request.auth.uid == userId
+                   && !("fcmToken" in request.resource.data)
+                   && !("email" in request.resource.data);
+
+      // Private subcollection — only owner reads/writes, server uses Admin SDK
+      match /private/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
 
       // Contacts subcollection — private to the owner
       match /contacts/{contactId} {

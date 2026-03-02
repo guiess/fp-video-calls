@@ -174,7 +174,7 @@ app.get("/api/turn", (req, res) => {
 
 /** Lookup a user's FCM token from Firestore */
 async function getFcmToken(uid) {
-  const doc = await admin.firestore().collection("users").doc(uid).get();
+  const doc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
   return doc.exists ? (doc.data().fcmToken || null) : null;
 }
 

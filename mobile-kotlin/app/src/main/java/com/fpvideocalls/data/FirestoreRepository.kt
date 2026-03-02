@@ -25,21 +25,32 @@ class FirestoreRepository @Inject constructor(
         val data = hashMapOf<String, Any?>(
             "displayName" to user.displayName,
             "displayNameLower" to user.displayName.lowercase(),
-            "email" to user.email,
             "photoURL" to user.photoURL,
-            "fcmToken" to fcmToken,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         firestore.collection("users")
             .document(user.uid)
             .set(data, com.google.firebase.firestore.SetOptions.merge())
             .await()
+        // Store sensitive data in private subcollection
+        val privateData = hashMapOf<String, Any?>(
+            "email" to user.email,
+        )
+        if (fcmToken != null) privateData["fcmToken"] = fcmToken
+        firestore.collection("users")
+            .document(user.uid)
+            .collection("private")
+            .document("userData")
+            .set(privateData, com.google.firebase.firestore.SetOptions.merge())
+            .await()
     }
 
     suspend fun updateFcmToken(uid: String, token: String) {
         firestore.collection("users")
             .document(uid)
-            .update("fcmToken", token)
+            .collection("private")
+            .document("userData")
+            .set(mapOf("fcmToken" to token), com.google.firebase.firestore.SetOptions.merge())
             .await()
     }
 

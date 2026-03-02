@@ -30,8 +30,7 @@ export default function NewChatScreen() {
 
   const filtered = contacts.filter(
     (c) =>
-      c.displayName.toLowerCase().includes(search.toLowerCase()) ||
-      c.email.toLowerCase().includes(search.toLowerCase())
+      c.displayName.toLowerCase().includes(search.toLowerCase())
   );
 
   async function startChat(contact: Contact) {
@@ -160,7 +159,6 @@ export default function NewChatScreen() {
               </div>
               <div>
                 <div style={{ fontSize: 16, fontWeight: 400, color: "#000" }}>{c.displayName}</div>
-                <div style={{ fontSize: 14, color: "#707579" }}>{c.email}</div>
               </div>
             </button>
           ))}

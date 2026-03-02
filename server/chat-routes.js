@@ -26,7 +26,7 @@ function isParticipant(conversationId, uid) {
 
 async function getFcmToken(uid) {
   try {
-    const doc = await admin.firestore().collection("users").doc(uid).get();
+    const doc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
     return doc.exists ? (doc.data().fcmToken || null) : null;
   } catch { return null; }
 }

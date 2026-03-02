@@ -15,7 +15,7 @@ export async function fetchContacts(): Promise<Contact[]> {
     return {
       uid: d.id,
       displayName: data.displayName || "",
-      email: data.email || "",
+      email: "",  // Email is private; not available from public user docs
       photoUrl: data.photoUrl || "",
     };
   });
