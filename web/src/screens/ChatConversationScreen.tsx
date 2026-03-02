@@ -19,6 +19,7 @@ interface Message {
   fileSize?: number;
   replyToId?: string;
   timestamp: number;
+  pending?: boolean;
 }
 
 interface ConversationDetail {
@@ -37,6 +38,8 @@ export default function ChatConversationScreen() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [showMembers, setShowMembers] = useState(false);
@@ -61,6 +64,8 @@ export default function ChatConversationScreen() {
   useEffect(() => {
     if (!id) return;
     initialScrollDone.current = false;
+    setHasMore(true);
+    setMessages([]);
     loadConversation();
     loadMessages();
     markAsRead();
@@ -73,7 +78,11 @@ export default function ChatConversationScreen() {
         if (msg.conversationId === id) {
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg];
+            // If this is our own message arriving via socket, remove the pending version
+            const withoutPending = msg.senderUid === user?.uid
+              ? prev.filter((m) => !(m.pending && m.senderUid === msg.senderUid && Math.abs(m.timestamp - msg.timestamp) < 5000))
+              : prev;
+            return [...withoutPending, msg];
           });
           scrollToBottom();
           markAsRead();
@@ -129,11 +138,40 @@ export default function ChatConversationScreen() {
       if (res.ok) {
         const data = await res.json();
         setMessages((data.messages || []).reverse());
+        setHasMore(data.hasMore ?? false);
       }
     } catch (err) {
       console.warn("[chat] load messages failed", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadOlderMessages() {
+    if (loadingOlder || !hasMore || messages.length === 0) return;
+    setLoadingOlder(true);
+    try {
+      const oldest = messages[0].timestamp;
+      const res = await apiFetch(`/api/chat/conversations/${id}/messages?limit=50&before=${oldest}`);
+      if (res.ok) {
+        const data = await res.json();
+        const older = (data.messages || []).reverse();
+        if (older.length > 0) {
+          // Preserve scroll position: remember distance from top before prepending
+          const el = messagesContainerRef.current;
+          const prevHeight = el?.scrollHeight || 0;
+          setMessages((prev) => [...older, ...prev]);
+          // Restore scroll position after DOM update
+          requestAnimationFrame(() => {
+            if (el) el.scrollTop = el.scrollHeight - prevHeight;
+          });
+        }
+        setHasMore(data.hasMore ?? false);
+      }
+    } catch (err) {
+      console.warn("[chat] load older messages failed", err);
+    } finally {
+      setLoadingOlder(false);
     }
   }
 
@@ -156,19 +194,40 @@ export default function ChatConversationScreen() {
   }
 
   async function sendMessage() {
-    if (!input.trim() || sending || !user) return;
-    setSending(true);
+    const text = input.trim();
+    if (!text || !user) return;
+
+    // Optimistic: clear input and show message immediately
+    const tempId = `pending-${Date.now()}`;
+    const pendingMsg: Message = {
+      id: tempId,
+      senderUid: user.uid,
+      senderName: user.displayName || "User",
+      type: "text",
+      plaintext: text,
+      ciphertext: "",
+      iv: "",
+      encryptedKeys: {},
+      replyToId: replyTo?.id,
+      timestamp: Date.now(),
+      pending: true,
+    };
+    setMessages((prev) => [...prev, pendingMsg]);
+    setInput("");
+    setReplyTo(null);
+    scrollToBottom();
+
     try {
       const body: any = {
         type: "text",
-        ciphertext: btoa(input.trim()),
+        ciphertext: btoa(text),
         iv: btoa("0"),
         encryptedKeys: {},
         senderName: user.displayName || "User",
-        plaintext: input.trim(),
+        plaintext: text,
       };
-      if (replyTo) {
-        body.replyToId = replyTo.id;
+      if (pendingMsg.replyToId) {
+        body.replyToId = pendingMsg.replyToId;
       }
       const res = await apiFetch(`/api/chat/conversations/${id}/messages`, {
         method: "POST",
@@ -176,18 +235,22 @@ export default function ChatConversationScreen() {
       });
       if (res.ok) {
         const data = await res.json();
+        // Replace pending message with real server message (or remove if socket already delivered it)
         setMessages((prev) => {
-          if (prev.some((m) => m.id === data.message.id)) return prev;
-          return [...prev, data.message];
+          const hasReal = prev.some((m) => m.id === data.message.id);
+          if (hasReal) {
+            // Socket already delivered — just remove the pending one
+            return prev.filter((m) => m.id !== tempId);
+          }
+          return prev.map((m) => (m.id === tempId ? { ...data.message, pending: false } : m));
         });
-        setInput("");
-        setReplyTo(null);
-        scrollToBottom();
+      } else {
+        // Mark as failed (remove pending flag but keep message)
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
       }
     } catch (err) {
       console.warn("[chat] send failed", err);
-    } finally {
-      setSending(false);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     }
   }
 
@@ -394,14 +457,35 @@ export default function ChatConversationScreen() {
       )}
 
       {/* Messages — Telegram wallpaper style */}
-      <div ref={messagesContainerRef} style={{
-        flex: 1,
-        overflowY: "auto",
-        padding: "8px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}>
+      <div
+        ref={messagesContainerRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (el.scrollTop < 100 && hasMore && !loadingOlder) {
+            loadOlderMessages();
+          }
+        }}
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "8px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        {loadingOlder && (
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <div style={{
+              display: "inline-block",
+              width: 24, height: 24,
+              border: "3px solid #e0e0e0",
+              borderTop: "3px solid #3390ec",
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }} />
+          </div>
+        )}
         {messages.map((m) => {
           const isMine = m.senderUid === user?.uid;
           const replyMsg = m.replyToId ? getReplyMessage(m.replyToId) : null;
@@ -518,7 +602,7 @@ export default function ChatConversationScreen() {
                     ...(isMine ? {} : { color: "#707579" }),
                   }}>
                     {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    {isMine && " ✓"}
+                    {isMine && (m.pending ? " 🕐" : " ✓")}
                   </div>
                 </div>
 
@@ -660,6 +744,7 @@ export default function ChatConversationScreen() {
       <style>{`
         div:hover > .reply-btn { opacity: 0.5 !important; }
         div:hover > .reply-btn:hover { opacity: 1 !important; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       {/* Fullscreen image preview overlay */}

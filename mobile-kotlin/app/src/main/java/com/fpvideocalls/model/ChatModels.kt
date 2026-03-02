@@ -33,7 +33,9 @@ data class ChatMessage(
     val timestamp: Long = 0,
     val replyToId: String? = null,
     // Decrypted content (populated client-side after decryption)
-    val decryptedText: String? = null
+    val decryptedText: String? = null,
+    // True while message is being sent to server
+    val pending: Boolean = false
 )
 
 data class NotificationSettings(

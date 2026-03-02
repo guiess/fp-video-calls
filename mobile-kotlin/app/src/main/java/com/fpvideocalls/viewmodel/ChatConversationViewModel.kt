@@ -49,6 +49,12 @@ class ChatConversationViewModel @Inject constructor(
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
+    private val _loadingOlder = MutableStateFlow(false)
+    val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
+
+    private val _hasMore = MutableStateFlow(true)
+    val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending.asStateFlow()
 
@@ -98,15 +104,16 @@ class ChatConversationViewModel @Inject constructor(
 
     fun loadMessages(before: Long? = null) {
         val convoId = currentConversationId ?: return
+        if (before != null && _loadingOlder.value) return
         viewModelScope.launch {
-            _loading.value = true
-            val msgs = chatRepository.getMessages(convoId, before)
-            val decrypted = msgs.map { msg ->
+            if (before != null) _loadingOlder.value = true else _loading.value = true
+            val result = chatRepository.getMessages(convoId, before)
+            val decrypted = result.messages.map { msg ->
                 try {
-                    val result = ChatCryptoManager.decryptMessage(
+                    val r = ChatCryptoManager.decryptMessage(
                         msg.ciphertext, msg.iv, msg.encryptedKeys, msg.senderUid
                     )
-                    msg.copy(decryptedText = result?.plaintext ?: msg.decryptedText)
+                    msg.copy(decryptedText = r?.plaintext ?: msg.decryptedText)
                 } catch (_: Exception) { msg }
             }
             if (before != null) {
@@ -114,8 +121,10 @@ class ChatConversationViewModel @Inject constructor(
             } else {
                 _messages.value = decrypted
             }
+            _hasMore.value = result.hasMore
             _loading.value = false
-            msgs.firstOrNull()?.let { chatRepository.markAsRead(convoId, it.id) }
+            _loadingOlder.value = false
+            result.messages.firstOrNull()?.let { chatRepository.markAsRead(convoId, it.id) }
         }
     }
 
@@ -136,10 +145,28 @@ class ChatConversationViewModel @Inject constructor(
         onTypingChanged(false)
         val replyId = _replyingTo.value?.id
         _replyingTo.value = null
+
+        // Optimistic: show pending message immediately
+        val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+        val tempId = "pending-${System.currentTimeMillis()}"
+        val pendingMsg = ChatMessage(
+            id = tempId,
+            conversationId = convoId,
+            senderUid = myUid,
+            senderName = senderName,
+            type = "text",
+            ciphertext = "",
+            iv = "",
+            encryptedKeys = emptyMap(),
+            timestamp = System.currentTimeMillis(),
+            replyToId = replyId,
+            decryptedText = text.trim(),
+            pending = true
+        )
+        _messages.value = (listOf(pendingMsg) + _messages.value)
+
         viewModelScope.launch {
-            _sending.value = true
             if (convoId.startsWith("new")) {
-                val myUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val myName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Me"
                 val isGroup = convoId.startsWith("newgroup_") || participantUids.size > 2
                 val names = mutableMapOf<String, String>()
@@ -160,7 +187,7 @@ class ChatConversationViewModel @Inject constructor(
                     convoId = newId
                     currentConversationId = newId
                 } else {
-                    _sending.value = false
+                    _messages.value = _messages.value.filter { it.id != tempId }
                     return@launch
                 }
             }
@@ -173,9 +200,13 @@ class ChatConversationViewModel @Inject constructor(
             )
             if (msg != null) {
                 val decrypted = msg.copy(decryptedText = text.trim())
-                _messages.value = (listOf(decrypted) + _messages.value).distinctBy { it.id }
+                // Replace pending message with real one
+                _messages.value = _messages.value.map {
+                    if (it.id == tempId) decrypted else it
+                }.distinctBy { it.id }
+            } else {
+                _messages.value = _messages.value.filter { it.id != tempId }
             }
-            _sending.value = false
         }
     }
 

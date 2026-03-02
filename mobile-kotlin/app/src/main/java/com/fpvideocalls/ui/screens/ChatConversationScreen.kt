@@ -75,6 +75,8 @@ fun ChatConversationScreen(
     val sending by viewModel.sending.collectAsState()
     val typingUsers by viewModel.typingUsers.collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
+    val loadingOlder by viewModel.loadingOlder.collectAsState()
+    val hasMore by viewModel.hasMore.collectAsState()
     val participants by groupInfoViewModel.participants.collectAsState()
     val groupLoading by groupInfoViewModel.loading.collectAsState()
     val contacts by contactsViewModel.contacts.collectAsState()
@@ -158,6 +160,15 @@ fun ChatConversationScreen(
             }
         }
 
+        // Load older messages when scrolled near the top (end of reversed list)
+        val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        LaunchedEffect(lastVisibleIndex) {
+            if (lastVisibleIndex >= messages.size - 5 && hasMore && !loadingOlder && messages.isNotEmpty()) {
+                val oldest = messages.lastOrNull()?.timestamp
+                if (oldest != null) viewModel.loadMessages(before = oldest)
+            }
+        }
+
         LazyColumn(
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
             state = listState,
@@ -187,6 +198,20 @@ fun ChatConversationScreen(
                     )
                 }
                 Spacer(Modifier.height(4.dp))
+            }
+            if (loadingOlder) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = Color(0xFF3390EC)
+                        )
+                    }
+                }
             }
         }
 
@@ -293,7 +318,7 @@ fun ChatConversationScreen(
             Spacer(Modifier.width(8.dp))
             IconButton(
                 onClick = {
-                    if (inputText.isNotBlank() && !sending) {
+                    if (inputText.isNotBlank()) {
                         viewModel.sendMessage(inputText, myName)
                         inputText = ""
                     }
@@ -676,12 +701,24 @@ private fun MessageBubble(
                 }
 
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    timeText,
-                    color = if (isMine) OnPrimary.copy(alpha = 0.6f) else TextTertiary,
-                    fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.End)
-                )
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        timeText,
+                        color = if (isMine) OnPrimary.copy(alpha = 0.6f) else TextTertiary,
+                        fontSize = 10.sp,
+                    )
+                    if (isMine) {
+                        Text(
+                            if (message.pending) "🕐" else "✓",
+                            fontSize = 10.sp,
+                            color = if (isMine) OnPrimary.copy(alpha = 0.6f) else TextTertiary,
+                        )
+                    }
+                }
             }
         }
             DropdownMenu(

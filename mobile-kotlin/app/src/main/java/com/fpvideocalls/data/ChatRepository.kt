@@ -91,12 +91,14 @@ class ChatRepository @Inject constructor(
         }
     }
 
+    data class MessagesResult(val messages: List<ChatMessage>, val hasMore: Boolean)
+
     suspend fun getMessages(
         conversationId: String,
         before: Long? = null,
         limit: Int = 50
-    ): List<ChatMessage> = withContext(Dispatchers.IO) {
-        val token = getAuthToken() ?: return@withContext emptyList()
+    ): MessagesResult = withContext(Dispatchers.IO) {
+        val token = getAuthToken() ?: return@withContext MessagesResult(emptyList(), false)
         val url = buildString {
             append("$baseUrl/api/chat/conversations/$conversationId/messages?limit=$limit")
             if (before != null) append("&before=$before")
@@ -109,12 +111,14 @@ class ChatRepository @Inject constructor(
         try {
             val response = okHttpClient.newCall(request).execute()
             val json = JSONObject(response.body?.string() ?: "{}")
-            if (!json.optBoolean("ok")) return@withContext emptyList()
+            if (!json.optBoolean("ok")) return@withContext MessagesResult(emptyList(), false)
             val arr = json.getJSONArray("messages")
-            (0 until arr.length()).map { i -> parseMessage(arr.getJSONObject(i)) }
+            val msgs = (0 until arr.length()).map { i -> parseMessage(arr.getJSONObject(i)) }
+            val hasMore = json.optBoolean("hasMore", false)
+            MessagesResult(msgs, hasMore)
         } catch (e: Exception) {
             Log.e(TAG, "getMessages failed", e)
-            emptyList()
+            MessagesResult(emptyList(), false)
         }
     }
 
