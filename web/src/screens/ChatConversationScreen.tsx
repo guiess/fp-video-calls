@@ -231,7 +231,7 @@ export default function ChatConversationScreen() {
     try {
       const body: any = {
         type: "text",
-        ciphertext: btoa(text),
+        ciphertext: btoa(encodeURIComponent(text)),
         iv: btoa("0"),
         encryptedKeys: {},
         senderName: user.displayName || "User",
@@ -284,11 +284,12 @@ export default function ChatConversationScreen() {
     setSending(true);
     try {
       const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve) => {
+      const base64 = await new Promise<string>((resolve, reject) => {
         reader.onload = () => {
           const result = reader.result as string;
           resolve(result.split(",")[1]);
         };
+        reader.onerror = () => reject(reader.error);
         reader.readAsDataURL(file);
       });
 
@@ -305,14 +306,15 @@ export default function ChatConversationScreen() {
       const uploadData = await uploadRes.json();
 
       const isImage = file.type.startsWith("image/");
+      const label = isImage ? "📷 Photo" : `📎 ${file.name}`;
       const body: any = {
         type: isImage ? "image" : "file",
-        ciphertext: btoa(isImage ? "📷 Photo" : `📎 ${file.name}`),
+        ciphertext: btoa(encodeURIComponent(label)),
         iv: btoa("0"),
         encryptedKeys: {},
         senderName: user.displayName || "User",
-        plaintext: isImage ? "📷 Photo" : `📎 ${file.name}`,
-        mediaUrl: uploadData.downloadUrl,
+        plaintext: label,
+        mediaUrl: uploadData.downloadUrl.startsWith("/") ? `${getBaseUrl()}${uploadData.downloadUrl}` : uploadData.downloadUrl,
         fileName: file.name,
         fileSize: uploadData.fileSize,
       };

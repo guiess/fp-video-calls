@@ -335,7 +335,9 @@ class ChatRepository @Inject constructor(
             ciphertext = json.optString("ciphertext", ""),
             iv = json.optString("iv", ""),
             encryptedKeys = encryptedKeys,
-            mediaUrl = json.optString("mediaUrl", json.optString("media_url", null)),
+            mediaUrl = json.optString("mediaUrl", json.optString("media_url", null))?.let { url ->
+                if (url.startsWith("/")) "${com.fpvideocalls.util.Constants.SIGNALING_URL}$url" else url
+            },
             fileName = json.optString("fileName", json.optString("file_name", null)),
             fileSize = json.optLong("fileSize", json.optLong("file_size", 0)).takeIf { it > 0 },
             timestamp = json.optLong("timestamp", 0),
