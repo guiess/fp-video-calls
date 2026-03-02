@@ -291,7 +291,16 @@ router.get("/conversations/:id/messages", (req, res) => {
     replyToId: r.reply_to_id,
   }));
 
-  return res.json({ ok: true, messages, hasMore: rows.length === limit });
+  // Get read receipts for other participants (to show double-check marks)
+  const receipts = db.prepare(
+    "SELECT user_uid, last_read_at FROM read_receipts WHERE conversation_id = ? AND user_uid != ?"
+  ).all(id, req.uid);
+  const readReceipts = {};
+  for (const r of receipts) {
+    readReceipts[r.user_uid] = r.last_read_at;
+  }
+
+  return res.json({ ok: true, messages, hasMore: rows.length === limit, readReceipts });
 });
 
 // ── DELETE /api/chat/conversations/:id/messages/:msgId — Delete a message ───
@@ -352,6 +361,20 @@ function markAsReadHandler(req, res) {
     ON CONFLICT (conversation_id, user_uid)
     DO UPDATE SET last_read_message_id = excluded.last_read_message_id, last_read_at = excluded.last_read_at
   `).run(id, uid, messageId || null, now);
+
+  // Notify other participants so they can show double-check
+  if (router._io) {
+    const participants = db.prepare(
+      "SELECT user_uid FROM conversation_participants WHERE conversation_id = ? AND user_uid != ?"
+    ).all(id, uid);
+    for (const p of participants) {
+      router._io.to(`user:${p.user_uid}`).emit("chat_read_receipt", {
+        conversationId: id,
+        readerUid: uid,
+        lastReadAt: now,
+      });
+    }
+  }
 
   return res.json({ ok: true });
 }

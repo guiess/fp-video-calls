@@ -91,7 +91,7 @@ class ChatRepository @Inject constructor(
         }
     }
 
-    data class MessagesResult(val messages: List<ChatMessage>, val hasMore: Boolean)
+    data class MessagesResult(val messages: List<ChatMessage>, val hasMore: Boolean, val readReceipts: Map<String, Long> = emptyMap())
 
     suspend fun getMessages(
         conversationId: String,
@@ -115,7 +115,11 @@ class ChatRepository @Inject constructor(
             val arr = json.getJSONArray("messages")
             val msgs = (0 until arr.length()).map { i -> parseMessage(arr.getJSONObject(i)) }
             val hasMore = json.optBoolean("hasMore", false)
-            MessagesResult(msgs, hasMore)
+            val receipts = mutableMapOf<String, Long>()
+            json.optJSONObject("readReceipts")?.let { rr ->
+                rr.keys().forEach { uid -> receipts[uid] = rr.optLong(uid, 0) }
+            }
+            MessagesResult(msgs, hasMore, receipts)
         } catch (e: Exception) {
             Log.e(TAG, "getMessages failed", e)
             MessagesResult(emptyList(), false)

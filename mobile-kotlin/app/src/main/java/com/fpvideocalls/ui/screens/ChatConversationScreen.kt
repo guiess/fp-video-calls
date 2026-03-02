@@ -77,6 +77,7 @@ fun ChatConversationScreen(
     val replyingTo by viewModel.replyingTo.collectAsState()
     val loadingOlder by viewModel.loadingOlder.collectAsState()
     val hasMore by viewModel.hasMore.collectAsState()
+    val readReceipts by viewModel.readReceipts.collectAsState()
     val participants by groupInfoViewModel.participants.collectAsState()
     val groupLoading by groupInfoViewModel.loading.collectAsState()
     val contacts by contactsViewModel.contacts.collectAsState()
@@ -101,6 +102,7 @@ fun ChatConversationScreen(
 
     LaunchedEffect(conversationId) {
         viewModel.init(conversationId, participantUids, displayName)
+        viewModel.markConversationAsRead()
         if (isGroup && !conversationId.startsWith("new")) {
             groupInfoViewModel.init(conversationId, participantUids.map { ChatParticipant(it) })
             contactsViewModel.subscribeToContacts(myUid)
@@ -184,6 +186,7 @@ fun ChatConversationScreen(
                     MessageBubble(
                         message = msg,
                         isMine = isMine,
+                        isRead = isMine && readReceipts.values.any { it >= msg.timestamp },
                         repliedMessage = repliedMsg,
                         onImageClick = { url -> fullscreenImageUrl = url },
                         onDownload = { url, name -> downloadFile(context, url, name) },
@@ -543,6 +546,7 @@ private fun SwipeToReplyWrapper(
 private fun MessageBubble(
     message: ChatMessage,
     isMine: Boolean,
+    isRead: Boolean = false,
     repliedMessage: ChatMessage? = null,
     onImageClick: (String) -> Unit,
     onDownload: (String, String) -> Unit,
@@ -713,7 +717,7 @@ private fun MessageBubble(
                     )
                     if (isMine) {
                         Text(
-                            if (message.pending) "🕐" else "✓",
+                            if (message.pending) "🕐" else if (isRead) "✓✓" else "✓",
                             fontSize = 10.sp,
                             color = if (isMine) OnPrimary.copy(alpha = 0.6f) else TextTertiary,
                         )

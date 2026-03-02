@@ -44,6 +44,8 @@ export default function ChatConversationScreen() {
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [showMembers, setShowMembers] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  // Read receipts: map of uid -> last_read_at timestamp (other participants)
+  const [readReceipts, setReadReceipts] = useState<Record<string, number>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -85,7 +87,10 @@ export default function ChatConversationScreen() {
             return [...withoutPending, msg];
           });
           scrollToBottom();
-          markAsRead();
+          // Only mark as read if this message is from someone else and chat is visible
+          if (msg.senderUid !== user?.uid && document.visibilityState === "visible") {
+            markAsRead();
+          }
         }
       },
       onMessageDeleted: (convId: string, msgId: string) => {
@@ -101,6 +106,11 @@ export default function ChatConversationScreen() {
             else next.delete(uid);
             return next;
           });
+        }
+      },
+      onReadReceipt: (convId: string, readerUid: string, lastReadAt: number) => {
+        if (convId === id) {
+          setReadReceipts((prev) => ({ ...prev, [readerUid]: lastReadAt }));
         }
       },
     });
@@ -139,6 +149,7 @@ export default function ChatConversationScreen() {
         const data = await res.json();
         setMessages((data.messages || []).reverse());
         setHasMore(data.hasMore ?? false);
+        if (data.readReceipts) setReadReceipts(data.readReceipts);
       }
     } catch (err) {
       console.warn("[chat] load messages failed", err);
@@ -602,7 +613,9 @@ export default function ChatConversationScreen() {
                     ...(isMine ? {} : { color: "#707579" }),
                   }}>
                     {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    {isMine && (m.pending ? " 🕐" : " ✓")}
+                    {isMine && (m.pending ? " 🕐" : (
+                      Object.values(readReceipts).some(t => t >= m.timestamp) ? " ✓✓" : " ✓"
+                    ))}
                   </div>
                 </div>
 

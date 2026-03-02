@@ -41,6 +41,13 @@ class ChatConversationViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            ChatEventBus.readReceiptEvents.collect { event ->
+                if (event.conversationId == currentConversationId) {
+                    _readReceipts.value = _readReceipts.value + (event.readerUid to event.lastReadAt)
+                }
+            }
+        }
     }
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -63,6 +70,10 @@ class ChatConversationViewModel @Inject constructor(
 
     private val _replyingTo = MutableStateFlow<ChatMessage?>(null)
     val replyingTo: StateFlow<ChatMessage?> = _replyingTo.asStateFlow()
+
+    // Read receipts: map of uid -> lastReadAt timestamp (other participants)
+    private val _readReceipts = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val readReceipts: StateFlow<Map<String, Long>> = _readReceipts.asStateFlow()
 
     private var currentConversationId: String? = null
     private var participantUids: List<String> = emptyList()
@@ -122,9 +133,20 @@ class ChatConversationViewModel @Inject constructor(
                 _messages.value = decrypted
             }
             _hasMore.value = result.hasMore
+            if (result.readReceipts.isNotEmpty()) {
+                _readReceipts.value = _readReceipts.value + result.readReceipts
+            }
             _loading.value = false
             _loadingOlder.value = false
-            result.messages.firstOrNull()?.let { chatRepository.markAsRead(convoId, it.id) }
+        }
+    }
+
+    /** Call explicitly when the user is actively viewing the conversation */
+    fun markConversationAsRead() {
+        val convoId = currentConversationId ?: return
+        val latestMsg = _messages.value.firstOrNull() ?: return
+        viewModelScope.launch {
+            chatRepository.markAsRead(convoId, latestMsg.id)
         }
     }
 

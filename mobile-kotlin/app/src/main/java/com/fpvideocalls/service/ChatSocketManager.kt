@@ -72,6 +72,20 @@ object ChatSocketManager {
                     }
                 }
 
+                on("chat_read_receipt") { args ->
+                    try {
+                        val data = args.getOrNull(0) as? JSONObject ?: return@on
+                        val convoId = data.optString("conversationId", "")
+                        val readerUid = data.optString("readerUid", "")
+                        val lastReadAt = data.optLong("lastReadAt", 0)
+                        if (convoId.isNotEmpty() && readerUid.isNotEmpty()) {
+                            ChatEventBus.postReadReceipt(ChatEventBus.ReadReceiptEvent(convoId, readerUid, lastReadAt))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "chat_read_receipt parse error", e)
+                    }
+                }
+
                 on(Socket.EVENT_DISCONNECT) {
                     Log.d(TAG, "Disconnected")
                 }

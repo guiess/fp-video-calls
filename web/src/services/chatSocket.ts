@@ -25,6 +25,7 @@ export type ChatSocketHandlers = {
   onChatMessage?: (msg: ChatMessageEvent) => void;
   onMessageDeleted?: (conversationId: string, messageId: string) => void;
   onTyping?: (conversationId: string, uid: string, typing: boolean) => void;
+  onReadReceipt?: (conversationId: string, readerUid: string, lastReadAt: number) => void;
 };
 
 // Multiple listeners can subscribe
@@ -79,6 +80,10 @@ export function ensureChatSocket(): Socket {
 
   chatSocket.on("chat_typing", ({ conversationId, uid, typing }: any) => {
     listeners.forEach((h) => h.onTyping?.(conversationId, uid, !!typing));
+  });
+
+  chatSocket.on("chat_read_receipt", ({ conversationId, readerUid, lastReadAt }: any) => {
+    listeners.forEach((h) => h.onReadReceipt?.(conversationId, readerUid, lastReadAt));
   });
 
   return chatSocket;
