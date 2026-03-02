@@ -39,6 +39,7 @@ export default function AppShell() {
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"chats" | "rooms">("chats");
 
   // Determine if a conversation is open (to highlight in sidebar)
   const activeChatId = location.pathname.match(/\/app\/chats\/([^/]+)/)?.[1];
@@ -118,6 +119,32 @@ export default function AppShell() {
       fontFamily: "'Roboto', system-ui, -apple-system, sans-serif",
       overflow: "hidden",
     }}>
+      {/* ====== NAV RAIL ====== */}
+      <div style={{
+        width: 68,
+        minWidth: 68,
+        background: "#202021",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        paddingTop: 12,
+        gap: 4,
+      }}>
+        <NavRailItem
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>}
+          label={t.chatsTab || "Chats"}
+          active={activeTab === "chats"}
+          badge={conversations.reduce((sum, c) => sum + c.unreadCount, 0)}
+          onClick={() => setActiveTab("chats")}
+        />
+        <NavRailItem
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>}
+          label={t.roomsTab || "Rooms"}
+          active={activeTab === "rooms"}
+          onClick={() => setActiveTab("rooms")}
+        />
+      </div>
+
       {/* ====== LEFT SIDEBAR ====== */}
       <div style={{
         width: 400,
@@ -126,6 +153,7 @@ export default function AppShell() {
         display: "flex",
         flexDirection: "column",
         background: "#fff",
+        position: "relative",
       }}>
         {/* Sidebar header */}
         <div style={{
@@ -234,114 +262,122 @@ export default function AppShell() {
           </>
         )}
 
-        {/* Chat list */}
-        <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
-          {loading ? (
-            <div style={{ padding: "40px 16px", textAlign: "center", color: "#707579", fontSize: 14 }}>
-              {t.loading || "Loading..."}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div style={{ padding: "60px 16px", textAlign: "center", color: "#707579" }}>
-              <p style={{ fontSize: 14 }}>{t.noConversations || "No conversations yet"}</p>
-              <button
-                onClick={() => navigate("/app/chats/new")}
-                style={{ color: "#3390ec", fontWeight: 500, fontSize: 14, background: "none", border: "none", cursor: "pointer" }}
-              >
-                {t.startConversation || "Start a conversation"}
-              </button>
-            </div>
-          ) : (
-            filtered.map((c) => {
-              const name = getConversationName(c);
-              const isActive = activeChatId === c.id;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => navigate(`/app/chats/${c.id}`)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    width: "100%",
-                    padding: "7px 8px",
-                    background: isActive ? "#3390ec" : "none",
-                    border: "none",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    borderRadius: 10,
-                    transition: "background 0.15s",
-                  }}
-                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#f4f4f5"; }}
-                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
-                >
-                  <div style={{
-                    width: 54, height: 54, borderRadius: "50%",
-                    background: isActive ? "rgba(255,255,255,0.2)" : avatarColor(name),
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 22, fontWeight: 500, color: "#fff",
-                    flexShrink: 0, marginRight: 12,
-                  }}>
-                    {name.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
-                      <span style={{
-                        fontSize: 15, fontWeight: c.unreadCount > 0 ? 600 : 400,
-                        color: isActive ? "#fff" : "#000",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>{name}</span>
-                      <span style={{
-                        fontSize: 12,
-                        color: isActive ? "rgba(255,255,255,0.7)" : (c.unreadCount > 0 ? "#3390ec" : "#707579"),
-                        flexShrink: 0, marginLeft: 8,
+        {/* Tab content */}
+        {activeTab === "chats" ? (
+          <>
+            {/* Chat list */}
+            <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
+              {loading ? (
+                <div style={{ padding: "40px 16px", textAlign: "center", color: "#707579", fontSize: 14 }}>
+                  {t.loading || "Loading..."}
+                </div>
+              ) : filtered.length === 0 ? (
+                <div style={{ padding: "60px 16px", textAlign: "center", color: "#707579" }}>
+                  <p style={{ fontSize: 14 }}>{t.noConversations || "No conversations yet"}</p>
+                  <button
+                    onClick={() => navigate("/app/chats/new")}
+                    style={{ color: "#3390ec", fontWeight: 500, fontSize: 14, background: "none", border: "none", cursor: "pointer" }}
+                  >
+                    {t.startConversation || "Start a conversation"}
+                  </button>
+                </div>
+              ) : (
+                filtered.map((c) => {
+                  const name = getConversationName(c);
+                  const isActive = activeChatId === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => navigate(`/app/chats/${c.id}`)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        width: "100%",
+                        padding: "7px 8px",
+                        background: isActive ? "#3390ec" : "none",
+                        border: "none",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        borderRadius: 10,
+                        transition: "background 0.15s",
+                      }}
+                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#f4f4f5"; }}
+                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                    >
+                      <div style={{
+                        width: 54, height: 54, borderRadius: "50%",
+                        background: isActive ? "rgba(255,255,255,0.2)" : avatarColor(name),
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 22, fontWeight: 500, color: "#fff",
+                        flexShrink: 0, marginRight: 12,
                       }}>
-                        {formatTime(c.lastMessage?.timestamp || c.lastMessageAt)}
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{
-                        fontSize: 14,
-                        color: isActive ? "rgba(255,255,255,0.7)" : "#707579",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {c.lastMessage?.sender_name && c.type === "group" ? (
-                          <><span style={{ color: isActive ? "rgba(255,255,255,0.85)" : "#3390ec" }}>{c.lastMessage.sender_name}: </span>{getPreview(c)}</>
-                        ) : getPreview(c)}
-                      </span>
-                      {c.unreadCount > 0 && !isActive && (
-                        <span style={{
-                          background: c.muted ? "#c4c9cc" : "#3390ec",
-                          color: "#fff", fontSize: 12, fontWeight: 500,
-                          borderRadius: 12, padding: "1px 7px", minWidth: 20,
-                          textAlign: "center", flexShrink: 0, marginLeft: 8,
-                        }}>
-                          {c.unreadCount}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
+                        {name.charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                          <span style={{
+                            fontSize: 15, fontWeight: c.unreadCount > 0 ? 600 : 400,
+                            color: isActive ? "#fff" : "#000",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>{name}</span>
+                          <span style={{
+                            fontSize: 12,
+                            color: isActive ? "rgba(255,255,255,0.7)" : (c.unreadCount > 0 ? "#3390ec" : "#707579"),
+                            flexShrink: 0, marginLeft: 8,
+                          }}>
+                            {formatTime(c.lastMessage?.timestamp || c.lastMessageAt)}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{
+                            fontSize: 14,
+                            color: isActive ? "rgba(255,255,255,0.7)" : "#707579",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {c.lastMessage?.sender_name && c.type === "group" ? (
+                              <><span style={{ color: isActive ? "rgba(255,255,255,0.85)" : "#3390ec" }}>{c.lastMessage.sender_name}: </span>{getPreview(c)}</>
+                            ) : getPreview(c)}
+                          </span>
+                          {c.unreadCount > 0 && !isActive && (
+                            <span style={{
+                              background: c.muted ? "#c4c9cc" : "#3390ec",
+                              color: "#fff", fontSize: 12, fontWeight: 500,
+                              borderRadius: 12, padding: "1px 7px", minWidth: 20,
+                              textAlign: "center", flexShrink: 0, marginLeft: 8,
+                            }}>
+                              {c.unreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
 
-        {/* FAB — new message */}
-        <button
-          onClick={() => navigate("/app/chats/new")}
-          style={{
-            position: "absolute", bottom: 20, left: 344,
-            width: 54, height: 54, borderRadius: "50%",
-            background: "#3390ec", color: "#fff",
-            border: "none", cursor: "pointer",
-            boxShadow: "0 3px 12px rgba(51,144,236,0.4)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 10, transition: "transform 0.2s",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        </button>
+            {/* FAB — new message */}
+            <button
+              onClick={() => navigate("/app/chats/new")}
+              style={{
+                position: "absolute", bottom: 20, right: 16,
+                width: 54, height: 54, borderRadius: "50%",
+                background: "#3390ec", color: "#fff",
+                border: "none", cursor: "pointer",
+                boxShadow: "0 3px 12px rgba(51,144,236,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                zIndex: 10, transition: "transform 0.2s",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </button>
+          </>
+        ) : (
+          /* ====== ROOMS PANEL ====== */
+          <RoomsSidebarPanel />
+        )}
       </div>
 
       {/* ====== RIGHT PANEL ====== */}
@@ -392,5 +428,131 @@ function MenuButton({ icon, label, onClick, color }: { icon: React.ReactNode; la
       {icon}
       {label}
     </button>
+  );
+}
+
+function NavRailItem({ icon, label, active, badge, onClick }: {
+  icon: React.ReactNode; label: string; active: boolean; badge?: number; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 2,
+        padding: "10px 8px",
+        width: 60,
+        background: active ? "rgba(255,255,255,0.1)" : "none",
+        border: "none",
+        borderRadius: 12,
+        cursor: "pointer",
+        color: active ? "#fff" : "rgba(255,255,255,0.5)",
+        transition: "all 0.15s",
+        position: "relative",
+      }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "none"; }}
+    >
+      <div style={{ position: "relative" }}>
+        {icon}
+        {!!badge && badge > 0 && (
+          <span style={{
+            position: "absolute", top: -6, right: -10,
+            background: "#e53935", color: "#fff", fontSize: 10, fontWeight: 600,
+            borderRadius: 10, padding: "1px 5px", minWidth: 16, textAlign: "center",
+          }}>
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
+      </div>
+      <span style={{ fontSize: 11, fontWeight: active ? 600 : 400 }}>{label}</span>
+    </button>
+  );
+}
+
+function RoomsSidebarPanel() {
+  const { t } = useLanguage();
+  const [roomId, setRoomId] = useState("");
+  const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
+
+  function handleJoin() {
+    if (!roomId.trim()) return;
+    window.location.href = `/?room=${encodeURIComponent(roomId.trim())}&cq=${quality}`;
+  }
+
+  function handleCreate() {
+    window.location.href = `/?cq=${quality}`;
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "16px 12px" }}>
+      <div style={{ fontSize: 14, fontWeight: 500, color: "#000", marginBottom: 16 }}>
+        {t.roomsTitle || "Video Rooms"}
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 13, color: "#707579", marginBottom: 4 }}>
+          {t.roomId || "Room ID"}
+        </label>
+        <input
+          value={roomId}
+          onChange={(e) => setRoomId(e.target.value)}
+          placeholder={t.roomIdPlaceholder || "Enter room ID"}
+          onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
+          style={{
+            width: "100%", padding: "10px 12px", fontSize: 14,
+            border: "1px solid #d9d9d9", borderRadius: 10, outline: "none",
+            boxSizing: "border-box", transition: "border-color 0.15s",
+          }}
+          onFocus={(e) => (e.currentTarget.style.borderColor = "#3390ec")}
+          onBlur={(e) => (e.currentTarget.style.borderColor = "#d9d9d9")}
+        />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 13, color: "#707579", marginBottom: 4 }}>
+          {t.videoQuality || "Video Quality"}
+        </label>
+        <select
+          value={quality}
+          onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
+          style={{
+            width: "100%", padding: "10px 12px", fontSize: 14,
+            border: "1px solid #d9d9d9", borderRadius: 10, outline: "none",
+            backgroundColor: "#fff", boxSizing: "border-box",
+          }}
+        >
+          <option value="720p">720p (HD)</option>
+          <option value="1080p">1080p (Full HD)</option>
+        </select>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={handleJoin}
+          disabled={!roomId.trim()}
+          style={{
+            flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 500,
+            color: "#fff", background: roomId.trim() ? "#3390ec" : "#c4c9cc",
+            border: "none", borderRadius: 10,
+            cursor: roomId.trim() ? "pointer" : "default",
+          }}
+        >
+          {t.joinRoom || "Join"}
+        </button>
+        <button
+          onClick={handleCreate}
+          style={{
+            flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 500,
+            color: "#3390ec", background: "#fff",
+            border: "1px solid #3390ec", borderRadius: 10, cursor: "pointer",
+          }}
+        >
+          {t.createNewRoom || "Create"}
+        </button>
+      </div>
+    </div>
   );
 }
