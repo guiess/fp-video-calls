@@ -84,9 +84,9 @@ export default function AppShell() {
   }, [loadConversations]);
 
   function getConversationName(c: Conversation): string {
-    if (c.type === "group" && c.groupName) return c.groupName;
+    if (c.type === "group" && c.groupName) return c.groupName.replace(/\+/g, " ");
     const other = c.participants.find((p) => p.user_uid !== user?.uid);
-    return other?.user_name || "Chat";
+    return other?.user_name?.replace(/\+/g, " ") || "Chat";
   }
 
   function getPreview(c: Conversation): string {

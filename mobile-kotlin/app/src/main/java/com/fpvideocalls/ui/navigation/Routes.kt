@@ -1,6 +1,6 @@
 package com.fpvideocalls.ui.navigation
 
-import java.net.URLEncoder
+import android.net.Uri
 
 object Routes {
     const val SIGN_IN = "sign_in"
@@ -25,23 +25,23 @@ object Routes {
     const val GROUP_INFO = "group_info/{conversationId}/{groupName}"
 
     fun inCall(roomId: String, displayName: String, userId: String, callType: String = "room", password: String? = null): String {
-        val encName = URLEncoder.encode(displayName, "UTF-8")
-        val encRoom = URLEncoder.encode(roomId, "UTF-8")
-        val encUser = URLEncoder.encode(userId, "UTF-8")
+        val encName = Uri.encode(displayName)
+        val encRoom = Uri.encode(roomId)
+        val encUser = Uri.encode(userId)
         var route = "in_call/$encRoom/$encName/$encUser?callType=$callType"
-        if (password != null) route += "&password=${URLEncoder.encode(password, "UTF-8")}"
+        if (password != null) route += "&password=${Uri.encode(password)}"
         return route
     }
 
     fun outgoingCall(callType: String): String = "outgoing_call/$callType"
     fun preCall(callType: String): String = "pre_call/$callType"
     fun chatConversation(conversationId: String, displayName: String, participantUids: List<String>, type: String = "direct"): String {
-        val encName = URLEncoder.encode(displayName, "UTF-8")
-        val encUids = URLEncoder.encode(participantUids.joinToString(","), "UTF-8")
+        val encName = Uri.encode(displayName)
+        val encUids = Uri.encode(participantUids.joinToString(","))
         return "chat_conversation/$conversationId/$encName/$encUids?type=$type"
     }
     fun groupInfo(conversationId: String, groupName: String): String {
-        val encName = URLEncoder.encode(groupName, "UTF-8")
+        val encName = Uri.encode(groupName)
         return "group_info/$conversationId/$encName"
     }
 }

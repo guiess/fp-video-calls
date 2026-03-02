@@ -338,9 +338,9 @@ export default function ChatConversationScreen() {
 
   function getConversationTitle(): string {
     if (!conversation) return "";
-    if (conversation.type === "group" && conversation.groupName) return conversation.groupName;
+    if (conversation.type === "group" && conversation.groupName) return conversation.groupName.replace(/\+/g, " ");
     const other = conversation.participants.find((p) => p.user_uid !== user?.uid);
-    return other?.user_name || "Chat";
+    return other?.user_name?.replace(/\+/g, " ") || "Chat";
   }
 
   function getReplyMessage(replyToId: string): Message | undefined {
