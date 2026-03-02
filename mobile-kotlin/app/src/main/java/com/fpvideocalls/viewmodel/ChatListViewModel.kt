@@ -63,9 +63,9 @@ class ChatListViewModel @Inject constructor(
     }
 
     fun getDisplayName(convo: Conversation): String {
-        if (convo.type == "group") return convo.groupName ?: "Group"
+        if (convo.type == "group") return convo.groupName?.replace("+", " ") ?: "Group"
         val myUid = FirebaseAuth.getInstance().currentUser?.uid
         val other = convo.participants.firstOrNull { it.userUid != myUid }
-        return other?.userName ?: "Chat"
+        return other?.userName?.replace("+", " ") ?: "Chat"
     }
 }

@@ -297,7 +297,7 @@ class ChatRepository @Inject constructor(
             val p = participantsArr.getJSONObject(i)
             ChatParticipant(
                 userUid = p.getString("user_uid"),
-                userName = p.optString("user_name", null),
+                userName = p.optString("user_name", null)?.replace("+", " "),
                 muted = p.optInt("muted", 0) == 1
             )
         }
@@ -330,7 +330,7 @@ class ChatRepository @Inject constructor(
             id = json.getString("id"),
             conversationId = json.optString("conversationId", json.optString("conversation_id", "")),
             senderUid = json.optString("senderUid", json.optString("sender_uid", "")),
-            senderName = json.optString("senderName", json.optString("sender_name", null)),
+            senderName = json.optString("senderName", json.optString("sender_name", null))?.replace("+", " "),
             type = json.optString("type", "text"),
             ciphertext = json.optString("ciphertext", ""),
             iv = json.optString("iv", ""),
