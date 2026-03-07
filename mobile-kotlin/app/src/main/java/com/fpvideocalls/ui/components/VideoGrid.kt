@@ -115,12 +115,11 @@ fun VideoGrid(
                     }
                 }
             } else if (totalTiles == 2) {
-                // 2 tiles vertically
-                Column(Modifier.fillMaxSize()) {
-                    // Remote
+                // 2 tiles: vertical in portrait, side-by-side in landscape
+                val remoteTile = @Composable { mod: Modifier ->
                     participants.firstOrNull()?.let { p ->
                         val track = remoteVideoTracks[p.userId]
-                        Box(Modifier.weight(1f).fillMaxWidth().clickable { pinnedId = p.userId }) {
+                        Box(mod.clickable { pinnedId = p.userId }) {
                             if (track != null) {
                                 WebRTCVideoView(track, eglBase, Modifier.fillMaxSize())
                             } else {
@@ -128,16 +127,28 @@ fun VideoGrid(
                             }
                         }
                     }
-                    // Local
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                }
+                val localTile = @Composable { mod: Modifier ->
+                    Box(mod) {
                         if (localVideoTrack != null) {
-                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize(), )
+                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
                         }
                         if (!camEnabled) {
                             Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
                             }
                         }
+                    }
+                }
+                if (isPortrait) {
+                    Column(Modifier.fillMaxSize()) {
+                        remoteTile(Modifier.weight(1f).fillMaxWidth())
+                        localTile(Modifier.weight(1f).fillMaxWidth())
+                    }
+                } else {
+                    Row(Modifier.fillMaxSize()) {
+                        remoteTile(Modifier.weight(1f).fillMaxHeight())
+                        localTile(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
             } else {
