@@ -1,7 +1,10 @@
 package com.fpvideocalls.webrtc
 
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.util.Log
+import android.view.OrientationEventListener
 import com.fpvideocalls.data.CallApiService
 import com.fpvideocalls.model.JoinOptions
 import com.fpvideocalls.model.Participant
@@ -37,6 +40,7 @@ class WebRTCManager(
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var eglBase: EglBase? = null
     private val mirrorProcessor = MirrorVideoProcessor()
+    private var orientationListener: OrientationEventListener? = null
     private val peerConnections = mutableMapOf<String, PeerConnection>()
     private var signalingService: SignalingService? = null
     private var iceServers = STUN_SERVERS.toMutableList()
@@ -223,17 +227,19 @@ class WebRTCManager(
         val enumerator = Camera2Enumerator(context)
         val frontCamera = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
         val cameraName = frontCamera ?: enumerator.deviceNames.firstOrNull() ?: return
+        val isFront = enumerator.isFrontFacing(cameraName)
 
         videoCapturer = enumerator.createCapturer(cameraName, null)
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", egl.eglBaseContext)
         val videoSource = f.createVideoSource(videoCapturer!!.isScreencast)
-        // Mirror front-camera frames at source via the official VideoProcessor API.
-        // applyTransformMatrix returns a real TextureBufferImpl so the transform
-        // survives cropAndScale and is honoured by both encoder and local sinks.
-        mirrorProcessor.mirrorEnabled = true
+        mirrorProcessor.mirrorEnabled = isFront
         videoSource.setVideoProcessor(mirrorProcessor)
         videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource.capturerObserver)
         videoCapturer!!.startCapture(1280, 720, 30)
+
+        // Sensor-based orientation listener to fix frame rotation on API 30+
+        // (applicationContext's Display.getRotation() can be stale)
+        startOrientationListener(cameraName, isFront)
 
         localVideoTrack = f.createVideoTrack("video0", videoSource)
         localVideoTrack?.setEnabled(_camEnabled.value)
@@ -242,6 +248,35 @@ class WebRTCManager(
         if (!_camEnabled.value) {
             try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         }
+    }
+
+    private fun startOrientationListener(cameraId: String, isFrontFacing: Boolean) {
+        orientationListener?.disable()
+        val cm = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val sensorOrientation = try {
+            cm.getCameraCharacteristics(cameraId)
+                .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not get sensor orientation", e)
+            0
+        }
+        Log.d(TAG, "Camera $cameraId sensorOrientation=$sensorOrientation isFront=$isFrontFacing")
+
+        orientationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                // Quantize to nearest 90 degrees, then invert to match
+                // WebRTC's convention (Display.ROTATION_90 → 270, ROTATION_270 → 90)
+                val rounded = ((orientation + 45) / 90 * 90) % 360
+                val deviceOrientation = (360 - rounded) % 360
+                val rotation = if (isFrontFacing) {
+                    (sensorOrientation + deviceOrientation) % 360
+                } else {
+                    (sensorOrientation - deviceOrientation + 360) % 360
+                }
+                mirrorProcessor.rotationOverride = rotation
+            }
+        }.also { it.enable() }
     }
 
     private fun createPeerConnection(targetId: String): PeerConnection {
@@ -427,6 +462,14 @@ class WebRTCManager(
             override fun onCameraSwitchDone(isFront: Boolean) {
                 _isFrontCamera.value = isFront
                 mirrorProcessor.mirrorEnabled = isFront
+                // Re-create orientation listener for the new camera's sensor orientation
+                val enumerator = Camera2Enumerator(context)
+                val cameraName = enumerator.deviceNames.firstOrNull {
+                    if (isFront) enumerator.isFrontFacing(it) else enumerator.isBackFacing(it)
+                }
+                if (cameraName != null) {
+                    startOrientationListener(cameraName, isFront)
+                }
             }
             override fun onCameraSwitchError(error: String?) {
                 Log.w(TAG, "Camera switch failed: $error")
@@ -435,12 +478,16 @@ class WebRTCManager(
     }
 
     fun cleanup() {
-        // 1. Clear state flows FIRST on Main so Compose stops rendering and releases SurfaceViewRenderers
+        // 1. Stop orientation listener
+        orientationListener?.disable()
+        orientationListener = null
+
+        // 2. Clear state flows FIRST on Main so Compose stops rendering and releases SurfaceViewRenderers
         _localVideoTrackFlow.value = null
         _remoteVideoTracks.value = emptyMap()
         _participants.value = emptyList()
 
-        // 2. Capture references, then null them so nothing else touches them
+        // 3. Capture references, then null them so nothing else touches them
         val sig = signalingService; signalingService = null
         val pcs = peerConnections.toMap(); peerConnections.clear()
         val cap = videoCapturer; videoCapturer = null
@@ -450,7 +497,7 @@ class WebRTCManager(
         val fac = factory; factory = null
         val egl = eglBase; eglBase = null
 
-        // 3. Run blocking WebRTC disposal on a background thread to avoid ANR
+        // 4. Run blocking WebRTC disposal on a background thread to avoid ANR
         Thread {
             try { sig?.leave() } catch (_: Exception) {}
 

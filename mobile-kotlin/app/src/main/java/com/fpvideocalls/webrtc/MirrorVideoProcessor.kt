@@ -9,9 +9,8 @@ import org.webrtc.VideoSink
 
 /**
  * VideoProcessor that horizontally mirrors front-camera frames before encoding/preview.
- *
- * Uses VideoSource.setVideoProcessor() and TextureBufferImpl.applyTransformMatrix() so the
- * flip is baked into a real TextureBufferImpl that the entire native pipeline honours.
+ * Also corrects frame rotation using sensor-based device orientation (set externally)
+ * to work around applicationContext Display.getRotation() staleness on API 30+.
  */
 class MirrorVideoProcessor : VideoProcessor {
 
@@ -19,6 +18,10 @@ class MirrorVideoProcessor : VideoProcessor {
 
     @Volatile
     var mirrorEnabled = true
+
+    /** Correct frame rotation computed from OrientationEventListener + sensor orientation. */
+    @Volatile
+    var rotationOverride: Int = -1
 
     override fun setSink(sink: VideoSink?) {
         this.sink = sink
@@ -31,36 +34,37 @@ class MirrorVideoProcessor : VideoProcessor {
 
     override fun onFrameCaptured(frame: VideoFrame) {
         val buffer = frame.buffer
+        val rotation = if (rotationOverride >= 0) rotationOverride else frame.rotation
 
         if (logCount < 5) {
             logCount++
-            Log.d("MirrorProcessor", "onFrameCaptured | mirrorEnabled=$mirrorEnabled | bufferType=${buffer::class.java.simpleName} | isTextureBufferImpl=${buffer is TextureBufferImpl}")
+            Log.d("MirrorProcessor", "onFrameCaptured | mirrorEnabled=$mirrorEnabled | rotation=$rotation (override=${rotationOverride}, frame=${frame.rotation})")
         }
 
         if (!mirrorEnabled || buffer !is TextureBufferImpl) {
-            sink?.onFrame(frame)
+            // Still apply rotation override for non-mirrored frames (back camera)
+            if (rotationOverride >= 0 && rotation != frame.rotation) {
+                buffer.retain()
+                val corrected = VideoFrame(buffer, rotation, frame.timestampNs)
+                sink?.onFrame(corrected)
+                corrected.release()
+            } else {
+                sink?.onFrame(frame)
+            }
             return
         }
 
-        // Camera sensors are typically rotated 90°/270°, so texture-x maps to screen-y.
-        // Flip the appropriate texture axis based on frame rotation to achieve a
-        // horizontal mirror on screen.
-        val rotation = frame.rotation
         val mirrorMatrix = Matrix()
         if (rotation == 90 || rotation == 270) {
-            mirrorMatrix.setScale(1f, -1f, 0.5f, 0.5f)  // flip texture-y → screen-x flip
+            mirrorMatrix.setScale(1f, -1f, 0.5f, 0.5f)
         } else {
-            mirrorMatrix.setScale(-1f, 1f, 0.5f, 0.5f)  // flip texture-x → screen-x flip
+            mirrorMatrix.setScale(-1f, 1f, 0.5f, 0.5f)
         }
 
         val mirroredBuffer = buffer.applyTransformMatrix(
             mirrorMatrix, buffer.width, buffer.height
         )
-        val mirroredFrame = VideoFrame(mirroredBuffer, frame.rotation, frame.timestampNs)
-
-        if (logCount <= 5) {
-            Log.d("MirrorProcessor", "original transform=${buffer.transformMatrix} | mirrored transform=${mirroredBuffer.transformMatrix}")
-        }
+        val mirroredFrame = VideoFrame(mirroredBuffer, rotation, frame.timestampNs)
 
         sink?.onFrame(mirroredFrame)
         mirroredFrame.release()
