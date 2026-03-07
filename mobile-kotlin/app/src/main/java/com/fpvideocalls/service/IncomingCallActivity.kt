@@ -28,14 +28,18 @@ import com.fpvideocalls.MainActivity
 import com.fpvideocalls.R
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.data.CallApiService
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class IncomingCallActivity : ComponentActivity() {
+
+    @Inject lateinit var callApiService: CallApiService
 
     companion object {
         private const val TAG = "IncomingCallActivity"
@@ -113,6 +117,18 @@ class IncomingCallActivity : ComponentActivity() {
                     onDecline = {
                         Log.d(TAG, "Call declined")
                         CallEventBus.post(CallEvent.Decline(callData.callUUID))
+                        // Notify caller directly (CallViewModel may not be alive)
+                        kotlinx.coroutines.MainScope().launch {
+                            try {
+                                callApiService.cancelCall(
+                                    calleeUids = listOf(callData.callerId),
+                                    roomId = callData.roomId,
+                                    callUUID = callData.callUUID
+                                )
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to send decline to caller", e)
+                            }
+                        }
                         stopService(Intent(this, CallRingingService::class.java))
                         NotificationHelper.cancelNotification(this, callData.callUUID)
                         finish()

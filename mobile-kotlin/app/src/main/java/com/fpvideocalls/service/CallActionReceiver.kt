@@ -9,6 +9,16 @@ import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
+import com.fpvideocalls.util.Constants
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 class CallActionReceiver : BroadcastReceiver() {
 
@@ -49,6 +59,8 @@ class CallActionReceiver : BroadcastReceiver() {
 
             ACTION_DECLINE -> {
                 val callUUID = intent.getStringExtra("callUUID") ?: ""
+                val roomId = intent.getStringExtra("roomId") ?: ""
+                val callerId = intent.getStringExtra("callerId") ?: ""
                 CallEventBus.post(CallEvent.Decline(callUUID))
 
                 // Stop ringing service
@@ -56,6 +68,30 @@ class CallActionReceiver : BroadcastReceiver() {
 
                 // Cancel notification
                 NotificationHelper.cancelNotification(context, callUUID)
+
+                // Notify caller via API (fire-and-forget)
+                if (roomId.isNotEmpty() && callerId.isNotEmpty()) {
+                    val pending = goAsync()
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val body = JSONObject().apply {
+                                put("calleeUids", JSONArray().put(callerId))
+                                put("roomId", roomId)
+                                put("callUUID", callUUID)
+                            }
+                            val req = Request.Builder()
+                                .url("${Constants.SIGNALING_URL}/api/call/cancel")
+                                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                                .build()
+                            OkHttpClient().newCall(req).execute().close()
+                            Log.d("CallActionReceiver", "Decline cancel sent to $callerId")
+                        } catch (e: Exception) {
+                            Log.w("CallActionReceiver", "Failed to send decline cancel", e)
+                        } finally {
+                            pending.finish()
+                        }
+                    }
+                }
             }
 
             ACTION_HANG_UP -> {

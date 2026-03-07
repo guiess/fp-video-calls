@@ -5,6 +5,7 @@ import { useLanguage } from "../i18n/LanguageContext";
 import { WebRTCService, SignalingHandlers } from "../services/webrtc";
 import { createRoom, sendCallInvite, cancelCall } from "../services/callService";
 import { saveCallRecord } from "../services/callHistoryService";
+import { subscribeChatEvents } from "../services/chatSocket";
 import VideoGrid, { RemoteTile } from "../components/VideoGrid";
 
 function safeRandomId() {
@@ -360,6 +361,34 @@ export default function ActiveCallScreen() {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  // Listen for call_cancel from callee (declined) while ringing
+  useEffect(() => {
+    if (phase !== "ringing" || isIncoming) return;
+    console.log("[ActiveCallScreen] subscribing to call_cancel, roomId=", roomIdRef.current, "callUUID=", callUUIDRef.current);
+
+    const unsub = subscribeChatEvents({
+      onCallCancel: (data) => {
+        console.log("[ActiveCallScreen] received call_cancel:", data, "our roomId=", roomIdRef.current, "our callUUID=", callUUIDRef.current);
+        if (data.roomId === roomIdRef.current || data.callUUID === callUUIDRef.current) {
+          console.log("[ActiveCallScreen] MATCH — ending call");
+          if (timerRef.current) clearTimeout(timerRef.current);
+          try { svcRef.current?.leave(); } catch {}
+          setPhase("ended");
+          saveCallRecord({
+            callId: callUUIDRef.current, callUUID: callUUIDRef.current,
+            callerUid: user!.uid, callerName: user!.displayName || "User",
+            calleeUids, callType, roomId: roomIdRef.current,
+            status: "DECLINED", direction: "outgoing",
+            createdAt: Date.now(), endedAt: Date.now(),
+          });
+          setTimeout(() => { window.location.href = "/app"; }, 2000);
+        }
+      },
+    });
+
+    return unsub;
+  }, [phase]);
 
   function handleEndCall() {
     if (timerRef.current) clearTimeout(timerRef.current);

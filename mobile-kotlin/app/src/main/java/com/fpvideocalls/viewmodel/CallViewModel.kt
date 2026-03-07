@@ -61,26 +61,45 @@ class CallViewModel @Inject constructor(
                         CallStateManager.answerCall(event.data.callUUID)
                         _incomingCall.value = null
                         _navigationEvents.emit(CallNavigationEvent.AnswerCall(event.data))
+                        // Notify caller that we answered
+                        viewModelScope.launch {
+                            try {
+                                callApiService.sendCallAnswer(
+                                    callerUid = event.data.callerId,
+                                    roomId = event.data.roomId,
+                                    callUUID = event.data.callUUID
+                                )
+                            } catch (e: Exception) {
+                                Log.w("CallViewModel", "Failed to send answer to caller", e)
+                            }
+                        }
                     }
                     is CallEvent.Decline -> {
                         Log.d("CallViewModel", "Call declined: ${event.callUUID}")
+                        // Get call info from UI state or CallStateManager
                         val callData = _incomingCall.value
+                        val record = CallStateManager.getRecord(event.callUUID)
+                        val callerUid = callData?.callerId ?: record?.callerUid
+                        val roomId = callData?.roomId ?: record?.roomId
                         CallStateManager.declineCall(event.callUUID)
                         _incomingCall.value = null
                         _navigationEvents.emit(CallNavigationEvent.DismissIncomingCall)
                         // Notify caller that we declined
-                        if (callData != null) {
+                        if (callerUid != null && !roomId.isNullOrEmpty()) {
                             viewModelScope.launch {
                                 try {
                                     callApiService.cancelCall(
-                                        calleeUids = listOf(callData.callerId),
-                                        roomId = callData.roomId,
-                                        callUUID = callData.callUUID
+                                        calleeUids = listOf(callerUid),
+                                        roomId = roomId,
+                                        callUUID = event.callUUID
                                     )
+                                    Log.d("CallViewModel", "Decline cancel sent to $callerUid")
                                 } catch (e: Exception) {
                                     Log.w("CallViewModel", "Failed to send decline to caller", e)
                                 }
                             }
+                        } else {
+                            Log.w("CallViewModel", "No call data to send decline: callData=$callData record=$record")
                         }
                         saveCallHistory(event.callUUID)
                     }
@@ -106,6 +125,27 @@ class CallViewModel @Inject constructor(
 
     fun clearIncomingCall() {
         _incomingCall.value = null
+    }
+
+    /** Decline the current incoming call and notify the caller via API */
+    fun declineIncomingCall() {
+        val callData = _incomingCall.value
+        _incomingCall.value = null
+        if (callData != null) {
+            CallStateManager.declineCall(callData.callUUID)
+            viewModelScope.launch {
+                try {
+                    callApiService.cancelCall(
+                        calleeUids = listOf(callData.callerId),
+                        roomId = callData.roomId,
+                        callUUID = callData.callUUID
+                    )
+                } catch (e: Exception) {
+                    Log.w("CallViewModel", "Failed to send decline to caller", e)
+                }
+            }
+            saveCallHistory(callData.callUUID)
+        }
     }
 
     private fun saveCallHistory(callUUID: String) {

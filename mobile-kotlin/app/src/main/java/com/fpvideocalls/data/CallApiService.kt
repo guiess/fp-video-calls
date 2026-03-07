@@ -127,4 +127,23 @@ class CallApiService @Inject constructor(
             client.newCall(request).execute()
         } catch (_: Exception) {}
     }
+
+    suspend fun sendCallAnswer(
+        callerUid: String,
+        roomId: String,
+        callUUID: String? = null
+    ) = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply {
+            put("callerUid", callerUid)
+            put("roomId", roomId)
+            if (callUUID != null) put("callUUID", callUUID)
+        }
+        val request = Request.Builder()
+            .url("$baseUrl/api/call/answer")
+            .post(body.toString().toRequestBody(json))
+            .build()
+        try {
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+    }
 }

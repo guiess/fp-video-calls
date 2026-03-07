@@ -299,7 +299,7 @@ fun AppNavigation(
                     }
                 },
                 onDecline = {
-                    callViewModel.clearIncomingCall()
+                    callViewModel.declineIncomingCall()
                     navController.popBackStack()
                 }
             )

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { subscribeChatEvents } from "../services/chatSocket";
 import { useAuth } from "../contexts/AuthContext";
 import { saveCallRecord } from "../services/callHistoryService";
-import { cancelCall } from "../services/callService";
+import { cancelCall, sendCallAnswer } from "../services/callService";
 
 interface IncomingCall {
   callUUID: string;
@@ -58,6 +58,8 @@ export default function IncomingCallModal() {
     stopRingtone();
     const c = call;
     setCall(null);
+    // Notify the caller that we answered
+    sendCallAnswer(c.callerId, c.roomId, c.callUUID);
     saveCallRecord({
       callId: c.callUUID, callUUID: c.callUUID, callerUid: c.callerId,
       callerName: c.callerName, calleeUids: [user?.uid || ""],
