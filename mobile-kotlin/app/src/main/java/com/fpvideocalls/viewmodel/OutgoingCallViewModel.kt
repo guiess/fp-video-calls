@@ -10,19 +10,25 @@ import com.fpvideocalls.model.User
 import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.service.CallStateManager
 import com.fpvideocalls.webrtc.AudioManagerHelper
+import com.fpvideocalls.util.CallEvent
+import com.fpvideocalls.util.CallEventBus
 import com.fpvideocalls.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import javax.inject.Inject
 
 enum class OutgoingCallStatus {
-    SETTING_UP, CALLING, TIMED_OUT, ERROR
+    SETTING_UP, CALLING, TIMED_OUT, DECLINED, ERROR
 }
 
 data class OutgoingCallResult(
@@ -125,13 +131,34 @@ class OutgoingCallViewModel @Inject constructor(
                 }
 
                 // Wait for a remote participant to join (callee answered) with timeout
+                // Also listen for CallEvent.Cancel (callee declined via FCM)
                 Log.d(TAG, "Waiting for participants (current=${manager.participants.value.size})")
-                val joined = withTimeoutOrNull(Constants.OUTGOING_CALL_TIMEOUT_MS) {
-                    manager.participants.first { it.isNotEmpty() }
+
+                val joinSignal = manager.participants
+                    .filter { it.isNotEmpty() }
+                    .map { true }
+
+                val cancelSignal = CallEventBus.events
+                    .filterIsInstance<CallEvent.Cancel>()
+                    .filter { it.roomId == room.roomId || it.callUUID == callId }
+                    .map { false }
+
+                val answered: Boolean? = withTimeoutOrNull(Constants.OUTGOING_CALL_TIMEOUT_MS) {
+                    merge(joinSignal, cancelSignal).first()
                 }
                 if (cancelled) return@launch
 
-                if (joined == null) {
+                if (answered == false) {
+                    // Callee declined — they already sent cancel, don't re-cancel
+                    Log.d(TAG, "Callee declined the call")
+                    audioHelper.stopRingback()
+                    CallStateManager.endCall()
+                    ActiveCallService.endCall(getApplication())
+                    _status.value = OutgoingCallStatus.DECLINED
+                    return@launch
+                }
+
+                if (answered == null) {
                     Log.d(TAG, "Outgoing call timed out after ${Constants.OUTGOING_CALL_TIMEOUT_MS}ms")
                     audioHelper.stopRingback()
                     CallStateManager.endCall()

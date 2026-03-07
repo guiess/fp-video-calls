@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { subscribeChatEvents } from "../services/chatSocket";
 import { useAuth } from "../contexts/AuthContext";
 import { saveCallRecord } from "../services/callHistoryService";
+import { cancelCall } from "../services/callService";
 
 interface IncomingCall {
   callUUID: string;
@@ -15,6 +17,7 @@ interface IncomingCall {
 
 export default function IncomingCallModal() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [call, setCall] = useState<IncomingCall | null>(null);
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
 
@@ -62,11 +65,13 @@ export default function IncomingCallModal() {
       direction: "incoming", createdAt: Date.now(), answeredAt: Date.now(),
     });
     const camOff = audioOnly ? "&camOff=1" : "";
-    window.location.href = `/app/call?roomId=${c.roomId}&pwd=${c.roomPassword}&name=${encodeURIComponent(c.callerName)}&type=${c.callType}&quality=1080p${camOff}`;
+    navigate(`/app/call?roomId=${c.roomId}&pwd=${c.roomPassword}&name=${encodeURIComponent(c.callerName)}&type=${c.callType}&quality=1080p${camOff}`);
   }
 
   function handleDecline() {
     if (call) {
+      // Notify the caller so they stop ringing
+      cancelCall([call.callerId], call.roomId, call.callUUID);
       saveCallRecord({
         callId: call.callUUID, callUUID: call.callUUID, callerUid: call.callerId,
         callerName: call.callerName, calleeUids: [user?.uid || ""],

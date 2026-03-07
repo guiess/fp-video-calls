@@ -2,6 +2,8 @@ package com.fpvideocalls.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,9 +38,33 @@ fun PreCallScreen(
 ) {
     val context = LocalContext.current
     val displayNames = contacts.joinToString(", ") { it.displayName }
-    val hasCameraPermission = remember {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    // Dynamic permission state — updated after the runtime request completes
+    var hasCameraPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
+    var hasMicPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionsGranted = hasCameraPermission && hasMicPermission
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        hasCameraPermission = results[Manifest.permission.CAMERA] == true
+        hasMicPermission = results[Manifest.permission.RECORD_AUDIO] == true
+    }
+
+    // Request camera & mic permissions on first composition if not already granted
+    LaunchedEffect(Unit) {
+        if (!permissionsGranted) {
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.RECORD_AUDIO
+            ))
+        }
+    }
+
     var cameraOn by remember { mutableStateOf(true) }
 
     // Local camera preview state
@@ -162,6 +188,29 @@ fun PreCallScreen(
             )
             Spacer(Modifier.height(24.dp))
 
+            if (!permissionsGranted) {
+                Text(
+                    "Camera and microphone permissions are required to make calls.",
+                    color = ErrorRed,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        permissionLauncher.launch(arrayOf(
+                            Manifest.permission.CAMERA,
+                            Manifest.permission.RECORD_AUDIO
+                        ))
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple)
+                ) {
+                    Text("Grant Permissions", fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -174,6 +223,7 @@ fun PreCallScreen(
                 }
                 Button(
                     onClick = { onStartCall(!cameraOn) },
+                    enabled = permissionsGranted,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Purple),
                     modifier = Modifier.weight(1f)

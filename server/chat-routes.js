@@ -26,8 +26,11 @@ function isParticipant(conversationId, uid) {
 
 async function getFcmToken(uid) {
   try {
-    const doc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
-    return doc.exists ? (doc.data().fcmToken || null) : null;
+    const newDoc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
+    if (newDoc.exists && newDoc.data().fcmToken) return newDoc.data().fcmToken;
+    // Fallback: old path for users who haven't re-opened the app since migration
+    const oldDoc = await admin.firestore().collection("users").doc(uid).get();
+    return oldDoc.exists ? (oldDoc.data().fcmToken || null) : null;
   } catch { return null; }
 }
 
@@ -61,6 +64,22 @@ async function sendChatFcm(participantUids, senderUid, senderName, conversationI
         },
       })
     )
+  );
+}
+
+/** Send FCM data message to a list of UIDs (best-effort, skips failures) */
+async function sendFcmToUids(uids, data) {
+  if (!admin.apps.length) return;
+  await Promise.allSettled(
+    uids.map(async (uid) => {
+      const token = await getFcmToken(uid);
+      if (!token) return;
+      await admin.messaging().send({
+        token,
+        android: { priority: "high" },
+        data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+      });
+    })
   );
 }
 
@@ -305,7 +324,7 @@ router.get("/conversations/:id/messages", (req, res) => {
 
 // ── DELETE /api/chat/conversations/:id/messages/:msgId — Delete a message ───
 
-router.delete("/conversations/:id/messages/:msgId", (req, res) => {
+router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
   const { id, msgId } = req.params;
   if (!isParticipant(id, req.uid)) {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
@@ -336,6 +355,14 @@ router.delete("/conversations/:id/messages/:msgId", (req, res) => {
     });
   }
 
+  // FCM push for offline participants
+  try {
+    const uids = participants.map(p => p.user_uid).filter(uid => uid !== req.uid);
+    await sendFcmToUids(uids, { type: "message_deleted", conversationId: id, messageId: msgId });
+  } catch (e) {
+    console.warn("[chat/delete] FCM failed:", e.message);
+  }
+
   return res.json({ ok: true });
 });
 
@@ -344,7 +371,7 @@ router.delete("/conversations/:id/messages/:msgId", (req, res) => {
 router.put("/conversations/:id/read", markAsReadHandler);
 router.post("/conversations/:id/read", markAsReadHandler);
 
-function markAsReadHandler(req, res) {
+async function markAsReadHandler(req, res) {
   const { id } = req.params;
   const uid = req.uid;
 
@@ -362,11 +389,12 @@ function markAsReadHandler(req, res) {
     DO UPDATE SET last_read_message_id = excluded.last_read_message_id, last_read_at = excluded.last_read_at
   `).run(id, uid, messageId || null, now);
 
+  const participants = db.prepare(
+    "SELECT user_uid FROM conversation_participants WHERE conversation_id = ? AND user_uid != ?"
+  ).all(id, uid);
+
   // Notify other participants so they can show double-check
   if (router._io) {
-    const participants = db.prepare(
-      "SELECT user_uid FROM conversation_participants WHERE conversation_id = ? AND user_uid != ?"
-    ).all(id, uid);
     for (const p of participants) {
       router._io.to(`user:${p.user_uid}`).emit("chat_read_receipt", {
         conversationId: id,
@@ -374,6 +402,14 @@ function markAsReadHandler(req, res) {
         lastReadAt: now,
       });
     }
+  }
+
+  // FCM push for offline participants
+  try {
+    const uids = participants.map(p => p.user_uid);
+    await sendFcmToUids(uids, { type: "chat_read_receipt", conversationId: id, readerUid: uid, lastReadAt: String(now) });
+  } catch (e) {
+    console.warn("[chat/read] FCM failed:", e.message);
   }
 
   return res.json({ ok: true });

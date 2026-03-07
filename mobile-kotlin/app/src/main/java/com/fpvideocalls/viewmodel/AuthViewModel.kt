@@ -57,7 +57,10 @@ class AuthViewModel @Inject constructor(
             viewModelScope.launch {
                 try {
                     firestoreRepository.upsertUser(appUser)
+                    // Delete stale token and force FCM to issue a fresh one
+                    firebaseMessaging.deleteToken().await()
                     val token = firebaseMessaging.token.await()
+                    Log.d("AuthViewModel", "FCM token refreshed: ${token.take(20)}...")
                     firestoreRepository.updateFcmToken(appUser.uid, token)
                 } catch (e: Exception) {
                     Log.w("AuthViewModel", "Upsert/FCM failed", e)

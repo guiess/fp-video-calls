@@ -73,6 +73,7 @@ fun OutgoingCallScreen(
                 OutgoingCallStatus.SETTING_UP -> stringResource(R.string.connecting)
                 OutgoingCallStatus.CALLING -> stringResource(R.string.calling)
                 OutgoingCallStatus.TIMED_OUT -> stringResource(R.string.no_answer)
+                OutgoingCallStatus.DECLINED -> stringResource(R.string.status_declined)
                 OutgoingCallStatus.ERROR -> stringResource(R.string.call_failed)
             },
             color = TextSecondary,
@@ -95,7 +96,7 @@ fun OutgoingCallScreen(
             ) {
                 Text(stringResource(R.string.cancel), color = TextSecondary, fontSize = 16.sp)
             }
-        } else if (status == OutgoingCallStatus.TIMED_OUT) {
+        } else if (status == OutgoingCallStatus.TIMED_OUT || status == OutgoingCallStatus.DECLINED) {
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = { outgoingCallViewModel.retry() },

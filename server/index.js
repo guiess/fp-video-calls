@@ -172,10 +172,13 @@ app.get("/api/turn", (req, res) => {
 
 // ── Mobile call invite / cancel (Firebase FCM) ────────────────────────────
 
-/** Lookup a user's FCM token from Firestore */
+/** Lookup a user's FCM token from Firestore (new path, with fallback to old path) */
 async function getFcmToken(uid) {
-  const doc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
-  return doc.exists ? (doc.data().fcmToken || null) : null;
+  const newDoc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
+  if (newDoc.exists && newDoc.data().fcmToken) return newDoc.data().fcmToken;
+  // Fallback: old path for users who haven't re-opened the app since migration
+  const oldDoc = await admin.firestore().collection("users").doc(uid).get();
+  return oldDoc.exists ? (oldDoc.data().fcmToken || null) : null;
 }
 
 /**
@@ -214,6 +217,7 @@ app.post("/api/call/invite", async (req, res) => {
       const results = await Promise.allSettled(
         calleeUids.map(async (uid) => {
           const token = await getFcmToken(uid);
+          console.log(`[call/invite] FCM token for ${uid}: ${token ? "found" : "NOT FOUND"}`);
           if (!token) return;
           await admin.messaging().send({
             token,
@@ -266,6 +270,7 @@ app.post("/api/call/cancel", async (req, res) => {
       await Promise.allSettled(
         calleeUids.map(async (uid) => {
           const token = await getFcmToken(uid);
+          console.log(`[call/cancel] FCM token for ${uid}: ${token ? "found" : "NOT FOUND"}`);
           if (!token) return;
           await admin.messaging().send({
             token,
@@ -287,7 +292,7 @@ app.post("/api/call/cancel", async (req, res) => {
  * Body: { callerUid: string, roomId: string, callUUID?: string }
  * Notifies the caller that the callee answered so the caller can join the room.
  */
-app.post("/api/call/answer", (req, res) => {
+app.post("/api/call/answer", async (req, res) => {
   const { callerUid, roomId, callUUID } = req.body || {};
   if (!callerUid || !roomId) {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
@@ -296,6 +301,22 @@ app.post("/api/call/answer", (req, res) => {
     roomId: String(roomId),
     callUUID: String(callUUID || ""),
   });
+
+  if (firebaseReady) {
+    try {
+      const token = await getFcmToken(callerUid);
+      if (token) {
+        await admin.messaging().send({
+          token,
+          android: { priority: "high" },
+          data: { type: "call_answered", roomId: String(roomId), callUUID: String(callUUID || "") },
+        });
+      }
+    } catch (e) {
+      console.warn("[call/answer] FCM failed:", e.message);
+    }
+  }
+
   console.log(`[call/answer] notified caller ${callerUid} for room ${roomId}`);
   return res.json({ ok: true });
 });

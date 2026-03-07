@@ -46,7 +46,7 @@ class CallApiService @Inject constructor(
             .build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) throw Exception("Room creation failed: ${response.code}")
-        val result = JSONObject(response.body!!.string())
+        val result = JSONObject(response.body?.string() ?: throw Exception("Room creation failed: empty response"))
         val roomId = result.getString("roomId")
         android.util.Log.d(TAG, "Room created: $roomId")
         RoomCreateResult(roomId = roomId)
@@ -60,7 +60,7 @@ class CallApiService @Inject constructor(
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
-            val result = JSONObject(response.body!!.string())
+            val result = JSONObject(response.body?.string() ?: return@withContext null)
             if (result.has("username") && result.has("credential") && result.has("urls")) {
                 val urls = mutableListOf<String>()
                 val urlsArray = result.getJSONArray("urls")
@@ -103,7 +103,9 @@ class CallApiService @Inject constructor(
             .post(body.toString().toRequestBody(json))
             .build()
         val response = client.newCall(request).execute()
-        val result = JSONObject(response.body!!.string())
+        val responseBody = response.body?.string() ?: throw Exception("Call invite failed: empty response")
+        if (!response.isSuccessful) throw Exception("Call invite failed: ${response.code}")
+        val result = JSONObject(responseBody)
         result.optString("callUUID", "")
     }
 
