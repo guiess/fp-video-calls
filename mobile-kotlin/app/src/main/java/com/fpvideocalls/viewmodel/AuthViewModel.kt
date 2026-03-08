@@ -1,8 +1,9 @@
 package com.fpvideocalls.viewmodel
 
+import android.app.Application
 import android.content.Intent
 import android.util.Log
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.data.FirestoreRepository
 import com.fpvideocalls.model.User
@@ -24,10 +25,11 @@ import javax.inject.Inject
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
+    application: Application,
     private val firebaseAuth: FirebaseAuth,
     private val firestoreRepository: FirestoreRepository,
     private val firebaseMessaging: FirebaseMessaging
-) : ViewModel() {
+) : AndroidViewModel(application) {
 
     private val _user = MutableStateFlow<User?>(null)
     val user: StateFlow<User?> = _user.asStateFlow()
@@ -87,8 +89,12 @@ class AuthViewModel @Inject constructor(
             .requestIdToken(Constants.GOOGLE_WEB_CLIENT_ID)
             .requestEmail()
             .build()
-        googleSignInClient = GoogleSignIn.getClient(activity, gso)
-        _signInIntent.value = googleSignInClient!!.signInIntent
+        val client = GoogleSignIn.getClient(activity, gso)
+        googleSignInClient = client
+        // Sign out first so the account picker always appears
+        client.signOut().addOnCompleteListener {
+            _signInIntent.value = client.signInIntent
+        }
     }
 
     fun handleSignInResult(data: Intent?) {
@@ -120,10 +126,23 @@ class AuthViewModel @Inject constructor(
     fun signOut() {
         viewModelScope.launch {
             try {
-                googleSignInClient?.signOut()
+                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestIdToken(Constants.GOOGLE_WEB_CLIENT_ID)
+                    .requestEmail()
+                    .build()
+                val client = googleSignInClient ?: GoogleSignIn.getClient(getApplication(), gso)
+                // Best-effort revoke/signOut with timeout — don't block Firebase signOut
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(3000) {
+                        try { client.revokeAccess().await() } catch (_: Exception) {}
+                        try { client.signOut().await() } catch (_: Exception) {}
+                    }
+                } catch (_: Exception) {}
                 firebaseAuth.signOut()
             } catch (e: Exception) {
                 Log.w("AuthViewModel", "Sign-out failed", e)
+                // Always sign out of Firebase even if Google fails
+                try { firebaseAuth.signOut() } catch (_: Exception) {}
             }
         }
     }

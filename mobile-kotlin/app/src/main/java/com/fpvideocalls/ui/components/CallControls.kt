@@ -55,11 +55,11 @@ fun CallControls(
             onClick = onToggleCam
         )
 
-        // Speaker
+        // Speaker / earpiece
         ControlButton(
-            icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.HearingDisabled,
+            icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.Headphones,
             contentDescription = if (isSpeakerOn) stringResource(R.string.cd_earpiece) else stringResource(R.string.cd_speaker),
-            isActive = isSpeakerOn,
+            isActive = true,
             onClick = onToggleSpeaker
         )
 
