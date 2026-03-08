@@ -28,6 +28,7 @@ import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.service.ActiveCallService
+import com.fpvideocalls.service.CallStateManager
 import com.fpvideocalls.ui.screens.*
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
@@ -289,11 +290,12 @@ fun AppNavigation(
 
             IncomingCallScreen(
                 callData = callData,
-                onAnswer = { roomId, callType, password, cameraOff ->
+                onAnswer = { cameraOff ->
+                    CallStateManager.answerCall(callData.callUUID)
                     callViewModel.clearIncomingCall()
                     ActiveCallService.pendingCameraOff = cameraOff
                     navController.navigate(
-                        Routes.inCall(roomId, currentUser?.displayName ?: "Me", currentUser?.uid ?: callData.callerId, callType, password)
+                        Routes.inCall(callData.roomId, currentUser?.displayName ?: "Me", currentUser?.uid ?: callData.callerId, callData.callType.value, callData.roomPassword)
                     ) {
                         popUpTo(Routes.MAIN) { inclusive = false }
                     }

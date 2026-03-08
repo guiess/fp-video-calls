@@ -132,24 +132,13 @@ class CallRingingService : Service() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                Constants.RINGING_SERVICE_NOTIFICATION_ID,
+                callUUID.hashCode(),
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
         } else {
-            startForeground(Constants.RINGING_SERVICE_NOTIFICATION_ID, notification)
+            startForeground(callUUID.hashCode(), notification)
         }
-
-        NotificationHelper.showCallNotification(
-            context = this,
-            callerName = callerName,
-            callType = callType,
-            roomId = roomId,
-            callUUID = callUUID,
-            callerId = callerId,
-            callerPhoto = callerPhoto,
-            roomPassword = roomPassword
-        )
 
         // Acquire wake lock
         acquireWakeLock()

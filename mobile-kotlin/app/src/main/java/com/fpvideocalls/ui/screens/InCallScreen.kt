@@ -1,7 +1,10 @@
 package com.fpvideocalls.ui.screens
 
+import android.Manifest
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +39,20 @@ fun InCallScreen(
     val activity = LocalActivity.current
     val isInPipMode = (activity as? MainActivity)?.isInPipMode == true
 
+    // Request camera/mic permissions before starting the call
+    var permissionsGranted by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        permissionsGranted = results.values.all { it }
+    }
+    LaunchedEffect(Unit) {
+        permissionLauncher.launch(arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.RECORD_AUDIO
+        ))
+    }
+
     // Back press moves app to background instead of ending the call
     BackHandler {
         activity.moveTaskToBack(true)
@@ -62,9 +79,9 @@ fun InCallScreen(
         }
     }
 
-    // Start call only if not already active (handles return-to-call)
-    LaunchedEffect(roomId) {
-        if (!ActiveCallService.isCallActive.value) {
+    // Start call only if not already active and permissions granted
+    LaunchedEffect(roomId, permissionsGranted) {
+        if (permissionsGranted && !ActiveCallService.isCallActive.value) {
             inCallViewModel.startCall(roomId, userId, displayName, password, callType)
         }
     }

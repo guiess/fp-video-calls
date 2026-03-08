@@ -26,10 +26,13 @@ import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.service.CallRingingService
 import com.fpvideocalls.ui.theme.*
 
+/**
+ * Shared incoming call UI used by both in-app navigation and IncomingCallActivity (lock screen).
+ */
 @Composable
 fun IncomingCallScreen(
     callData: IncomingCallData,
-    onAnswer: (roomId: String, callType: String, password: String?, cameraOff: Boolean) -> Unit,
+    onAnswer: (cameraOff: Boolean) -> Unit,
     onDecline: () -> Unit
 ) {
     val context = LocalContext.current
@@ -86,12 +89,7 @@ fun IncomingCallScreen(
                 IconButton(
                     onClick = {
                         context.stopService(Intent(context, CallRingingService::class.java))
-                        onAnswer(
-                            callData.roomId,
-                            callData.callType.value,
-                            callData.roomPassword,
-                            true
-                        )
+                        onAnswer(true)
                     },
                     modifier = Modifier
                         .size(72.dp)
@@ -108,12 +106,7 @@ fun IncomingCallScreen(
                 IconButton(
                     onClick = {
                         context.stopService(Intent(context, CallRingingService::class.java))
-                        onAnswer(
-                            callData.roomId,
-                            callData.callType.value,
-                            callData.roomPassword,
-                            false
-                        )
+                        onAnswer(false)
                     },
                     modifier = Modifier
                         .size(72.dp)
