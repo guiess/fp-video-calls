@@ -34,9 +34,15 @@ fun VideoGrid(
     localUserId: String,
     camEnabled: Boolean,
     eglBase: EglBase?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onPinnedChanged: (Boolean) -> Unit = {}
 ) {
     var pinnedId by remember { mutableStateOf<String?>(null) }
+
+    // Notify parent whenever pinned state changes
+    LaunchedEffect(pinnedId) {
+        onPinnedChanged(pinnedId != null)
+    }
     val config = LocalConfiguration.current
     val isMobile = config.screenWidthDp < 600
     val isPortrait = config.orientation == Configuration.ORIENTATION_PORTRAIT

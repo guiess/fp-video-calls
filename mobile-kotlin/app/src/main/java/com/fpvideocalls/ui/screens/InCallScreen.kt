@@ -5,7 +5,11 @@ import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -13,18 +17,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.LocalActivity
 import com.fpvideocalls.MainActivity
 import com.fpvideocalls.R
 import com.fpvideocalls.service.ActiveCallService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.fpvideocalls.ui.components.CallControls
 import com.fpvideocalls.ui.components.VideoGrid
 import com.fpvideocalls.viewmodel.InCallViewModel
+
+/** Duration before controls auto-hide when a remote participant is pinned */
+private const val AUTO_HIDE_DELAY_MS = 10_000L
 
 @Composable
 fun InCallScreen(
@@ -71,11 +84,45 @@ fun InCallScreen(
     val signalingState by (webRTCManager?.signalingState ?: MutableStateFlow("connecting")).collectAsState()
     val isSpeakerOn by (inCallViewModel.audioHelper?.isSpeakerOn ?: MutableStateFlow(true)).collectAsState()
 
+    // Overlay controls visibility state
+    var controlsVisible by remember { mutableStateOf(true) }
+    var isPinned by remember { mutableStateOf(false) }
+    // Counter that increments on every user interaction to reset the auto-hide timer
+    var interactionCounter by remember { mutableIntStateOf(0) }
+
+    // Auto-hide controls after timeout when a remote participant is pinned
+    LaunchedEffect(controlsVisible, isPinned, isInPipMode, interactionCounter) {
+        if (controlsVisible && isPinned && !isInPipMode) {
+            delay(AUTO_HIDE_DELAY_MS)
+            controlsVisible = false
+        }
+    }
+
     // Keep screen awake
     DisposableEffect(Unit) {
         activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
             activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // Immersive fullscreen — hide system bars (status bar + navigation bar)
+    val view = LocalView.current
+    DisposableEffect(isInPipMode) {
+        if (!isInPipMode) {
+            val window = activity.window
+            val controller = WindowInsetsControllerCompat(window, view)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            // Ensure content draws behind system bars
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+        }
+        onDispose {
+            val window = activity.window
+            val controller = WindowInsetsControllerCompat(window, view)
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            WindowCompat.setDecorFitsSystemWindows(window, true)
         }
     }
 
@@ -100,44 +147,18 @@ fun InCallScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        if (!isInPipMode) {
-            // Signaling status badge
-            if (signalingState != "connected") {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 8.dp)
-                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        if (signalingState == "connecting") stringResource(R.string.incall_connecting) else stringResource(R.string.incall_reconnecting),
-                        color = Color.White,
-                        fontSize = 13.sp
-                    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    controlsVisible = !controlsVisible
+                    interactionCounter++
                 }
             }
-
-            // Room label
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(top = 4.dp, start = 16.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Text("\uD83D\uDEAA $roomId", color = Color.White, fontSize = 12.sp, maxLines = 1)
-            }
-        }
-
-        // Video grid — in PiP mode, use full space; otherwise leave room for controls
-        val bottomPadding = if (isInPipMode) 0.dp else {
-            val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            80.dp + bottomInset
-        }
+    ) {
+        // Video grid — fills entire screen, no padding reserved for controls
         VideoGrid(
             localVideoTrack = localVideoTrack,
             remoteVideoTracks = remoteVideoTracks,
@@ -145,27 +166,84 @@ fun InCallScreen(
             localUserId = userId,
             camEnabled = camEnabled,
             eglBase = webRTCManager?.getEglBase(),
-            modifier = Modifier.fillMaxSize().padding(bottom = bottomPadding)
+            modifier = Modifier.fillMaxSize(),
+            onPinnedChanged = { pinned -> isPinned = pinned }
         )
 
         if (!isInPipMode) {
-            // Controls at bottom, above navigation bar
-            CallControls(
-                micMuted = micMuted,
-                camEnabled = camEnabled,
-                isSpeakerOn = isSpeakerOn,
-                onToggleMic = { webRTCManager?.toggleMic() },
-                onToggleCam = { webRTCManager?.toggleCam() },
-                onToggleSpeaker = { inCallViewModel.audioHelper?.toggleSpeaker() },
-                onSwitchCamera = { webRTCManager?.switchCamera() },
-                onEndCall = {
-                    inCallViewModel.endCall()
-                    onEndCall()
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-            )
+            // HUD overlay — room label and signaling status (hidden with controls)
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.statusBarsPadding()
+                ) {
+                    // Room label
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 4.dp, start = 16.dp, end = 16.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("\uD83D\uDEAA $roomId", color = Color.White, fontSize = 12.sp, maxLines = 1)
+                    }
+
+                    // Signaling status badge
+                    if (signalingState != "connected") {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                if (signalingState == "connecting") stringResource(R.string.incall_connecting) else stringResource(R.string.incall_reconnecting),
+                                color = Color.White,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Controls overlay at bottom with animated visibility
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                CallControls(
+                    micMuted = micMuted,
+                    camEnabled = camEnabled,
+                    isSpeakerOn = isSpeakerOn,
+                    onToggleMic = {
+                        webRTCManager?.toggleMic()
+                        interactionCounter++
+                    },
+                    onToggleCam = {
+                        webRTCManager?.toggleCam()
+                        interactionCounter++
+                    },
+                    onToggleSpeaker = {
+                        inCallViewModel.audioHelper?.toggleSpeaker()
+                        interactionCounter++
+                    },
+                    onSwitchCamera = {
+                        webRTCManager?.switchCamera()
+                        interactionCounter++
+                    },
+                    onEndCall = {
+                        inCallViewModel.endCall()
+                        onEndCall()
+                    },
+                    modifier = Modifier.navigationBarsPadding()
+                )
+            }
         }
     }
 }

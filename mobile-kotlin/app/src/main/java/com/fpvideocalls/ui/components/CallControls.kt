@@ -31,7 +31,10 @@ fun CallControls(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.6f))
+            .background(
+                Color.Black.copy(alpha = 0.5f),
+                RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            )
             .padding(vertical = 20.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
