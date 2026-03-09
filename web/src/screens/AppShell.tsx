@@ -784,14 +784,20 @@ function RoomsFormPanel({ onJoin }: {
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState("");
   const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
+  const [password, setPassword] = useState("");
+  const [passwordHint, setPasswordHint] = useState("");
 
   function handleSubmit() {
     const trimmed = roomId.trim();
     if (trimmed) {
       onJoin(trimmed, quality);
-      navigate(`/app/room?id=${encodeURIComponent(trimmed)}&cq=${quality}`);
+      const params = new URLSearchParams({ id: trimmed, cq: quality });
+      if (password) params.set("pwd", password);
+      navigate(`/app/room?${params}`);
     } else {
-      navigate(`/app/room?cq=${quality}`);
+      const params = new URLSearchParams({ cq: quality });
+      if (password) params.set("pwd", password);
+      navigate(`/app/room?${params}`);
     }
   }
 
@@ -807,7 +813,6 @@ function RoomsFormPanel({ onJoin }: {
         maxWidth: 420, width: "100%",
         boxShadow: "0 2px 16px rgba(0,0,0,0.06)",
       }}>
-        {/* Header icon */}
         <div style={{ textAlign: "center", marginBottom: 8 }}>
           <span style={{ fontSize: 48 }}>📹</span>
         </div>
@@ -824,7 +829,7 @@ function RoomsFormPanel({ onJoin }: {
         </div>
 
         {/* Room ID input */}
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
             {t.roomId || "Room ID"}
           </label>
@@ -844,27 +849,78 @@ function RoomsFormPanel({ onJoin }: {
           />
         </div>
 
-        {/* Quality selector */}
-        <div style={{ marginBottom: 28 }}>
-          <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
-            {t.videoQuality || "Video Quality"}
-          </label>
-          <select
-            value={quality}
-            onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
-            style={{
-              width: "100%", padding: "12px 14px", fontSize: 15,
-              border: "1px solid #d9d9d9", borderRadius: 10,
-              outline: "none", backgroundColor: "#fff",
-              boxSizing: "border-box", cursor: "pointer",
-            }}
-          >
-            <option value="720p">720p (HD)</option>
-            <option value="1080p">1080p (Full HD)</option>
-          </select>
-        </div>
+        {/* Advanced settings */}
+        <details style={{ marginBottom: 20 }}>
+          <summary style={{ fontSize: 14, color: "#3390ec", cursor: "pointer", fontWeight: 500, marginBottom: 12 }}>
+            {t.advancedSettings || "Advanced Settings"}
+          </summary>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 8 }}>
+            {/* Quality selector */}
+            <div>
+              <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
+                {t.videoQuality || "Video Quality"}
+              </label>
+              <select
+                value={quality}
+                onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
+                style={{
+                  width: "100%", padding: "12px 14px", fontSize: 15,
+                  border: "1px solid #d9d9d9", borderRadius: 10,
+                  outline: "none", backgroundColor: "#fff",
+                  boxSizing: "border-box", cursor: "pointer",
+                }}
+              >
+                <option value="720p">720p (HD)</option>
+                <option value="1080p">1080p (Full HD)</option>
+              </select>
+            </div>
 
-        {/* Single action button with dynamic label */}
+            {/* Room password */}
+            <div>
+              <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
+                {t.roomPassword || "Room Password"}
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t.roomPasswordPlaceholder || "Optional password"}
+                style={{
+                  width: "100%", padding: "12px 14px", fontSize: 15,
+                  border: "1px solid #d9d9d9", borderRadius: 10,
+                  outline: "none", boxSizing: "border-box",
+                  transition: "border-color 0.15s",
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "#3390ec")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = "#d9d9d9")}
+              />
+            </div>
+
+            {/* Password hint */}
+            {password && (
+              <div>
+                <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
+                  {t.passwordHint || "Password Hint"}
+                </label>
+                <input
+                  value={passwordHint}
+                  onChange={(e) => setPasswordHint(e.target.value)}
+                  placeholder={t.passwordHintPlaceholder || "Optional hint for others"}
+                  style={{
+                    width: "100%", padding: "12px 14px", fontSize: 15,
+                    border: "1px solid #d9d9d9", borderRadius: 10,
+                    outline: "none", boxSizing: "border-box",
+                    transition: "border-color 0.15s",
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#3390ec")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "#d9d9d9")}
+                />
+              </div>
+            )}
+          </div>
+        </details>
+
+        {/* Single action button */}
         <button
           onClick={handleSubmit}
           style={{

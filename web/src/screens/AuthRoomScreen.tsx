@@ -44,7 +44,7 @@ export default function AuthRoomScreen() {
 
     let cancelled = false;
     (async () => {
-      const result = await createRoom(quality);
+      const result = await createRoom(quality, roomPassword);
       if (cancelled) return;
       if (result) {
         setRoomId(result.roomId);
@@ -88,7 +88,8 @@ export default function AuthRoomScreen() {
   if (error) {
     return (
       <div style={{
-        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100vh", width: "100vw",
         background: "#0f172a", color: "white",
         fontFamily: "system-ui, -apple-system, sans-serif",
         flexDirection: "column", gap: 16,
@@ -112,7 +113,8 @@ export default function AuthRoomScreen() {
   if (!roomId) {
     return (
       <div style={{
-        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100vh", width: "100vw",
         background: "#0f172a", color: "white",
         fontFamily: "system-ui, -apple-system, sans-serif",
         flexDirection: "column", gap: 16,

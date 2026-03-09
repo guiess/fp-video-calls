@@ -11,13 +11,14 @@ export interface CallInvite {
 }
 
 /** Create a password-protected room on the server */
-export async function createRoom(quality: string = "1080p"): Promise<{ roomId: string; password: string } | null> {
-  const password = crypto.randomUUID().slice(0, 12);
+export async function createRoom(quality: string = "1080p", customPassword?: string): Promise<{ roomId: string; password: string } | null> {
+  const password = customPassword || crypto.randomUUID().slice(0, 12);
+  const passwordEnabled = !!password;
   try {
     const res = await fetch(`${getBaseUrl()}/room`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoQuality: quality, passwordEnabled: true, password }),
+      body: JSON.stringify({ videoQuality: quality, passwordEnabled, password: passwordEnabled ? password : undefined }),
     });
     if (!res.ok) return null;
     const data = await res.json();

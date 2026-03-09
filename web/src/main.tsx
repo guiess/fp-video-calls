@@ -72,6 +72,7 @@ const router = createBrowserRouter([
       { path: "/dev", element: <DevApp /> },
       { path: "/dev/room/:roomId", element: <DevApp /> },
       { path: "/login", element: <LoginScreen /> },
+      { path: "/app/room", element: <AuthGuard><AuthRoomScreen /></AuthGuard> },
       {
         path: "/app",
         element: <AuthGuard><AppShell /></AuthGuard>,
@@ -80,7 +81,6 @@ const router = createBrowserRouter([
           { path: "chats/new-group", element: <NewGroupChatScreen /> },
           { path: "chats/:id", element: <ChatConversationScreen /> },
           { path: "rooms", element: <RoomJoinScreen /> },
-          { path: "room", element: <AuthRoomScreen /> },
           { path: "options", element: <OptionsScreen /> },
           { path: "call", element: <ActiveCallScreen /> },
           { path: "call-history", element: <CallHistoryScreen /> },
