@@ -16,6 +16,7 @@ import OutgoingCallScreen from "./screens/OutgoingCallScreen";
 import ActiveCallScreen from "./screens/ActiveCallScreen";
 import CallHistoryScreen from "./screens/CallHistoryScreen";
 import IncomingCallModal from "./components/IncomingCallModal";
+import AuthRoomScreen from "./screens/AuthRoomScreen";
 
 /**
  * Root page: if the URL has ?room= param, show existing guest join (App).
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
       { path: "options", element: <OptionsScreen /> },
       { path: "call", element: <ActiveCallScreen /> },
       { path: "call-history", element: <CallHistoryScreen /> },
+          { path: "room", element: <AuthRoomScreen /> },
     ],
   },
 ]);

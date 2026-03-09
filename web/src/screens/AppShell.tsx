@@ -558,16 +558,17 @@ function NavRailItem({ icon, label, active, badge, onClick }: {
 
 function RoomsSidebarPanel() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [roomId, setRoomId] = useState("");
   const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
 
   function handleJoin() {
     if (!roomId.trim()) return;
-    window.location.href = `/?room=${encodeURIComponent(roomId.trim())}&cq=${quality}`;
+    navigate(`/app/room?id=${encodeURIComponent(roomId.trim())}&cq=${quality}`);
   }
 
   function handleCreate() {
-    window.location.href = `/?cq=${quality}`;
+    navigate(`/app/room?cq=${quality}`);
   }
 
   return (
