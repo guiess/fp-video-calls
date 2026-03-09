@@ -5,6 +5,32 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiFetch } from "../services/api";
 import { subscribeChatEvents, ensureChatSocket, authenticateSocket } from "../services/chatSocket";
 import { subscribeToCallHistory, CallRecord } from "../services/callHistoryService";
+import NewChatScreen from "./NewChatScreen";
+import NewGroupChatScreen from "./NewGroupChatScreen";
+
+/* ------------------------------------------------------------------ */
+/*  Room history helpers (localStorage)                                */
+/* ------------------------------------------------------------------ */
+
+interface RoomHistoryItem {
+  roomId: string;
+  quality: "720p" | "1080p";
+  joinedAt: number;
+}
+
+const ROOM_HISTORY_KEY = "room_history";
+
+function loadRoomHistory(): RoomHistoryItem[] {
+  try {
+    return JSON.parse(localStorage.getItem(ROOM_HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function persistRoomHistory(history: RoomHistoryItem[]): void {
+  localStorage.setItem(ROOM_HISTORY_KEY, JSON.stringify(history));
+}
 
 interface Conversation {
   id: string;
@@ -43,11 +69,38 @@ export default function AppShell() {
   const [activeTab, setActiveTab] = useState<"chats" | "rooms" | "calls" | "options">("chats");
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
+  const [roomHistory, setRoomHistory] = useState<RoomHistoryItem[]>(loadRoomHistory);
+
+  function addRoomToHistory(roomId: string, quality: "720p" | "1080p") {
+    setRoomHistory((prev) => {
+      const filtered = prev.filter((h) => h.roomId !== roomId);
+      const next = [{ roomId, quality, joinedAt: Date.now() }, ...filtered].slice(0, 50);
+      persistRoomHistory(next);
+      return next;
+    });
+  }
+
+  function removeRoomFromHistory(roomId: string) {
+    setRoomHistory((prev) => {
+      const next = prev.filter((h) => h.roomId !== roomId);
+      persistRoomHistory(next);
+      return next;
+    });
+  }
 
   // Determine if a conversation is open (to highlight in sidebar)
   const activeChatId = location.pathname.match(/\/app\/chats\/([^/]+)/)?.[1];
-  // Determine if right panel has content
-  const hasRightContent = location.pathname !== "/app" && location.pathname !== "/app/";
+  // Determine if right panel has content (sidebar screens render in left panel, not right)
+  const isSidebarScreen = ["/app/chats/new", "/app/chats/new-group"].includes(location.pathname);
+  const hasRightContent = location.pathname !== "/app" && location.pathname !== "/app/" && !isSidebarScreen;
+
+  // Refresh room history from localStorage when navigating back from a room
+  // (AuthRoomScreen also writes to room_history on the create-flow)
+  useEffect(() => {
+    if (activeTab === "rooms") {
+      setRoomHistory(loadRoomHistory());
+    }
+  }, [activeTab, location.pathname]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -183,6 +236,9 @@ export default function AppShell() {
         background: "#fff",
         position: "relative",
       }}>
+        {isSidebarScreen ? (
+          location.pathname === "/app/chats/new-group" ? <NewGroupChatScreen /> : <NewChatScreen />
+        ) : (<>
         {/* Sidebar header */}
         <div style={{
           padding: "8px 8px 0",
@@ -404,7 +460,14 @@ export default function AppShell() {
           </>
         ) : activeTab === "rooms" ? (
           /* ====== ROOMS PANEL ====== */
-          <RoomsSidebarPanel />
+          <RoomsSidebarPanel
+            history={roomHistory}
+            onDelete={removeRoomFromHistory}
+            onJoin={(roomId, quality) => {
+              addRoomToHistory(roomId, quality);
+              navigate(`/app/room?id=${encodeURIComponent(roomId)}&cq=${quality}`);
+            }}
+          />
         ) : activeTab === "options" ? (
           /* ====== OPTIONS PANEL ====== */
           <div style={{ flex: 1, overflowY: "auto" }}>
@@ -456,6 +519,7 @@ export default function AppShell() {
           /* ====== CALLS PANEL ====== */
           <CallsSidebarPanel records={callHistory} loading={callHistoryLoading} user={user} />
         )}
+        </>)}
       </div>
 
       {/* ====== RIGHT PANEL ====== */}
@@ -471,6 +535,12 @@ export default function AppShell() {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <Outlet />
           </div>
+        ) : activeTab === "rooms" ? (
+          /* Room creation / join form in the right panel */
+          <RoomsFormPanel onJoin={(roomId, quality) => {
+            addRoomToHistory(roomId, quality);
+            navigate(`/app/room?id=${encodeURIComponent(roomId)}&cq=${quality}`);
+          }} />
         ) : (
           /* Empty state — tab-specific placeholder */
           <div style={{
@@ -481,9 +551,7 @@ export default function AppShell() {
                 background: "rgba(0,0,0,0.04)", borderRadius: 24,
                 padding: "10px 20px", fontSize: 15, color: "#707579",
               }}>
-                {activeTab === "rooms"
-                  ? (t.selectRoom || "Create or join a room to start a call")
-                  : activeTab === "calls"
+                {activeTab === "calls"
                   ? "Select a call or start a new one"
                   : (t.selectChat || "Select a chat to start messaging")}
               </div>
@@ -556,86 +624,259 @@ function NavRailItem({ icon, label, active, badge, onClick }: {
   );
 }
 
-function RoomsSidebarPanel() {
+/* ====================================================================== */
+/*  RoomsSidebarPanel — shows room history only (form is in right panel)  */
+/* ====================================================================== */
+
+function RoomsSidebarPanel({ history, onDelete, onJoin }: {
+  history: RoomHistoryItem[];
+  onDelete: (roomId: string) => void;
+  onJoin: (roomId: string, quality: "720p" | "1080p") => void;
+}) {
+  const { t } = useLanguage();
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  function formatJoinedAt(ts: number): string {
+    const d = new Date(ts);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " +
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
+      <div style={{ fontSize: 14, fontWeight: 500, color: "#3390ec", padding: "8px 12px 4px" }}>
+        {t.recentRooms || "Recent Rooms"}
+      </div>
+
+      {history.length === 0 ? (
+        <div style={{
+          padding: "60px 16px", textAlign: "center", color: "#707579",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 40 }}>📹</span>
+          <span style={{ fontSize: 14 }}>{t.noRecentRooms || "No recent rooms"}</span>
+        </div>
+      ) : (
+        history.map((item) => (
+          <div key={item.roomId} style={{ position: "relative", padding: "0 4px" }}>
+            <button
+              onClick={() => onJoin(item.roomId, item.quality)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                width: "100%",
+                padding: "7px 8px",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                textAlign: "left",
+                borderRadius: 10,
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f4f4f5"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+            >
+              {/* Avatar */}
+              <div style={{
+                width: 54, height: 54, borderRadius: "50%",
+                background: "#e3f2fd",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 22, flexShrink: 0, marginRight: 12,
+              }}>
+                📹
+              </div>
+
+              {/* Content */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 15, fontWeight: 500, color: "#000",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  marginBottom: 2,
+                }}>
+                  {item.roomId}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13, color: "#707579" }}>
+                    {formatJoinedAt(item.joinedAt)}
+                  </span>
+                  <span style={{
+                    fontSize: 11, color: "#3390ec", background: "#e3f2fd",
+                    padding: "1px 6px", borderRadius: 6,
+                  }}>
+                    {item.quality}
+                  </span>
+                </div>
+              </div>
+
+              {/* 3-dot menu trigger */}
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setMenuOpenId(menuOpenId === item.roomId ? null : item.roomId);
+                }}
+                style={{
+                  padding: 8, borderRadius: "50%", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0, color: "#707579", fontSize: 18, fontWeight: 700,
+                }}
+              >
+                ⋮
+              </div>
+            </button>
+
+            {/* Dropdown menu */}
+            {menuOpenId === item.roomId && (
+              <>
+                <div
+                  onClick={() => setMenuOpenId(null)}
+                  style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }}
+                />
+                <div style={{
+                  position: "absolute", top: 48, right: 12, zIndex: 100,
+                  background: "#fff", borderRadius: 8, minWidth: 140,
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.15)", padding: "4px 0",
+                }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(item.roomId);
+                      setMenuOpenId(null);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      width: "100%", padding: "9px 14px",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontSize: 14, color: "#e53935",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                    </svg>
+                    {t.deleteRoom || "Delete"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/* ====================================================================== */
+/*  RoomsFormPanel — room creation / join form in the right panel          */
+/* ====================================================================== */
+
+function RoomsFormPanel({ onJoin }: {
+  onJoin: (roomId: string, quality: "720p" | "1080p") => void;
+}) {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState("");
   const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
 
-  function handleJoin() {
-    if (!roomId.trim()) return;
-    navigate(`/app/room?id=${encodeURIComponent(roomId.trim())}&cq=${quality}`);
+  function handleSubmit() {
+    const trimmed = roomId.trim();
+    if (trimmed) {
+      onJoin(trimmed, quality);
+      navigate(`/app/room?id=${encodeURIComponent(trimmed)}&cq=${quality}`);
+    } else {
+      navigate(`/app/room?cq=${quality}`);
+    }
   }
 
-  function handleCreate() {
-    navigate(`/app/room?cq=${quality}`);
-  }
+  const isJoin = roomId.trim().length > 0;
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "16px 12px" }}>
-      <div style={{ fontSize: 14, fontWeight: 500, color: "#000", marginBottom: 16 }}>
-        {t.roomsTitle || "Video Rooms"}
-      </div>
+    <div style={{
+      flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 20,
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 16, padding: "36px 32px",
+        maxWidth: 420, width: "100%",
+        boxShadow: "0 2px 16px rgba(0,0,0,0.06)",
+      }}>
+        {/* Header icon */}
+        <div style={{ textAlign: "center", marginBottom: 8 }}>
+          <span style={{ fontSize: 48 }}>📹</span>
+        </div>
+        <div style={{
+          fontSize: 20, fontWeight: 500, textAlign: "center",
+          marginBottom: 6, color: "#000",
+        }}>
+          {t.roomsTitle || "Rooms"}
+        </div>
+        <div style={{
+          fontSize: 14, color: "#707579", textAlign: "center", marginBottom: 28,
+        }}>
+          {t.selectRoom || "Create or join a room to start a call"}
+        </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <label style={{ display: "block", fontSize: 13, color: "#707579", marginBottom: 4 }}>
-          {t.roomId || "Room ID"}
-        </label>
-        <input
-          value={roomId}
-          onChange={(e) => setRoomId(e.target.value)}
-          placeholder={t.roomIdPlaceholder || "Enter room ID"}
-          onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
-          style={{
-            width: "100%", padding: "10px 12px", fontSize: 14,
-            border: "1px solid #d9d9d9", borderRadius: 10, outline: "none",
-            boxSizing: "border-box", transition: "border-color 0.15s",
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = "#3390ec")}
-          onBlur={(e) => (e.currentTarget.style.borderColor = "#d9d9d9")}
-        />
-      </div>
+        {/* Room ID input */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
+            {t.roomId || "Room ID"}
+          </label>
+          <input
+            value={roomId}
+            onChange={(e) => setRoomId(e.target.value)}
+            placeholder={t.roomIdPlaceholder || "Enter room ID or leave blank to create"}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+            style={{
+              width: "100%", padding: "12px 14px", fontSize: 15,
+              border: "1px solid #d9d9d9", borderRadius: 10,
+              outline: "none", boxSizing: "border-box",
+              transition: "border-color 0.15s",
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "#3390ec")}
+            onBlur={(e) => (e.currentTarget.style.borderColor = "#d9d9d9")}
+          />
+        </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <label style={{ display: "block", fontSize: 13, color: "#707579", marginBottom: 4 }}>
-          {t.videoQuality || "Video Quality"}
-        </label>
-        <select
-          value={quality}
-          onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
-          style={{
-            width: "100%", padding: "10px 12px", fontSize: 14,
-            border: "1px solid #d9d9d9", borderRadius: 10, outline: "none",
-            backgroundColor: "#fff", boxSizing: "border-box",
-          }}
-        >
-          <option value="720p">720p (HD)</option>
-          <option value="1080p">1080p (Full HD)</option>
-        </select>
-      </div>
+        {/* Quality selector */}
+        <div style={{ marginBottom: 28 }}>
+          <label style={{ display: "block", fontSize: 14, color: "#707579", marginBottom: 6 }}>
+            {t.videoQuality || "Video Quality"}
+          </label>
+          <select
+            value={quality}
+            onChange={(e) => setQuality(e.target.value as "720p" | "1080p")}
+            style={{
+              width: "100%", padding: "12px 14px", fontSize: 15,
+              border: "1px solid #d9d9d9", borderRadius: 10,
+              outline: "none", backgroundColor: "#fff",
+              boxSizing: "border-box", cursor: "pointer",
+            }}
+          >
+            <option value="720p">720p (HD)</option>
+            <option value="1080p">1080p (Full HD)</option>
+          </select>
+        </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
+        {/* Single action button with dynamic label */}
         <button
-          onClick={handleJoin}
-          disabled={!roomId.trim()}
+          onClick={handleSubmit}
           style={{
-            flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 500,
-            color: "#fff", background: roomId.trim() ? "#3390ec" : "#c4c9cc",
-            border: "none", borderRadius: 10,
-            cursor: roomId.trim() ? "pointer" : "default",
+            width: "100%", padding: "12px 24px", fontSize: 15, fontWeight: 500,
+            color: "#fff", background: "#3390ec",
+            border: "none", borderRadius: 10, cursor: "pointer",
+            transition: "background 0.15s",
           }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#2b7dd6")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#3390ec")}
         >
-          {t.joinRoom || "Join"}
-        </button>
-        <button
-          onClick={handleCreate}
-          style={{
-            flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 500,
-            color: "#3390ec", background: "#fff",
-            border: "1px solid #3390ec", borderRadius: 10, cursor: "pointer",
-          }}
-        >
-          {t.createNewRoom || "Create"}
+          {isJoin ? (t.joinRoom || "Join Room") : (t.createRoom || "Create Room")}
         </button>
       </div>
     </div>

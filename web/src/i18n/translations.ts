@@ -109,6 +109,11 @@ export interface Translations {
 
   // Rooms
   roomsTitle: string;
+  selectRoom: string;
+  recentRooms: string;
+  noRecentRooms: string;
+  deleteRoom: string;
+  createRoom: string;
 
   // Options
   profile: string;
@@ -235,6 +240,11 @@ export const translations: Record<Language, Translations> = {
 
     // Rooms
     roomsTitle: 'Комнаты',
+    selectRoom: 'Создайте или войдите в комнату',
+    recentRooms: 'Недавние комнаты',
+    noRecentRooms: 'Нет недавних комнат',
+    deleteRoom: 'Удалить',
+    createRoom: 'Создать комнату',
 
     // Options
     profile: 'Профиль',
@@ -359,6 +369,11 @@ export const translations: Record<Language, Translations> = {
 
     // Rooms
     roomsTitle: 'Rooms',
+    selectRoom: 'Create or join a room to start a call',
+    recentRooms: 'Recent Rooms',
+    noRecentRooms: 'No recent rooms',
+    deleteRoom: 'Delete',
+    createRoom: 'Create Room',
 
     // Options
     profile: 'Profile',

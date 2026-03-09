@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import DevApp from "./DevApp";
-import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate, Outlet } from "react-router-dom";
 import { LanguageProvider } from "./i18n/LanguageContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import LoginScreen from "./screens/LoginScreen";
@@ -15,8 +15,8 @@ import OptionsScreen from "./screens/OptionsScreen";
 import OutgoingCallScreen from "./screens/OutgoingCallScreen";
 import ActiveCallScreen from "./screens/ActiveCallScreen";
 import CallHistoryScreen from "./screens/CallHistoryScreen";
-import IncomingCallModal from "./components/IncomingCallModal";
 import AuthRoomScreen from "./screens/AuthRoomScreen";
+import IncomingCallModal from "./components/IncomingCallModal";
 
 /**
  * Root page: if the URL has ?room= param, show existing guest join (App).
@@ -47,6 +47,16 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Root layout: renders IncomingCallModal globally inside the router context */
+function RootLayout() {
+  return (
+    <>
+      <Outlet />
+      <IncomingCallModal />
+    </>
+  );
+}
+
 const container = document.getElementById("root");
 if (!container) {
   throw new Error("Root container not found");
@@ -54,23 +64,28 @@ if (!container) {
 const root = createRoot(container);
 
 const router = createBrowserRouter([
-  { path: "/", element: <RootPage /> },
-  { path: "/room/:roomId", element: <App /> },
-  { path: "/dev", element: <DevApp /> },
-  { path: "/dev/room/:roomId", element: <DevApp /> },
-  { path: "/login", element: <LoginScreen /> },
   {
-    path: "/app",
-    element: <AuthGuard><AppShell /></AuthGuard>,
+    element: <RootLayout />,
     children: [
-      { path: "chats/new", element: <NewChatScreen /> },
-      { path: "chats/new-group", element: <NewGroupChatScreen /> },
-      { path: "chats/:id", element: <ChatConversationScreen /> },
-      { path: "rooms", element: <RoomJoinScreen /> },
-      { path: "options", element: <OptionsScreen /> },
-      { path: "call", element: <ActiveCallScreen /> },
-      { path: "call-history", element: <CallHistoryScreen /> },
+      { path: "/", element: <RootPage /> },
+      { path: "/room/:roomId", element: <App /> },
+      { path: "/dev", element: <DevApp /> },
+      { path: "/dev/room/:roomId", element: <DevApp /> },
+      { path: "/login", element: <LoginScreen /> },
+      {
+        path: "/app",
+        element: <AuthGuard><AppShell /></AuthGuard>,
+        children: [
+          { path: "chats/new", element: <NewChatScreen /> },
+          { path: "chats/new-group", element: <NewGroupChatScreen /> },
+          { path: "chats/:id", element: <ChatConversationScreen /> },
+          { path: "rooms", element: <RoomJoinScreen /> },
           { path: "room", element: <AuthRoomScreen /> },
+          { path: "options", element: <OptionsScreen /> },
+          { path: "call", element: <ActiveCallScreen /> },
+          { path: "call-history", element: <CallHistoryScreen /> },
+        ],
+      },
     ],
   },
 ]);
@@ -79,7 +94,6 @@ root.render(
   <AuthProvider>
     <LanguageProvider>
       <RouterProvider router={router} />
-      <IncomingCallModal />
     </LanguageProvider>
   </AuthProvider>
 );
