@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,7 @@ import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.service.ActiveCallService
+import com.fpvideocalls.service.CallRingingService
 import com.fpvideocalls.service.CallStateManager
 import com.fpvideocalls.ui.screens.*
 import com.fpvideocalls.ui.theme.*
@@ -40,11 +42,13 @@ import kotlinx.coroutines.delay
 
 // Shared state for passing contacts between screens
 private val pendingContacts = mutableListOf<Contact>()
-private var pendingCallData: IncomingCallData? = null
+private val pendingCallData = mutableStateOf<IncomingCallData?>(null)
 
 @Composable
 fun AppNavigation(
     intent: Intent? = null,
+    isDarkTheme: Boolean = true,
+    onToggleTheme: (Boolean) -> Unit = {},
     authViewModel: AuthViewModel = hiltViewModel(),
     callViewModel: CallViewModel = hiltViewModel()
 ) {
@@ -57,7 +61,7 @@ fun AppNavigation(
         callViewModel.navigationEvents.collect { event ->
             when (event) {
                 is CallNavigationEvent.ShowIncomingCall -> {
-                    pendingCallData = event.data
+                    pendingCallData.value = event.data
                     navController.navigate(Routes.INCOMING_CALL) {
                         launchSingleTop = true
                     }
@@ -128,16 +132,20 @@ fun AppNavigation(
                             popUpTo(0) { inclusive = true }
                             launchSingleTop = true
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        android.util.Log.w("AppNavigation", "Nav retry failed", e)
+                    }
                 }
             } else {
                 // Tapped notification (not a specific action) — show IncomingCallScreen
-                pendingCallData = callData
+                pendingCallData.value = callData
                 try {
                     navController.navigate(Routes.INCOMING_CALL) {
                         launchSingleTop = true
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    android.util.Log.w("AppNavigation", "Nav to incoming call failed", e)
+                }
             }
 
             // Clear the intent extras so we don't re-handle on recomposition
@@ -229,7 +237,7 @@ fun AppNavigation(
 
         // Main tabs
         composable(Routes.MAIN) {
-            MainScreen(navController = navController)
+            MainScreen(navController = navController, isDarkTheme = isDarkTheme, onToggleTheme = onToggleTheme)
         }
 
         // In call
@@ -285,14 +293,16 @@ fun AppNavigation(
 
         // Incoming call
         composable(Routes.INCOMING_CALL) {
-            val callData = pendingCallData ?: return@composable
+            val callData = pendingCallData.value ?: return@composable
             val currentUser by authViewModel.user.collectAsState()
+            val context = LocalContext.current
 
             IncomingCallScreen(
                 callData = callData,
                 onAnswer = { cameraOff ->
                     CallStateManager.answerCall(callData.callUUID)
                     callViewModel.clearIncomingCall()
+                    context.stopService(Intent(context, CallRingingService::class.java))
                     ActiveCallService.pendingCameraOff = cameraOff
                     navController.navigate(
                         Routes.inCall(callData.roomId, currentUser?.displayName ?: "Me", currentUser?.uid ?: callData.callerId, callData.callType.value, callData.roomPassword)
@@ -301,6 +311,7 @@ fun AppNavigation(
                     }
                 },
                 onDecline = {
+                    context.stopService(Intent(context, CallRingingService::class.java))
                     callViewModel.declineIncomingCall()
                     navController.popBackStack()
                 }
@@ -446,7 +457,7 @@ fun AppNavigation(
 }
 
 @Composable
-fun MainScreen(navController: NavHostController) {
+fun MainScreen(navController: NavHostController, isDarkTheme: Boolean = true, onToggleTheme: (Boolean) -> Unit = {}) {
     val tabNavController = rememberNavController()
     val currentEntry by tabNavController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
@@ -555,7 +566,7 @@ fun MainScreen(navController: NavHostController) {
                 )
             }
             composable(Routes.TAB_OPTIONS) {
-                OptionsScreen()
+                OptionsScreen(isDarkTheme = isDarkTheme, onToggleTheme = onToggleTheme)
             }
         }
     }

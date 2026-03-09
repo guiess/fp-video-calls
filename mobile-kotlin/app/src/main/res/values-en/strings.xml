@@ -146,7 +146,11 @@
 
     <!-- Options Screen -->
     <string name="options_title">Settings</string>
+    <string name="options_account">Account</string>
     <string name="options_language">App Language</string>
+    <string name="options_theme">Theme</string>
+    <string name="theme_dark">Dark theme</string>
+    <string name="theme_light">Light theme</string>
 
     <!-- Room Screen -->
     <string name="recent_rooms_title">Recent Rooms</string>

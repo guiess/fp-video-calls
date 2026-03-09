@@ -40,7 +40,7 @@ export default function AppShell() {
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"chats" | "rooms" | "calls">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "rooms" | "calls" | "options">("chats");
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
 
@@ -163,6 +163,14 @@ export default function AppShell() {
           active={activeTab === "calls"}
           onClick={() => { setActiveTab("calls"); navigate("/app"); }}
         />
+        <div style={{ flex: 1 }} />
+        <NavRailItem
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>}
+          label={t.settings || "Settings"}
+          active={activeTab === "options"}
+          onClick={() => { setActiveTab("options"); }}
+        />
+        <div style={{ height: 12 }} />
       </div>
 
       {/* ====== LEFT SIDEBAR ====== */}
@@ -397,6 +405,53 @@ export default function AppShell() {
         ) : activeTab === "rooms" ? (
           /* ====== ROOMS PANEL ====== */
           <RoomsSidebarPanel />
+        ) : activeTab === "options" ? (
+          /* ====== OPTIONS PANEL ====== */
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {/* Profile header */}
+            <div style={{
+              background: "#517da2", padding: "24px 16px 20px", color: "#fff",
+              display: "flex", alignItems: "center", gap: 16,
+            }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: "50%",
+                background: "rgba(255,255,255,0.2)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 24, fontWeight: 500,
+              }}>
+                {(user?.displayName || "U").charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 500 }}>{user?.displayName || "User"}</div>
+                <div style={{ fontSize: 13, opacity: 0.8, marginTop: 2 }}>{user?.email}</div>
+              </div>
+            </div>
+
+            {/* Language */}
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid #f0f0f0" }}>
+              <div style={{ fontSize: 14, color: "#3390ec", fontWeight: 500, marginBottom: 10 }}>
+                {t.language || "Language"}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setLanguage("en")} style={{
+                  flex: 1, padding: "10px 0", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer",
+                  background: language === "en" ? "#3390ec" : "#f4f4f5", color: language === "en" ? "#fff" : "#000",
+                }}>English</button>
+                <button onClick={() => setLanguage("ru")} style={{
+                  flex: 1, padding: "10px 0", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer",
+                  background: language === "ru" ? "#3390ec" : "#f4f4f5", color: language === "ru" ? "#fff" : "#000",
+                }}>Русский</button>
+              </div>
+            </div>
+
+            {/* Sign out */}
+            <MenuButton
+              icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>}
+              label={t.signOutButton || "Sign Out"}
+              onClick={signOut}
+              color="#e53935"
+            />
+          </div>
         ) : (
           /* ====== CALLS PANEL ====== */
           <CallsSidebarPanel records={callHistory} loading={callHistoryLoading} user={user} />
@@ -412,7 +467,7 @@ export default function AppShell() {
         overflow: "hidden",
         height: "100vh",
       }}>
-        {hasRightContent ? (
+        {hasRightContent && activeTab !== "options" ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <Outlet />
           </div>
@@ -421,16 +476,18 @@ export default function AppShell() {
           <div style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            <div style={{
-              background: "rgba(0,0,0,0.04)", borderRadius: 24,
-              padding: "10px 20px", fontSize: 15, color: "#707579",
-            }}>
-              {activeTab === "rooms"
-                ? (t.selectRoom || "Create or join a room to start a call")
-                : activeTab === "calls"
-                ? "Select a call or start a new one"
-                : (t.selectChat || "Select a chat to start messaging")}
-            </div>
+            {activeTab !== "options" && (
+              <div style={{
+                background: "rgba(0,0,0,0.04)", borderRadius: 24,
+                padding: "10px 20px", fontSize: 15, color: "#707579",
+              }}>
+                {activeTab === "rooms"
+                  ? (t.selectRoom || "Create or join a room to start a call")
+                  : activeTab === "calls"
+                  ? "Select a call or start a new one"
+                  : (t.selectChat || "Select a chat to start messaging")}
+              </div>
+            )}
           </div>
         )}
       </div>

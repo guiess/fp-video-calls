@@ -1,6 +1,5 @@
 package com.fpvideocalls.ui.screens
 
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -15,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -23,7 +21,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fpvideocalls.R
 import com.fpvideocalls.model.IncomingCallData
-import com.fpvideocalls.service.CallRingingService
 import com.fpvideocalls.ui.theme.*
 
 /**
@@ -35,8 +32,6 @@ fun IncomingCallScreen(
     onAnswer: (cameraOff: Boolean) -> Unit,
     onDecline: () -> Unit
 ) {
-    val context = LocalContext.current
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -70,10 +65,7 @@ fun IncomingCallScreen(
             // Decline
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(
-                    onClick = {
-                        context.stopService(Intent(context, CallRingingService::class.java))
-                        onDecline()
-                    },
+                    onClick = { onDecline() },
                     modifier = Modifier
                         .size(72.dp)
                         .background(DeclineRed, CircleShape)
@@ -87,10 +79,7 @@ fun IncomingCallScreen(
             // Answer (camera off)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(
-                    onClick = {
-                        context.stopService(Intent(context, CallRingingService::class.java))
-                        onAnswer(true)
-                    },
+                    onClick = { onAnswer(true) },
                     modifier = Modifier
                         .size(72.dp)
                         .background(SuccessGreen.copy(alpha = 0.7f), CircleShape)
@@ -104,10 +93,7 @@ fun IncomingCallScreen(
             // Answer (with camera)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(
-                    onClick = {
-                        context.stopService(Intent(context, CallRingingService::class.java))
-                        onAnswer(false)
-                    },
+                    onClick = { onAnswer(false) },
                     modifier = Modifier
                         .size(72.dp)
                         .background(SuccessGreen, CircleShape)

@@ -29,6 +29,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OptionsScreen(
+    isDarkTheme: Boolean = true,
+    onToggleTheme: (Boolean) -> Unit = {},
     authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -74,6 +76,37 @@ fun OptionsScreen(
         )
         Spacer(Modifier.height(24.dp))
 
+        // User info section
+        if (user != null) {
+            Text(
+                stringResource(R.string.options_account),
+                fontSize = 14.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Surface, RoundedCornerShape(12.dp))
+                    .padding(16.dp)
+            ) {
+                Text(
+                    user!!.displayName,
+                    color = OnBackground,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    user!!.email,
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+
         // Language section
         Text(
             stringResource(R.string.options_language),
@@ -114,6 +147,36 @@ fun OptionsScreen(
                 }
             }
             Spacer(Modifier.height(6.dp))
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Theme section
+        Text(
+            stringResource(R.string.options_theme),
+            fontSize = 14.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Surface, RoundedCornerShape(12.dp))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                if (isDarkTheme) stringResource(R.string.theme_dark) else stringResource(R.string.theme_light),
+                color = OnBackground,
+                fontSize = 16.sp
+            )
+            Switch(
+                checked = !isDarkTheme,
+                onCheckedChange = { onToggleTheme(!it) },
+                colors = SwitchDefaults.colors(checkedTrackColor = Purple)
+            )
         }
 
         Spacer(Modifier.height(24.dp))

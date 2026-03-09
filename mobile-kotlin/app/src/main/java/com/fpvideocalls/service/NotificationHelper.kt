@@ -17,6 +17,9 @@ import com.fpvideocalls.util.Constants
 
 object NotificationHelper {
 
+    /** Safe notification ID from callUUID — always positive and outside reserved range (9997-9999). */
+    fun notificationId(callUUID: String): Int = (callUUID.hashCode() and 0x7FFFFFFF) or 0x10000
+
     fun createCallChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
 
@@ -87,7 +90,7 @@ object NotificationHelper {
             putExtra("roomPassword", roomPassword ?: "")
         }
         val fullScreenPendingIntent = PendingIntent.getActivity(
-            context, callUUID.hashCode(), fullScreenIntent,
+            context, notificationId(callUUID), fullScreenIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -103,7 +106,7 @@ object NotificationHelper {
             putExtra("roomPassword", roomPassword ?: "")
         }
         val answerPendingIntent = PendingIntent.getBroadcast(
-            context, callUUID.hashCode() + 1, answerIntent,
+            context, notificationId(callUUID) + 1, answerIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -115,7 +118,7 @@ object NotificationHelper {
             putExtra("callerId", callerId)
         }
         val declinePendingIntent = PendingIntent.getBroadcast(
-            context, callUUID.hashCode() + 2, declineIntent,
+            context, notificationId(callUUID) + 2, declineIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -165,7 +168,7 @@ object NotificationHelper {
             context, callerName, callType, roomId, callUUID, callerId, callerPhoto, roomPassword
         )
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.notify(callUUID.hashCode(), notification)
+        manager.notify(notificationId(callUUID), notification)
     }
 
     fun buildActiveCallNotification(
@@ -298,7 +301,7 @@ object NotificationHelper {
 
     fun cancelNotification(context: Context, callUUID: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.cancel(callUUID.hashCode())
+        manager.cancel(notificationId(callUUID))
     }
 
     /** Cancel all call-related notifications (ringing, active, per-UUID). */
@@ -306,6 +309,6 @@ object NotificationHelper {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(Constants.ACTIVE_CALL_NOTIFICATION_ID)
         manager.cancel(Constants.RINGING_SERVICE_NOTIFICATION_ID)
-        callUUID?.let { manager.cancel(it.hashCode()) }
+        callUUID?.let { manager.cancel(notificationId(it)) }
     }
 }

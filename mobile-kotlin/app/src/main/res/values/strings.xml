@@ -146,7 +146,11 @@
 
     <!-- Options Screen -->
     <string name="options_title">Настройки</string>
+    <string name="options_account">Аккаунт</string>
     <string name="options_language">Язык приложения</string>
+    <string name="options_theme">Тема</string>
+    <string name="theme_dark">Тёмная тема</string>
+    <string name="theme_light">Светлая тема</string>
 
     <!-- Room Screen -->
     <string name="recent_rooms_title">Недавние комнаты</string>

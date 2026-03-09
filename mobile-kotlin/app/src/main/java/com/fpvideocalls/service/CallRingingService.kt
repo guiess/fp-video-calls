@@ -132,12 +132,12 @@ class CallRingingService : Service() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                callUUID.hashCode(),
+                NotificationHelper.notificationId(callUUID),
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
         } else {
-            startForeground(callUUID.hashCode(), notification)
+            startForeground(NotificationHelper.notificationId(callUUID), notification)
         }
 
         // Acquire wake lock
@@ -161,11 +161,8 @@ class CallRingingService : Service() {
     private fun acquireWakeLock() {
         try {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            @Suppress("DEPRECATION")
             wakeLock = powerManager.newWakeLock(
-                PowerManager.FULL_WAKE_LOCK or
-                        PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                        PowerManager.ON_AFTER_RELEASE,
+                PowerManager.PARTIAL_WAKE_LOCK,
                 "fpvideocalls:incoming_call"
             ).apply {
                 acquire(Constants.CALL_TIMEOUT_MS + 5000)

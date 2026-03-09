@@ -10,6 +10,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.lifecycle.lifecycleScope
 import com.fpvideocalls.MainActivity
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
@@ -83,6 +84,18 @@ class IncomingCallActivity : ComponentActivity() {
                         NotificationHelper.cancelNotification(this, callData.callUUID)
                         CallStateManager.answerCall(callData.callUUID)
                         ActiveCallService.pendingCameraOff = cameraOff
+                        // Notify caller that we answered
+                        lifecycleScope.launch {
+                            try {
+                                callApiService.sendCallAnswer(
+                                    callerUid = callData.callerId,
+                                    roomId = callData.roomId,
+                                    callUUID = callData.callUUID
+                                )
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to send answer to caller", e)
+                            }
+                        }
 
                         val launchIntent = Intent(this, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP

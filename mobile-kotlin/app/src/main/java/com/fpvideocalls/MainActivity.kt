@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.core.content.ContextCompat
@@ -79,8 +80,16 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CompositionLocalProvider(LocalActivity provides this) {
-                FPVideoCallsTheme {
-                    AppNavigation(intent = currentIntent)
+                var isDark by remember { mutableStateOf(com.fpvideocalls.util.ThemePrefs.isDark(this)) }
+                FPVideoCallsTheme(darkTheme = isDark) {
+                    AppNavigation(
+                        intent = currentIntent,
+                        isDarkTheme = isDark,
+                        onToggleTheme = { dark ->
+                            isDark = dark
+                            com.fpvideocalls.util.ThemePrefs.setDark(this@MainActivity, dark)
+                        }
+                    )
                 }
             }
         }
