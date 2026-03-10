@@ -62,11 +62,13 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    fun getDisplayName(convo: Conversation): String {
+    fun getDisplayName(convo: Conversation, context: android.content.Context? = null): String {
         if (convo.type == "group") return convo.groupName?.replace("+", " ") ?: "Group"
         val myUid = FirebaseAuth.getInstance().currentUser?.uid
         val other = convo.participants.firstOrNull { it.userUid != myUid }
-        return other?.userName?.replace("+", " ") ?: "Chat"
+        return other?.userName?.replace("+", " ")
+            ?: context?.getString(com.fpvideocalls.R.string.deleted_chat)
+            ?: "[Deleted]"
     }
 
     fun deleteConversation(id: String) {

@@ -155,7 +155,7 @@ export default function AppShell() {
   function getConversationName(c: Conversation): string {
     if (c.type === "group" && c.groupName) return c.groupName.replace(/\+/g, " ");
     const other = c.participants.find((p) => p.user_uid !== user?.uid);
-    return other?.user_name?.replace(/\+/g, " ") || "Chat";
+    return other?.user_name?.replace(/\+/g, " ") || (t.deletedChat || "[Deleted]");
   }
 
   function getPreview(c: Conversation): string {
@@ -482,7 +482,7 @@ export default function AppShell() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setChatMenuOpenId(null);
-                                if (confirm(t.confirmDeleteConversation || "Delete this chat?")) {
+                                if (confirm(t.confirmDeleteConversation || "Delete this chat? All message history will be permanently removed.")) {
                                   handleDeleteConversation(c.id);
                                 }
                               }}

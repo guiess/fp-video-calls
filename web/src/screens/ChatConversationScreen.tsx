@@ -353,7 +353,7 @@ export default function ChatConversationScreen() {
     if (!conversation) return "";
     if (conversation.type === "group" && conversation.groupName) return conversation.groupName.replace(/\+/g, " ");
     const other = conversation.participants.find((p) => p.user_uid !== user?.uid);
-    return other?.user_name?.replace(/\+/g, " ") || "Chat";
+    return other?.user_name?.replace(/\+/g, " ") || (t.deletedChat || "[Deleted]");
   }
 
   function getReplyMessage(replyToId: string): Message | undefined {

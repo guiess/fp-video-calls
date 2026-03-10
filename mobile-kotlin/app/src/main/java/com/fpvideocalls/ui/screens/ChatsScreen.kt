@@ -39,6 +39,7 @@ fun ChatsScreen(
 
     // Track which conversation has the delete confirm dialog open
     var confirmDeleteId by remember { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     // Refresh on resume
     LaunchedEffect(Unit) { chatListViewModel.loadConversations() }
@@ -74,7 +75,7 @@ fun ChatsScreen(
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(conversations, key = { it.id }) { convo ->
-                    val displayName = chatListViewModel.getDisplayName(convo)
+                    val displayName = chatListViewModel.getDisplayName(convo, context)
                     val uids = convo.participants.map { it.userUid }
                     ConversationItem(
                         conversation = convo,

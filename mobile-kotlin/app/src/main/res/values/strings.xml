@@ -190,5 +190,6 @@
     <string name="group_no_contacts_to_add">Нет контактов для добавления</string>
     <string name="group_info">Инфо группы</string>
     <string name="delete_conversation">Удалить</string>
-    <string name="delete_conversation_confirm">Удалить этот чат?</string>
+    <string name="deleted_chat">[Удалено]</string>
+    <string name="delete_conversation_confirm">Удалить этот чат? Вся история сообщений будет удалена.</string>
 </resources>
