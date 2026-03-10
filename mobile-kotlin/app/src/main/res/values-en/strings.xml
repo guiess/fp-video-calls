@@ -189,4 +189,6 @@
     <string name="group_remove_member_msg">Remove %1$s from group?</string>
     <string name="group_no_contacts_to_add">No contacts to add</string>
     <string name="group_info">Group Info</string>
+    <string name="delete_conversation">Delete</string>
+    <string name="delete_conversation_confirm">Delete this chat?</string>
 </resources>

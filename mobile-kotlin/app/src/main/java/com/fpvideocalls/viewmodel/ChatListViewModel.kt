@@ -68,4 +68,12 @@ class ChatListViewModel @Inject constructor(
         val other = convo.participants.firstOrNull { it.userUid != myUid }
         return other?.userName?.replace("+", " ") ?: "Chat"
     }
+
+    fun deleteConversation(id: String) {
+        viewModelScope.launch {
+            chatRepository.leaveConversation(id)
+            _conversations.value = _conversations.value.filter { it.id != id }
+            _totalUnread.value = _conversations.value.sumOf { it.unreadCount }
+        }
+    }
 }

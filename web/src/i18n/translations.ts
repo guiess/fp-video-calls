@@ -123,6 +123,8 @@ export interface Translations {
   typing: string;
   members: string;
   confirmDelete: string;
+  deleteConversation: string;
+  confirmDeleteConversation: string;
   searchContacts: string;
   noContactsFound: string;
   groupNamePlaceholder: string;
@@ -254,6 +256,8 @@ export const translations: Record<Language, Translations> = {
     typing: 'печатает...',
     members: 'Участники',
     confirmDelete: 'Удалить это сообщение?',
+    deleteConversation: 'Удалить',
+    confirmDeleteConversation: 'Удалить этот чат?',
     searchContacts: 'Поиск контактов...',
     noContactsFound: 'Контакты не найдены',
     groupNamePlaceholder: 'Название группы...',
@@ -383,6 +387,8 @@ export const translations: Record<Language, Translations> = {
     typing: 'typing...',
     members: 'Members',
     confirmDelete: 'Delete this message?',
+    deleteConversation: 'Delete',
+    confirmDeleteConversation: 'Delete this chat?',
     searchContacts: 'Search contacts...',
     noContactsFound: 'No contacts found',
     groupNamePlaceholder: 'Group name...',

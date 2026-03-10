@@ -65,6 +65,7 @@ export default function AppShell() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [chatMenuOpenId, setChatMenuOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"chats" | "rooms" | "calls" | "options">("chats");
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
@@ -178,6 +179,18 @@ export default function AppShell() {
   const filtered = conversations.filter((c) =>
     !search || getConversationName(c).toLowerCase().includes(search.toLowerCase())
   );
+
+  async function handleDeleteConversation(conversationId: string) {
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${conversationId}`, { method: "DELETE" });
+      if (res.ok) {
+        setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+        if (activeChatId === conversationId) navigate("/app");
+      }
+    } catch (err) {
+      console.warn("[chat] delete failed", err);
+    }
+  }
 
   return (
     <div style={{
@@ -370,71 +383,129 @@ export default function AppShell() {
                   const name = getConversationName(c);
                   const isActive = activeChatId === c.id;
                   return (
-                    <button
-                      key={c.id}
-                      onClick={() => navigate(`/app/chats/${c.id}`)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        width: "100%",
-                        padding: "7px 8px",
-                        background: isActive ? "#3390ec" : "none",
-                        border: "none",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        borderRadius: 10,
-                        transition: "background 0.15s",
-                      }}
-                      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#f4f4f5"; }}
-                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
-                    >
-                      <div style={{
-                        width: 54, height: 54, borderRadius: "50%",
-                        background: isActive ? "rgba(255,255,255,0.2)" : avatarColor(name),
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 22, fontWeight: 500, color: "#fff",
-                        flexShrink: 0, marginRight: 12,
-                      }}>
-                        {name.charAt(0).toUpperCase()}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
-                          <span style={{
-                            fontSize: 15, fontWeight: c.unreadCount > 0 ? 600 : 400,
-                            color: isActive ? "#fff" : "#000",
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>{name}</span>
-                          <span style={{
-                            fontSize: 12,
-                            color: isActive ? "rgba(255,255,255,0.7)" : (c.unreadCount > 0 ? "#3390ec" : "#707579"),
-                            flexShrink: 0, marginLeft: 8,
-                          }}>
-                            {formatTime(c.lastMessage?.timestamp || c.lastMessageAt)}
-                          </span>
+                    <div key={c.id} style={{ position: "relative", padding: "0 4px" }}>
+                      <button
+                        onClick={() => navigate(`/app/chats/${c.id}`)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          width: "100%",
+                          padding: "7px 8px",
+                          background: isActive ? "#3390ec" : "none",
+                          border: "none",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          borderRadius: 10,
+                          transition: "background 0.15s",
+                        }}
+                        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "#f4f4f5"; }}
+                        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                      >
+                        <div style={{
+                          width: 54, height: 54, borderRadius: "50%",
+                          background: isActive ? "rgba(255,255,255,0.2)" : avatarColor(name),
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 22, fontWeight: 500, color: "#fff",
+                          flexShrink: 0, marginRight: 12,
+                        }}>
+                          {name.charAt(0).toUpperCase()}
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{
-                            fontSize: 14,
-                            color: isActive ? "rgba(255,255,255,0.7)" : "#707579",
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
-                            {c.lastMessage?.sender_name && c.type === "group" ? (
-                              <><span style={{ color: isActive ? "rgba(255,255,255,0.85)" : "#3390ec" }}>{c.lastMessage.sender_name}: </span>{getPreview(c)}</>
-                            ) : getPreview(c)}
-                          </span>
-                          {c.unreadCount > 0 && !isActive && (
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
                             <span style={{
-                              background: c.muted ? "#c4c9cc" : "#3390ec",
-                              color: "#fff", fontSize: 12, fontWeight: 500,
-                              borderRadius: 12, padding: "1px 7px", minWidth: 20,
-                              textAlign: "center", flexShrink: 0, marginLeft: 8,
+                              fontSize: 15, fontWeight: c.unreadCount > 0 ? 600 : 400,
+                              color: isActive ? "#fff" : "#000",
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>{name}</span>
+                            <span style={{
+                              fontSize: 12,
+                              color: isActive ? "rgba(255,255,255,0.7)" : (c.unreadCount > 0 ? "#3390ec" : "#707579"),
+                              flexShrink: 0, marginLeft: 8,
                             }}>
-                              {c.unreadCount}
+                              {formatTime(c.lastMessage?.timestamp || c.lastMessageAt)}
                             </span>
-                          )}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{
+                              fontSize: 14,
+                              color: isActive ? "rgba(255,255,255,0.7)" : "#707579",
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>
+                              {c.lastMessage?.sender_name && c.type === "group" ? (
+                                <><span style={{ color: isActive ? "rgba(255,255,255,0.85)" : "#3390ec" }}>{c.lastMessage.sender_name}: </span>{getPreview(c)}</>
+                              ) : getPreview(c)}
+                            </span>
+                            {c.unreadCount > 0 && !isActive && (
+                              <span style={{
+                                background: c.muted ? "#c4c9cc" : "#3390ec",
+                                color: "#fff", fontSize: 12, fontWeight: 500,
+                                borderRadius: 12, padding: "1px 7px", minWidth: 20,
+                                textAlign: "center", flexShrink: 0, marginLeft: 8,
+                              }}>
+                                {c.unreadCount}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+
+                        {/* 3-dot menu trigger */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setChatMenuOpenId(chatMenuOpenId === c.id ? null : c.id);
+                          }}
+                          style={{
+                            padding: 8, borderRadius: "50%", cursor: "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            flexShrink: 0, color: isActive ? "rgba(255,255,255,0.7)" : "#707579",
+                            fontSize: 18, fontWeight: 700,
+                          }}
+                        >
+                          ⋮
+                        </div>
+                      </button>
+
+                      {/* Dropdown menu */}
+                      {chatMenuOpenId === c.id && (
+                        <>
+                          <div
+                            onClick={() => setChatMenuOpenId(null)}
+                            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }}
+                          />
+                          <div style={{
+                            position: "absolute", top: 48, right: 12, zIndex: 100,
+                            background: "#fff", borderRadius: 8, minWidth: 140,
+                            boxShadow: "0 4px 24px rgba(0,0,0,0.15)", padding: "4px 0",
+                          }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setChatMenuOpenId(null);
+                                if (confirm(t.confirmDeleteConversation || "Delete this chat?")) {
+                                  handleDeleteConversation(c.id);
+                                }
+                              }}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 10,
+                                width: "100%", padding: "9px 14px",
+                                background: "none", border: "none", cursor: "pointer",
+                                fontSize: 14, color: "#e53935",
+                                transition: "background 0.12s",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                            >
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                              </svg>
+                              {t.deleteConversation || "Delete"}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   );
                 })
               )}
