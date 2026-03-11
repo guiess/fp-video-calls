@@ -88,6 +88,8 @@ export interface Translations {
   // App Shell / Tabs
   homeTab: string;
   chatsTab: string;
+  contactsTab: string;
+  contactAdded: string;
   roomsTab: string;
   optionsTab: string;
 
@@ -222,6 +224,8 @@ export const translations: Record<Language, Translations> = {
     // App Shell / Tabs
     homeTab: 'Главная',
     chatsTab: 'Чаты',
+    contactsTab: 'Контакты',
+    contactAdded: 'Контакт добавлен',
     roomsTab: 'Комнаты',
     optionsTab: 'Настройки',
 
@@ -354,6 +358,8 @@ export const translations: Record<Language, Translations> = {
     // App Shell / Tabs
     homeTab: 'Home',
     chatsTab: 'Chats',
+    contactsTab: 'Contacts',
+    contactAdded: 'Contact added',
     roomsTab: 'Rooms',
     optionsTab: 'Options',
 

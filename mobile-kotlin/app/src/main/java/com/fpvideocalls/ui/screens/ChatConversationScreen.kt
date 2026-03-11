@@ -102,9 +102,11 @@ fun ChatConversationScreen(
 
     LaunchedEffect(conversationId) {
         viewModel.init(conversationId, participantUids, displayName)
+        // Clear any chat notification for this conversation
+        com.fpvideocalls.service.NotificationHelper.cancelChatNotification(context, conversationId)
+        contactsViewModel.subscribeToContacts(myUid)
         if (isGroup && !conversationId.startsWith("new")) {
             groupInfoViewModel.init(conversationId, participantUids.map { ChatParticipant(it) })
-            contactsViewModel.subscribeToContacts(myUid)
         }
     }
 
@@ -126,6 +128,18 @@ fun ChatConversationScreen(
                 }
             },
             actions = {
+                // Add to contacts button (direct chats, not yet a contact)
+                if (!isGroup) {
+                    val otherUid = participantUids.firstOrNull { it != myUid }
+                    if (otherUid != null && contacts.none { it.uid == otherUid }) {
+                        IconButton(onClick = {
+                            contactsViewModel.addContact(Contact(uid = otherUid, displayName = displayName))
+                            android.widget.Toast.makeText(context, context.getString(R.string.contact_added), android.widget.Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = stringResource(R.string.add_contact), tint = OnBackground)
+                        }
+                    }
+                }
                 if (isGroup) {
                     IconButton(onClick = { showMembersSheet = !showMembersSheet }) {
                         Icon(Icons.Default.Group, contentDescription = stringResource(R.string.group_info), tint = OnBackground)

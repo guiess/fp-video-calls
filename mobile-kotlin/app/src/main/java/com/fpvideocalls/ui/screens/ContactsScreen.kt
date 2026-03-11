@@ -31,6 +31,7 @@ import com.fpvideocalls.viewmodel.ContactsViewModel
 @Composable
 fun ContactsScreen(
     onCallContact: (Contact) -> Unit,
+    onChatContact: (Contact) -> Unit = {},
     onGroupCall: () -> Unit,
     authViewModel: AuthViewModel = hiltViewModel(),
     contactsViewModel: ContactsViewModel = hiltViewModel()
@@ -58,6 +59,7 @@ fun ContactsScreen(
         when (selectedTab) {
             0 -> ContactsContent(
                 onCallContact = onCallContact,
+                onChatContact = onChatContact,
                 onGroupCall = onGroupCall,
                 authViewModel = authViewModel,
                 contactsViewModel = contactsViewModel
@@ -70,6 +72,7 @@ fun ContactsScreen(
 @Composable
 private fun ContactsContent(
     onCallContact: (Contact) -> Unit,
+    onChatContact: (Contact) -> Unit = {},
     onGroupCall: () -> Unit,
     authViewModel: AuthViewModel,
     contactsViewModel: ContactsViewModel
@@ -130,6 +133,7 @@ private fun ContactsContent(
                 items(contacts, key = { it.uid }) { contact ->
                     ContactRow(
                         contact = contact,
+                        onClick = { onChatContact(contact) },
                         onCall = { onCallContact(contact) },
                         onRemove = { showRemoveDialog = contact }
                     )
@@ -258,10 +262,11 @@ private fun ContactsContent(
 }
 
 @Composable
-private fun ContactRow(contact: Contact, onCall: () -> Unit, onRemove: () -> Unit) {
+private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onCall: () -> Unit, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)

@@ -43,21 +43,25 @@ class ContactsViewModel @Inject constructor(
             _searchResults.value = emptyList()
             return
         }
-        viewModelScope.launch {
-            _searching.value = true
-            try {
-                val results = if (query.contains("@")) {
-                    // Email search via server API (exact match)
-                    firestoreRepository.searchUserByEmail(query.trim(), uid)
-                } else {
-                    firestoreRepository.searchUsers(query, uid)
+        if (query.contains("@")) {
+            // Email search via server API (exact match)
+            viewModelScope.launch {
+                _searching.value = true
+                try {
+                    val results = firestoreRepository.searchUserByEmail(query.trim(), uid)
+                    val contactIds = _contacts.value.map { it.uid }.toSet()
+                    _searchResults.value = results.filter { it.uid !in contactIds }
+                } catch (e: Exception) {
+                    Log.w("ContactsViewModel", "Search failed", e)
+                } finally {
+                    _searching.value = false
                 }
-                val contactIds = _contacts.value.map { it.uid }.toSet()
-                _searchResults.value = results.filter { it.uid !in contactIds }
-            } catch (e: Exception) {
-                Log.w("ContactsViewModel", "Search failed", e)
-            } finally {
-                _searching.value = false
+            }
+        } else {
+            // Name search: filter locally from already-loaded contacts
+            val lower = query.lowercase()
+            _searchResults.value = _contacts.value.filter {
+                it.displayName.lowercase().contains(lower)
             }
         }
     }

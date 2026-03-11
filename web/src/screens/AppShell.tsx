@@ -5,6 +5,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiFetch } from "../services/api";
 import { subscribeChatEvents, ensureChatSocket, authenticateSocket } from "../services/chatSocket";
 import { subscribeToCallHistory, CallRecord } from "../services/callHistoryService";
+import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { db } from "../firebase";
 import NewChatScreen from "./NewChatScreen";
 import NewGroupChatScreen from "./NewGroupChatScreen";
 
@@ -67,10 +69,13 @@ export default function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [chatMenuOpenId, setChatMenuOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"chats" | "rooms" | "calls" | "options">("chats");
+  const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "rooms" | "calls" | "options">("chats");
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
   const [roomHistory, setRoomHistory] = useState<RoomHistoryItem[]>(loadRoomHistory);
+  const [contacts, setContacts] = useState<{uid: string; displayName: string; photoUrl?: string}[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactMenuOpenId, setContactMenuOpenId] = useState<string | null>(null);
 
   function addRoomToHistory(roomId: string, quality: "720p" | "1080p") {
     setRoomHistory((prev) => {
@@ -152,6 +157,36 @@ export default function AppShell() {
     return unsub;
   }, [activeTab, user]);
 
+  // Load contacts when contacts tab is active
+  useEffect(() => {
+    if (activeTab !== "contacts" || !user) return;
+    setContactsLoading(true);
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "users", user.uid, "contacts"));
+        setContacts(snap.docs.map((d) => ({
+          uid: d.id,
+          displayName: d.data().displayName || "",
+          photoUrl: d.data().photoURL || d.data().photoUrl || "",
+        })));
+      } catch {
+        setContacts([]);
+      } finally {
+        setContactsLoading(false);
+      }
+    })();
+  }, [activeTab, user]);
+
+  async function handleRemoveContact(contactUid: string) {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "contacts", contactUid));
+      setContacts((prev) => prev.filter((c) => c.uid !== contactUid));
+    } catch (err) {
+      console.warn("[contacts] remove failed", err);
+    }
+  }
+
   function getConversationName(c: Conversation): string {
     if (c.type === "group" && c.groupName) return c.groupName.replace(/\+/g, " ");
     const other = c.participants.find((p) => p.user_uid !== user?.uid);
@@ -216,6 +251,12 @@ export default function AppShell() {
           active={activeTab === "chats"}
           badge={conversations.reduce((sum, c) => sum + c.unreadCount, 0)}
           onClick={() => { setActiveTab("chats"); navigate("/app"); }}
+        />
+        <NavRailItem
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}
+          label={t.contactsTab || "Contacts"}
+          active={activeTab === "contacts"}
+          onClick={() => { setActiveTab("contacts"); navigate("/app"); }}
         />
         <NavRailItem
           icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>}
@@ -529,6 +570,151 @@ export default function AppShell() {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             </button>
           </>
+        ) : activeTab === "contacts" ? (
+          /* ====== CONTACTS PANEL ====== */
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid #f0f0f0" }}>
+              <div style={{ fontSize: 14, color: "#3390ec", fontWeight: 500 }}>
+                {t.contactsTab || "Contacts"}
+              </div>
+            </div>
+
+            {contactsLoading ? (
+              <div style={{ padding: "40px 16px", textAlign: "center", color: "#707579", fontSize: 14 }}>
+                {t.loading || "Loading..."}
+              </div>
+            ) : contacts.length === 0 ? (
+              <div style={{ padding: "60px 16px", textAlign: "center", color: "#707579" }}>
+                <p style={{ fontSize: 14 }}>
+                  {language === "ru"
+                    ? "Контактов пока нет. Найдите по email в «Новый чат», чтобы добавить."
+                    : "No contacts yet. Search by email in New Chat to add contacts."}
+                </p>
+              </div>
+            ) : (
+              contacts.map((contact) => (
+                <div key={contact.uid} style={{ position: "relative", padding: "0 4px" }}>
+                  <button
+                    onClick={async () => {
+                      // Find existing direct conversation or create one
+                      const existing = conversations.find(
+                        (c) => c.type === "direct" && c.participants.some((p: any) => p.user_uid === contact.uid)
+                      );
+                      if (existing) {
+                        navigate(`/app/chats/${existing.id}`);
+                      } else {
+                        try {
+                          const res = await apiFetch("/api/chat/conversations", {
+                            method: "POST",
+                            body: JSON.stringify({
+                              type: "direct",
+                              participantUids: [user!.uid, contact.uid],
+                              participantNames: {
+                                [user!.uid]: user!.displayName || "Me",
+                                [contact.uid]: contact.displayName,
+                              },
+                            }),
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            navigate(`/app/chats/${data.conversationId}`);
+                          }
+                        } catch {}
+                      }
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      width: "100%",
+                      padding: "7px 8px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      borderRadius: 10,
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    <div style={{
+                      width: 54, height: 54, borderRadius: "50%",
+                      background: avatarColor(contact.displayName),
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 22, fontWeight: 500, color: "#fff",
+                      flexShrink: 0, marginRight: 12,
+                    }}>
+                      {(contact.displayName || "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{
+                        fontSize: 15, fontWeight: 400, color: "#000",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        display: "block",
+                      }}>
+                        {contact.displayName}
+                      </span>
+                    </div>
+
+                    {/* 3-dot menu trigger */}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setContactMenuOpenId(contactMenuOpenId === contact.uid ? null : contact.uid);
+                      }}
+                      style={{
+                        padding: 8, borderRadius: "50%", cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        flexShrink: 0, color: "#707579",
+                        fontSize: 18, fontWeight: 700,
+                      }}
+                    >
+                      ⋮
+                    </div>
+                  </button>
+
+                  {/* Dropdown menu */}
+                  {contactMenuOpenId === contact.uid && (
+                    <>
+                      <div
+                        onClick={() => setContactMenuOpenId(null)}
+                        style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }}
+                      />
+                      <div style={{
+                        position: "absolute", top: 48, right: 12, zIndex: 100,
+                        background: "#fff", borderRadius: 8, minWidth: 140,
+                        boxShadow: "0 4px 24px rgba(0,0,0,0.15)", padding: "4px 0",
+                      }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setContactMenuOpenId(null);
+                            handleRemoveContact(contact.uid);
+                          }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            width: "100%", padding: "9px 14px",
+                            background: "none", border: "none", cursor: "pointer",
+                            fontSize: 14, color: "#e53935",
+                            transition: "background 0.12s",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53935" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                          </svg>
+                          {language === "ru" ? "Удалить" : "Remove"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         ) : activeTab === "rooms" ? (
           /* ====== ROOMS PANEL ====== */
           <RoomsSidebarPanel

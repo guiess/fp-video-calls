@@ -15,6 +15,7 @@ object Routes {
     // Main tabs
     const val TAB_HOME = "tab_home"
     const val TAB_CHATS = "tab_chats"
+    const val TAB_CONTACTS = "tab_contacts"
     const val TAB_ROOMS = "tab_rooms"
     const val TAB_OPTIONS = "tab_options"
 

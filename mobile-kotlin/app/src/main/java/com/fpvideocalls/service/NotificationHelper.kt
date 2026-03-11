@@ -304,6 +304,12 @@ object NotificationHelper {
         manager.cancel(notificationId(callUUID))
     }
 
+    /** Cancel chat notification for a specific conversation. */
+    fun cancelChatNotification(context: Context, conversationId: String) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(Constants.CHAT_NOTIFICATION_ID_BASE + conversationId.hashCode().and(0xFFF))
+    }
+
     /** Cancel all call-related notifications (ringing, active, per-UUID). */
     fun cancelAllCallNotifications(context: Context, callUUID: String? = null) {
         val manager = context.getSystemService(NotificationManager::class.java)

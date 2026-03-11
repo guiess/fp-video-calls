@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
-import { fetchContacts, Contact } from "../services/contacts";
+import { fetchContacts, addContact, Contact } from "../services/contacts";
 import { apiFetch } from "../services/api";
 
 function avatarColor(s: string): string {
@@ -61,6 +61,8 @@ export default function NewChatScreen() {
     if (creating || !user) return;
     setCreating(true);
     try {
+      // Add to contacts list
+      addContact({ uid: contact.uid, displayName: contact.displayName, photoUrl: contact.photoUrl });
       const res = await apiFetch("/api/chat/conversations", {
         method: "POST",
         body: JSON.stringify({

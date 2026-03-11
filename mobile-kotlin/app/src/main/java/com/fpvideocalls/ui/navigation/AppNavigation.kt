@@ -503,6 +503,24 @@ fun MainScreen(navController: NavHostController, isDarkTheme: Boolean = true, on
                     )
                 )
                 NavigationBarItem(
+                    selected = currentRoute == Routes.TAB_CONTACTS,
+                    onClick = {
+                        tabNavController.navigate(Routes.TAB_CONTACTS) {
+                            popUpTo(Routes.TAB_CHATS)
+                            launchSingleTop = true
+                        }
+                    },
+                    icon = { Icon(Icons.Default.People, stringResource(R.string.nav_contacts)) },
+                    label = { Text(stringResource(R.string.nav_contacts)) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Purple,
+                        selectedTextColor = Purple,
+                        unselectedIconColor = TextTertiary,
+                        unselectedTextColor = TextTertiary,
+                        indicatorColor = Color.Transparent
+                    )
+                )
+                NavigationBarItem(
                     selected = currentRoute == Routes.TAB_ROOMS,
                     onClick = {
                         tabNavController.navigate(Routes.TAB_ROOMS) {
@@ -554,6 +572,40 @@ fun MainScreen(navController: NavHostController, isDarkTheme: Boolean = true, on
                     },
                     onNewChat = {
                         navController.navigate(Routes.NEW_CHAT)
+                    }
+                )
+            }
+            composable(Routes.TAB_CONTACTS) {
+                ContactsScreen(
+                    onCallContact = { contact ->
+                        pendingContacts.clear()
+                        pendingContacts.addAll(listOf(contact))
+                        navController.navigate(Routes.preCall("direct"))
+                    },
+                    onChatContact = { contact ->
+                        val currentUser = authViewModel.user.value ?: return@ContactsScreen
+                        // Check for existing direct conversation with this contact
+                        val existing = chatListViewModel.conversations.value.firstOrNull { convo ->
+                            convo.type == "direct" && convo.participants.any { it.userUid == contact.uid }
+                        }
+                        if (existing != null) {
+                            val displayName = chatListViewModel.getDisplayName(existing)
+                            val uids = existing.participants.map { it.userUid }
+                            navController.navigate(
+                                Routes.chatConversation(existing.id, displayName, uids)
+                            )
+                        } else {
+                            navController.navigate(
+                                Routes.chatConversation(
+                                    conversationId = "new_${contact.uid}",
+                                    displayName = contact.displayName,
+                                    participantUids = listOf(currentUser.uid, contact.uid)
+                                )
+                            )
+                        }
+                    },
+                    onGroupCall = {
+                        navController.navigate(Routes.GROUP_CALL_SETUP)
                     }
                 )
             }

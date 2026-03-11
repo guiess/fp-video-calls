@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
 import { apiFetch, getBaseUrl } from "../services/api";
 import { subscribeChatEvents, emitTyping, ChatMessageEvent } from "../services/chatSocket";
+import { fetchContacts, addContact } from "../services/contacts";
 
 interface Message {
   id: string;
@@ -46,6 +47,9 @@ export default function ChatConversationScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   // Read receipts: map of uid -> last_read_at timestamp (other participants)
   const [readReceipts, setReadReceipts] = useState<Record<string, number>>({});
+  const [isContact, setIsContact] = useState(true); // assume yes until checked
+  const [addingContact, setAddingContact] = useState(false);
+  const [contactAdded, setContactAdded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -136,6 +140,14 @@ export default function ChatConversationScreen() {
       if (res.ok) {
         const data = await res.json();
         setConversation(data.conversation);
+        // Check if the other participant is in contacts (direct chats only)
+        if (data.conversation?.type === "direct") {
+          const other = data.conversation.participants?.find((p: any) => p.user_uid !== user?.uid);
+          if (other) {
+            const contacts = await fetchContacts();
+            setIsContact(contacts.some((c) => c.uid === other.user_uid));
+          }
+        }
       }
     } catch (err) {
       console.warn("[chat] load conversation failed", err);
@@ -380,7 +392,20 @@ export default function ChatConversationScreen() {
       height: "100%",
       background: "#e6ebee",
       fontFamily: "'Roboto', system-ui, -apple-system, sans-serif",
+      position: "relative",
     }}>
+      {/* Contact added toast */}
+      {contactAdded && (
+        <div style={{
+          position: "absolute", top: 60, left: "50%", transform: "translateX(-50%)",
+          background: "#333", color: "#fff", padding: "8px 20px",
+          borderRadius: 20, fontSize: 14, zIndex: 100,
+          boxShadow: "0 2px 12px rgba(0,0,0,0.2)",
+          animation: "fadeIn 0.2s",
+        }}>
+          {t.contactAdded || "Contact added"}
+        </div>
+      )}
       {/* Top Bar — Telegram teal header */}
       <div style={{
         background: "#517da2",
@@ -413,6 +438,29 @@ export default function ChatConversationScreen() {
             <div style={{ fontSize: 13, opacity: 0.7 }}>{conversation.participants.length} members</div>
           ) : null}
         </div>
+        {/* Add to contacts button (direct chats, not yet a contact) */}
+        {conversation?.type === "direct" && !isContact && (
+          <button
+            onClick={async () => {
+              const other = conversation.participants?.find((p: any) => p.user_uid !== user?.uid);
+              if (!other || addingContact) return;
+              setAddingContact(true);
+              await addContact({ uid: other.user_uid, displayName: (other.user_name || "").replace(/\+/g, " ") });
+              setIsContact(true);
+              setAddingContact(false);
+              setContactAdded(true);
+              setTimeout(() => setContactAdded(false), 5000);
+            }}
+            title={t.addContact || "Add to contacts"}
+            style={{
+              padding: "6px", background: "none", color: "#fff",
+              border: "none", cursor: "pointer", borderRadius: "50%",
+              opacity: addingContact ? 0.5 : 1,
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+          </button>
+        )}
         {/* Call button */}
         <button
           onClick={() => {
