@@ -28,7 +28,6 @@ export default function App() {
   const [joinUsername, setJoinUsername] = useState("");
   const [joinQuality, setJoinQuality] = useState<"720p" | "1080p">("1080p");
   const [joinPassword, setJoinPassword] = useState<string | undefined>(undefined);
-  const displayNameParamRef = useRef<string | null>(null);
 
   /* ---- lobby helpers ---- */
 
@@ -100,17 +99,12 @@ export default function App() {
   async function join() {
     if (!roomId.trim()) { alert(t.enterRoomId); return; }
     if (meta?.settings?.passwordEnabled && password.trim().length === 0) { alert(t.passwordRequired); return; }
-    const displayName = username.trim() || displayNameParamRef.current || `Guest_${Math.floor(Math.random() * 10000)}`;
+    const displayName = username.trim() || `Guest_${Math.floor(Math.random() * 10000)}`;
     const chosenQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
     enterRoom(roomId.trim(), displayName, chosenQuality, password.trim() || undefined);
   }
 
   function leaveRoom() {
-    // If opened from the authenticated app (has name param), go back to /app
-    if (displayNameParamRef.current) {
-      window.location.href = "/app";
-      return;
-    }
     setShowRoom(false);
   }
 
@@ -123,9 +117,7 @@ export default function App() {
   useEffect(() => {
     const url = new URL(window.location.href);
     const nameParam = url.searchParams.get("name") || url.searchParams.get("username");
-    const displayName = nameParam && nameParam.trim() ? nameParam.trim() : "";
-    displayNameParamRef.current = displayName || null;
-    setUsername(displayName);
+    if (nameParam && nameParam.trim()) setUsername(nameParam.trim());
   }, []);
 
   useEffect(() => {
@@ -147,13 +139,6 @@ export default function App() {
           const intended = (cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam :
             qParam && (qParam === "720p" || qParam === "1080p") ? qParam : quality) as "720p" | "1080p";
           setMeta({ roomId: roomParam, exists: false, settings: { videoQuality: intended, passwordEnabled: false } });
-        }
-        // Auto-join when opened from the authenticated app (has name param)
-        const nameParam = url.searchParams.get("name") || url.searchParams.get("username");
-        if (nameParam && nameParam.trim()) {
-          const chosenQuality = (data?.settings?.videoQuality ??
-            (cqParam && (cqParam === "720p" || cqParam === "1080p") ? cqParam : quality)) as "720p" | "1080p";
-          enterRoom(roomParam, nameParam.trim(), chosenQuality, pwdParam || undefined);
         }
       } catch {}
     })();
