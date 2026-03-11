@@ -2,6 +2,7 @@ package com.fpvideocalls.data
 
 import com.fpvideocalls.util.Constants
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -31,6 +32,18 @@ class CallApiService @Inject constructor(
 
     private val baseUrl = Constants.SIGNALING_URL
     private val json = "application/json; charset=utf-8".toMediaType()
+
+    private suspend fun getAuthToken(): String? = try {
+        com.google.firebase.auth.FirebaseAuth.getInstance()
+            .currentUser?.getIdToken(false)
+            ?.await()?.token
+    } catch (_: Exception) { null }
+
+    private suspend fun Request.Builder.addAuth(): Request.Builder {
+        val token = getAuthToken()
+        if (token != null) addHeader("Authorization", "Bearer $token")
+        return this
+    }
 
     suspend fun createRoom(password: String? = null): RoomCreateResult = withContext(Dispatchers.IO) {
         val body = JSONObject().apply {
@@ -100,6 +113,7 @@ class CallApiService @Inject constructor(
         }
         val request = Request.Builder()
             .url("$baseUrl/api/call/invite")
+            .addAuth()
             .post(body.toString().toRequestBody(json))
             .build()
         val response = client.newCall(request).execute()
@@ -121,6 +135,7 @@ class CallApiService @Inject constructor(
         }
         val request = Request.Builder()
             .url("$baseUrl/api/call/cancel")
+            .addAuth()
             .post(body.toString().toRequestBody(json))
             .build()
         try {
@@ -140,6 +155,7 @@ class CallApiService @Inject constructor(
         }
         val request = Request.Builder()
             .url("$baseUrl/api/call/answer")
+            .addAuth()
             .post(body.toString().toRequestBody(json))
             .build()
         try {

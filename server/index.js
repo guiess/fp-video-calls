@@ -7,10 +7,12 @@ import { fileURLToPath } from "url";
 import { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
 import cors from "cors";
+import bcrypt from "bcryptjs";
 import admin from "firebase-admin";
 import chatRoutes from "./chat-routes.js";
 import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
+import { requireAuth } from "./auth-middleware.js";
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
 // Set FIREBASE_SERVICE_ACCOUNT_JSON to a base64-encoded service-account JSON,
@@ -186,7 +188,7 @@ async function getFcmToken(uid) {
  * Body: { callerId, callerName, callerPhoto?, calleeUids: string[], roomId, callType }
  * Sends an FCM data message to each callee so their device rings.
  */
-app.post("/api/call/invite", async (req, res) => {
+app.post("/api/call/invite", requireAuth, async (req, res) => {
   const { callerId, callerName, callerPhoto, calleeUids, roomId, callType, roomPassword } = req.body || {};
   console.log("[call/invite] received:", { callerId, callerName, calleeUids, roomId, callType });
   if (!callerId || !callerName || !Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
@@ -251,7 +253,7 @@ app.post("/api/call/invite", async (req, res) => {
  * Body: { calleeUids: string[], roomId }
  * Sends a cancel FCM message so the callee's ringing screen dismisses.
  */
-app.post("/api/call/cancel", async (req, res) => {
+app.post("/api/call/cancel", requireAuth, async (req, res) => {
   const { calleeUids, roomId, callUUID } = req.body || {};
   if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
@@ -292,7 +294,7 @@ app.post("/api/call/cancel", async (req, res) => {
  * Body: { callerUid: string, roomId: string, callUUID?: string }
  * Notifies the caller that the callee answered so the caller can join the room.
  */
-app.post("/api/call/answer", async (req, res) => {
+app.post("/api/call/answer", requireAuth, async (req, res) => {
   const { callerUid, roomId, callUUID } = req.body || {};
   if (!callerUid || !roomId) {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
@@ -357,7 +359,7 @@ app.post("/room", (req, res) => {
     ).run(roomId, q, pwEnabled ? 1 : 0, pwHash || null, passwordHint || null, Date.now());
   } catch (e) { console.warn("[room:create] DB persist failed", e); }
   console.log(`[room:create] ${roomId} via POST (password=${pwEnabled})`);
-  res.status(201).json({ roomId, settings: rooms.get(roomId).settings });
+  res.status(201).json({ roomId, settings: sanitizeSettings(rooms.get(roomId).settings) });
 });
 
 // Room meta (for password/quality)
@@ -385,7 +387,7 @@ app.get("/room/:roomId/meta", (req, res) => {
   res.json({
     roomId,
     exists: !!room,
-    settings: room?.settings || {
+    settings: sanitizeSettings(room?.settings) || {
       videoQuality: "720p",
       passwordEnabled: false
     }
@@ -486,7 +488,7 @@ io.on("connection", (socket) => {
       micMuted: !!p.micMuted
     }));
     console.log(`[room:join] ${userId} ${isReconnect ? "re" : ""}joined ${roomId} (${room.participants.size} participants)`);
-    socket.emit("room_joined", { participants, roomInfo: { roomId, settings: room.settings } });
+    socket.emit("room_joined", { participants, roomInfo: { roomId, settings: sanitizeSettings(room.settings) } });
 
     // Only notify others on first join (skip for reconnects to avoid duplicate user_joined)
     if (!isReconnect) {
@@ -620,12 +622,18 @@ function generateSlug() {
   return `${a}-${n}-${num}`;
 }
 
-// Very simple local hash/verify (not for production). Replace with bcrypt/argon2 in real app.
 function hashPassword(pw) {
-  return crypto.createHash("sha256").update(pw).digest("hex");
+  return bcrypt.hashSync(pw, 10);
 }
 function verifyPassword(pw, hash) {
-  return hashPassword(pw) === hash;
+  return bcrypt.compareSync(pw, hash);
+}
+
+/** Strip sensitive fields from room settings before sending to clients. */
+function sanitizeSettings(settings) {
+  if (!settings) return settings;
+  const { passwordHash, ...safe } = settings;
+  return safe;
 }
 
 const PORT = process.env.PORT || 3000;
