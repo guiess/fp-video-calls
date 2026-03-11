@@ -58,6 +58,15 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, timestamp DESC);
   CREATE INDEX IF NOT EXISTS idx_participants_user ON conversation_participants(user_uid);
+
+  CREATE TABLE IF NOT EXISTS rooms (
+    id TEXT PRIMARY KEY,
+    video_quality TEXT NOT NULL DEFAULT '720p',
+    password_enabled INTEGER NOT NULL DEFAULT 0,
+    password_hash TEXT,
+    password_hint TEXT,
+    created_at INTEGER NOT NULL
+  );
 `);
 
 // Add plaintext column if not exists (migration)

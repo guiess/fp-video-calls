@@ -338,23 +338,50 @@ app.use("/api/chat", chatRoutes);
 app.post("/room", (req, res) => {
   const { videoQuality = "720p", passwordEnabled = false, passwordHint, password } = req.body || {};
   const roomId = generateSlug();
+  const q = videoQuality === "1080p" ? "1080p" : "720p";
+  const pwEnabled = !!passwordEnabled;
+  const pwHash = pwEnabled && password ? hashPassword(password) : undefined;
   rooms.set(roomId, {
     participants: new Map(),
     settings: {
-      videoQuality: videoQuality === "1080p" ? "1080p" : "720p",
-      passwordEnabled: !!passwordEnabled,
-      passwordHash: passwordEnabled && password ? hashPassword(password) : undefined,
+      videoQuality: q,
+      passwordEnabled: pwEnabled,
+      passwordHash: pwHash,
       passwordHint: passwordHint
     }
   });
-  console.log(`[room:create] ${roomId} via POST (password=${!!passwordEnabled})`);
+  // Persist to DB so settings survive server restarts
+  try {
+    chatDb.prepare(
+      "INSERT OR REPLACE INTO rooms (id, video_quality, password_enabled, password_hash, password_hint, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(roomId, q, pwEnabled ? 1 : 0, pwHash || null, passwordHint || null, Date.now());
+  } catch (e) { console.warn("[room:create] DB persist failed", e); }
+  console.log(`[room:create] ${roomId} via POST (password=${pwEnabled})`);
   res.status(201).json({ roomId, settings: rooms.get(roomId).settings });
 });
 
 // Room meta (for password/quality)
 app.get("/room/:roomId/meta", (req, res) => {
   const { roomId } = req.params;
-  const room = rooms.get(roomId);
+  let room = rooms.get(roomId);
+  // Fall back to DB if not in memory
+  if (!room) {
+    try {
+      const row = chatDb.prepare("SELECT * FROM rooms WHERE id = ?").get(roomId);
+      if (row) {
+        room = {
+          participants: new Map(),
+          settings: {
+            videoQuality: row.video_quality,
+            passwordEnabled: !!row.password_enabled,
+            passwordHash: row.password_hash || undefined,
+            passwordHint: row.password_hint || undefined,
+          }
+        };
+        rooms.set(roomId, room);
+      }
+    } catch {}
+  }
   res.json({
     roomId,
     exists: !!room,
@@ -399,14 +426,41 @@ io.on("connection", (socket) => {
     const reqQ = typeof videoQuality === "string" ? videoQuality.trim().toLowerCase() : "";
     const normalizedQ = reqQ === "1080p" ? "1080p" : reqQ === "720p" ? "720p" : null;
 
-    // Auto-create room on first join if not present (no password by default)
+    // Load room from DB if not in memory, or auto-create if truly new
     if (!rooms.has(roomId)) {
-      const q = normalizedQ ?? "720p";
-      rooms.set(roomId, {
-        participants: new Map(),
-        settings: { videoQuality: q, passwordEnabled: false }
-      });
-      console.log(`[room:create] ${roomId} quality=${q} (requested=${videoQuality})`);
+      let loaded = false;
+      try {
+        const row = chatDb.prepare("SELECT * FROM rooms WHERE id = ?").get(roomId);
+        if (row) {
+          rooms.set(roomId, {
+            participants: new Map(),
+            settings: {
+              videoQuality: row.video_quality,
+              passwordEnabled: !!row.password_enabled,
+              passwordHash: row.password_hash || undefined,
+              passwordHint: row.password_hint || undefined,
+            }
+          });
+          loaded = true;
+          console.log(`[room:join] ${roomId} loaded from DB (password=${!!row.password_enabled})`);
+        }
+      } catch {}
+      if (!loaded) {
+        const q = normalizedQ ?? "720p";
+        const pwEnabled = !!password && password.length > 0;
+        const pwHash = pwEnabled ? hashPassword(password) : undefined;
+        rooms.set(roomId, {
+          participants: new Map(),
+          settings: { videoQuality: q, passwordEnabled: pwEnabled, passwordHash: pwHash }
+        });
+        // Persist to DB
+        try {
+          chatDb.prepare(
+            "INSERT OR REPLACE INTO rooms (id, video_quality, password_enabled, password_hash, password_hint, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+          ).run(roomId, q, pwEnabled ? 1 : 0, pwHash || null, null, Date.now());
+        } catch (e) { console.warn("[room:create] DB persist failed", e); }
+        console.log(`[room:create] ${roomId} quality=${q} password=${pwEnabled} (requested=${videoQuality})`);
+      }
     }
 
     const room = rooms.get(roomId);
@@ -447,7 +501,11 @@ io.on("connection", (socket) => {
       socket.leave(roomId);
       socket.to(roomId).emit("user_left", { userId });
       console.log(`[room:leave] ${userId} left ${roomId} (${room.participants.size} remaining)`);
-      if (room.participants.size === 0) { rooms.delete(roomId); console.log(`[room:delete] ${roomId} (empty)`); }
+      if (room.participants.size === 0) {
+        rooms.delete(roomId);
+        try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
+        console.log(`[room:delete] ${roomId} (empty)`);
+      }
     }
   });
 
@@ -455,13 +513,13 @@ io.on("connection", (socket) => {
   socket.on("close_room", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
-    // Inform all clients and remove them
     io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
     for (const [uid, info] of room.participants.entries()) {
       try { io.sockets.sockets.get(info.socketId)?.leave(roomId); } catch {}
       socket.to(roomId).emit("user_left", { userId: uid });
     }
     rooms.delete(roomId);
+    try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
     console.log(`[room:close] ${roomId}`);
   });
 
@@ -509,7 +567,11 @@ io.on("connection", (socket) => {
         room.participants.delete(userId);
         socket.to(roomId).emit("user_left", { userId });
         console.log(`[room:disconnect] ${userId} disconnected from ${roomId} (${room.participants.size} remaining)`);
-        if (room.participants.size === 0) { rooms.delete(roomId); console.log(`[room:delete] ${roomId} (empty)`); }
+        if (room.participants.size === 0) {
+          rooms.delete(roomId);
+          try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
+          console.log(`[room:delete] ${roomId} (empty)`);
+        }
       }
     }
   });
@@ -525,6 +587,7 @@ app.post("/room/:roomId/close", (req, res) => {
     try { io.sockets.sockets.get(info.socketId)?.leave(roomId); } catch {}
   }
   rooms.delete(roomId);
+  try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
   console.log(`[room:close] ${roomId} via REST`);
   return res.json({ ok: true });
 }

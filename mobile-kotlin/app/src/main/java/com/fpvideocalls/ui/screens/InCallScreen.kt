@@ -22,7 +22,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -115,14 +114,13 @@ fun InCallScreen(
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
-            // Ensure content draws behind system bars
-            WindowCompat.setDecorFitsSystemWindows(window, false)
         }
         onDispose {
             val window = activity.window
             val controller = WindowInsetsControllerCompat(window, view)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
             controller.show(WindowInsetsCompat.Type.systemBars())
-            WindowCompat.setDecorFitsSystemWindows(window, true)
         }
     }
 

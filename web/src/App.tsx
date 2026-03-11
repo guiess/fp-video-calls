@@ -101,7 +101,9 @@ export default function App() {
     if (meta?.settings?.passwordEnabled && password.trim().length === 0) { alert(t.passwordRequired); return; }
     const displayName = username.trim() || `Guest_${Math.floor(Math.random() * 10000)}`;
     const chosenQuality = (meta?.settings?.videoQuality ?? quality) as "720p" | "1080p";
-    enterRoom(roomId.trim(), displayName, chosenQuality, password.trim() || undefined);
+    // Use join password if room exists, or creation password if setting up a new room
+    const pwd = password.trim() || passwordOnCreate.trim() || undefined;
+    enterRoom(roomId.trim(), displayName, chosenQuality, pwd);
   }
 
   function leaveRoom() {
