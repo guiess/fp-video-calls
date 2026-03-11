@@ -282,7 +282,17 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
 
     return () => {
       clearTimeout(timer);
-      svcRef.current?.leave();
+      // Stop all local media tracks and clean up
+      try {
+        const svc = svcRef.current;
+        if (svc) {
+          const ls = svc.getLocalStream();
+          if (ls) ls.getTracks().forEach((t) => t.stop());
+          svc.leave();
+        }
+      } catch {}
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -376,7 +386,15 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
   /* ---------------------------------------------------------------- */
 
   function handleLeave() {
-    try { svcRef.current?.leave(); } catch {}
+    try {
+      const svc = svcRef.current;
+      if (svc) {
+        const ls = svc.getLocalStream();
+        if (ls) ls.getTracks().forEach((t) => t.stop());
+        svc.leave();
+      }
+    } catch {}
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
     onLeave();
   }
 

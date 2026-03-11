@@ -120,6 +120,34 @@ class FirestoreRepository @Inject constructor(
             }
     }
 
+    suspend fun searchUserByEmail(email: String, myUid: String): List<Contact> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val token = com.google.firebase.auth.FirebaseAuth.getInstance()
+                    .currentUser?.getIdToken(false)?.await()?.token ?: return@withContext emptyList()
+                val url = "${com.fpvideocalls.util.Constants.SIGNALING_URL}/api/chat/search-user?email=${java.net.URLEncoder.encode(email, "UTF-8")}"
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .addHeader("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+                val response = okhttp3.OkHttpClient().newCall(request).execute()
+                if (!response.isSuccessful) return@withContext emptyList()
+                val json = org.json.JSONObject(response.body?.string() ?: "{}")
+                val userObj = json.optJSONObject("user") ?: return@withContext emptyList()
+                val uid = userObj.getString("uid")
+                if (uid == myUid) return@withContext emptyList()
+                listOf(Contact(
+                    uid = uid,
+                    displayName = userObj.optString("displayName", ""),
+                    photoURL = userObj.optString("photoUrl", "").takeIf { it.isNotEmpty() }
+                ))
+            } catch (e: Exception) {
+                android.util.Log.w("FirestoreRepo", "Email search failed", e)
+                emptyList()
+            }
+        }
+
     // --- Groups ---
 
     suspend fun saveGroup(uid: String, group: Group) {

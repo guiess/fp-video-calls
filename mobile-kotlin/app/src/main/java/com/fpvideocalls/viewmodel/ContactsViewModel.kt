@@ -46,7 +46,12 @@ class ContactsViewModel @Inject constructor(
         viewModelScope.launch {
             _searching.value = true
             try {
-                val results = firestoreRepository.searchUsers(query, uid)
+                val results = if (query.contains("@")) {
+                    // Email search via server API (exact match)
+                    firestoreRepository.searchUserByEmail(query.trim(), uid)
+                } else {
+                    firestoreRepository.searchUsers(query, uid)
+                }
                 val contactIds = _contacts.value.map { it.uid }.toSet()
                 _searchResults.value = results.filter { it.uid !in contactIds }
             } catch (e: Exception) {

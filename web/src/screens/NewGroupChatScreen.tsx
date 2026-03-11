@@ -68,44 +68,45 @@ export default function NewGroupChatScreen() {
   }
 
   return (
-    <div style={{ maxWidth: 600, margin: "0 auto", fontFamily: "'Roboto', system-ui, -apple-system, sans-serif" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#fff", fontFamily: "'Roboto', system-ui, -apple-system, sans-serif", position: "relative" }}>
       {/* Header */}
       <div style={{
-        background: "#517da2",
-        padding: "10px 16px",
+        padding: "8px 8px 0",
         display: "flex",
         alignItems: "center",
-        gap: 16,
-        color: "#fff",
+        gap: 4,
       }}>
-        <button onClick={() => navigate("/app")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 0 }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <button onClick={() => navigate("/app")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 10, borderRadius: "50%", color: "#707579" }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#707579" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
-        <span style={{ fontSize: 18, fontWeight: 500 }}>{t.newGroupChat || "New Group"}</span>
+        <span style={{ fontSize: 15, fontWeight: 500, color: "#000" }}>{t.newGroupChat || "New Group"}</span>
       </div>
 
       {/* Group name input */}
-      <div style={{ padding: "16px 16px 8px" }}>
-        <input
-          value={groupName}
-          onChange={(e) => setGroupName(e.target.value)}
-          placeholder={t.groupNamePlaceholder || "Group name..."}
-          style={{
-            width: "100%",
-            padding: "12px 0",
-            fontSize: 16,
-            border: "none",
-            borderBottom: "2px solid #3390ec",
-            outline: "none",
-            boxSizing: "border-box",
-            color: "#000",
-          }}
-        />
+      <div style={{ padding: "8px 8px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", background: "#f4f4f5", borderRadius: 22, padding: "0 12px" }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#707579" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/><line x1="20" y1="8" x2="20" y2="14"/></svg>
+          <input
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder={t.groupNamePlaceholder || "Group name..."}
+            style={{
+              flex: 1,
+              padding: "9px 8px",
+              fontSize: 14,
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              boxSizing: "border-box",
+              color: "#000",
+            }}
+          />
+        </div>
       </div>
 
       {/* Selected chips */}
       {selected.size > 0 && (
-        <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ padding: "8px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
           {contacts.filter((c) => selected.has(c.uid)).map((c) => (
             <span
               key={c.uid}
@@ -129,18 +130,18 @@ export default function NewGroupChatScreen() {
         </div>
       )}
 
-      <div style={{ fontSize: 13, color: "#707579", padding: "8px 16px" }}>
+      <div style={{ fontSize: 14, color: "#3390ec", fontWeight: 500, padding: "8px 8px" }}>
         {t.selectMembers || "Select members"} ({selected.size})
       </div>
 
       {/* Contacts */}
-      {loading ? (
-        <div style={{ textAlign: "center", color: "#707579", padding: 40, fontSize: 14 }}>
-          {t.loading || "Loading..."}
-        </div>
-      ) : (
-        <div>
-          {contacts.map((c) => {
+      <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
+        {loading ? (
+          <div style={{ textAlign: "center", color: "#707579", padding: 40, fontSize: 14 }}>
+            {t.loading || "Loading..."}
+          </div>
+        ) : (
+          contacts.map((c) => {
             const isSelected = selected.has(c.uid);
             return (
               <button
@@ -150,10 +151,10 @@ export default function NewGroupChatScreen() {
                   display: "flex",
                   alignItems: "center",
                   width: "100%",
-                  padding: "8px 16px",
+                  padding: "7px 8px",
                   background: "none",
                   border: "none",
-                  borderBottom: "1px solid #f0f0f0",
+                  borderRadius: 10,
                   cursor: "pointer",
                   textAlign: "left",
                   transition: "background 0.15s",
@@ -163,10 +164,10 @@ export default function NewGroupChatScreen() {
               >
                 <div style={{ position: "relative", marginRight: 12, flexShrink: 0 }}>
                   <div style={{
-                    width: 46, height: 46, borderRadius: "50%",
+                    width: 54, height: 54, borderRadius: "50%",
                     background: avatarColor(c.displayName),
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 20, fontWeight: 500, color: "#fff",
+                    fontSize: 22, fontWeight: 500, color: "#fff",
                   }}>
                     {c.displayName.charAt(0).toUpperCase()}
                   </div>
@@ -183,22 +184,22 @@ export default function NewGroupChatScreen() {
                   )}
                 </div>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 400, color: "#000" }}>{c.displayName}</div>
+                  <div style={{ fontSize: 15, fontWeight: 400, color: "#000" }}>{c.displayName}</div>
                 </div>
               </button>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </div>
 
       {/* Create button — floating at bottom */}
       {selected.size > 0 && groupName.trim() && (
-        <div style={{ position: "fixed", bottom: 72, right: 24, zIndex: 50 }}>
+        <div style={{ position: "absolute", bottom: 24, right: 16, zIndex: 50 }}>
           <button
             onClick={createGroup}
             disabled={creating}
             style={{
-              width: 56, height: 56, borderRadius: "50%",
+              width: 54, height: 54, borderRadius: "50%",
               background: "#3390ec", color: "#fff",
               border: "none", cursor: creating ? "default" : "pointer",
               boxShadow: "0 4px 12px rgba(51,144,236,0.4)",

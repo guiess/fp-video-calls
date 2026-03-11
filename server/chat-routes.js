@@ -83,6 +83,39 @@ async function sendFcmToUids(uids, data) {
   );
 }
 
+// ── GET /api/chat/search-user?email=X — Search user by exact email match ────
+
+router.get("/search-user", async (req, res) => {
+  const { email } = req.query;
+  if (!email || typeof email !== "string" || !email.includes("@")) {
+    return res.status(400).json({ ok: false, error: "INVALID_EMAIL" });
+  }
+  try {
+    // Use Firebase Auth Admin to look up user by email (exact match)
+    const userRecord = await admin.auth().getUserByEmail(email.trim().toLowerCase());
+    if (userRecord.uid === req.uid) {
+      return res.json({ ok: true, user: null }); // Don't return self
+    }
+    // Get public profile from Firestore
+    const userDoc = await admin.firestore().collection("users").doc(userRecord.uid).get();
+    const data = userDoc.data() || {};
+    return res.json({
+      ok: true,
+      user: {
+        uid: userRecord.uid,
+        displayName: data.displayName || userRecord.displayName || "",
+        photoUrl: data.photoUrl || data.photoURL || userRecord.photoURL || "",
+      },
+    });
+  } catch (e) {
+    if (e.code === "auth/user-not-found") {
+      return res.json({ ok: true, user: null });
+    }
+    console.error("[search-user] failed", e);
+    return res.status(500).json({ ok: false, error: "SEARCH_FAILED" });
+  }
+});
+
 // ── POST /api/chat/conversations — Create conversation ─────────────────────
 
 router.post("/conversations", (req, res) => {
