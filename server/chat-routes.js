@@ -561,6 +561,17 @@ router.delete("/conversations/:id", (req, res) => {
   ).get(id);
 
   if (remaining.cnt === 0) {
+    // Clean up uploaded files before deleting messages
+    const filesRows = db.prepare(
+      "SELECT media_url FROM messages WHERE conversation_id = ? AND media_url IS NOT NULL"
+    ).all(id);
+    for (const f of filesRows) {
+      try {
+        const fileName = f.media_url.split("/").pop();
+        const filePath = path.join(UPLOAD_DIR, fileName);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch (_) {}
+    }
     db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(id);
     db.prepare("DELETE FROM read_receipts WHERE conversation_id = ?").run(id);
     db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
