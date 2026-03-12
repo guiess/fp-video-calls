@@ -8,6 +8,8 @@ import { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
 import cors from "cors";
 import bcrypt from "bcryptjs";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import admin from "firebase-admin";
 import chatRoutes from "./chat-routes.js";
 import { UPLOAD_DIR } from "./chat-routes.js";
@@ -89,6 +91,29 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "20mb" }));
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP would break WebRTC/WebSocket
+  crossOriginEmbedderPolicy: false,
+}));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api/", apiLimiter);
+
+const roomLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20, // 20 room creates per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/room", roomLimiter);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -329,6 +354,8 @@ app.get("/api/chat/files/:name", (req, res) => {
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   }
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition", `attachment; filename="${path.basename(req.params.name)}"`);
   return res.sendFile(filePath);
 });
 

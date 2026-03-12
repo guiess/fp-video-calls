@@ -362,9 +362,13 @@ router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const row = db.prepare("SELECT media_url FROM messages WHERE id = ? AND conversation_id = ?").get(msgId, id);
+  const row = db.prepare("SELECT sender_uid, media_url FROM messages WHERE id = ? AND conversation_id = ?").get(msgId, id);
   if (!row) {
     return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  }
+  // Only the sender can delete their own messages
+  if (row.sender_uid !== req.uid) {
+    return res.status(403).json({ ok: false, error: "NOT_SENDER" });
   }
 
   // Delete file from disk if exists
@@ -513,9 +517,17 @@ router.delete("/conversations/:id/members/:memberUid", (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const convo = db.prepare("SELECT type FROM conversations WHERE id = ?").get(id);
+  const convo = db.prepare("SELECT type, created_at FROM conversations WHERE id = ?").get(id);
   if (!convo || convo.type !== "group") {
     return res.status(400).json({ ok: false, error: "NOT_GROUP" });
+  }
+
+  // Only the group creator (first participant by joined_at) can remove others
+  const creator = db.prepare(
+    "SELECT user_uid FROM conversation_participants WHERE conversation_id = ? ORDER BY joined_at ASC LIMIT 1"
+  ).get(id);
+  if (creator?.user_uid !== uid && memberUid !== uid) {
+    return res.status(403).json({ ok: false, error: "NOT_ADMIN" });
   }
 
   db.prepare(
@@ -570,12 +582,25 @@ router.post("/upload", (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
+  // File size validation (10MB max)
+  const buffer = Buffer.from(data, "base64");
+  if (buffer.length > 10 * 1024 * 1024) {
+    return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: "10MB" });
+  }
+
+  // Extension allowlist
+  const ext = path.extname(fileName).toLowerCase();
+  const allowedExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic",
+    ".mp4", ".mov", ".webm", ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+    ".ppt", ".pptx", ".txt", ".zip", ".rar", ".7z", ".mp3", ".wav", ".ogg"];
+  if (ext && !allowedExts.includes(ext)) {
+    return res.status(400).json({ ok: false, error: "FILE_TYPE_NOT_ALLOWED" });
+  }
+
   try {
     const fileId = crypto.randomUUID();
-    const ext = path.extname(fileName) || "";
     const storedName = fileId + ext;
     const filePath = path.join(UPLOAD_DIR, storedName);
-    const buffer = Buffer.from(data, "base64");
     fs.writeFileSync(filePath, buffer);
 
     const downloadUrl = `/api/chat/files/${storedName}`;
