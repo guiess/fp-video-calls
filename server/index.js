@@ -73,12 +73,12 @@ app.use((req, res, next) => {
       ? true
       : allowlist.includes(origin);
 
-  // Echo allowed origin or fallback to "*"
   if (allowed && origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
-  } else {
+  } else if (allowlist.length === 0) {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
+  // If origin is not allowed and allowlist is set, don't set Access-Control-Allow-Origin
 
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   const allowHeaders = process.env.CORS_ALLOW_HEADERS || "Content-Type, Authorization";

@@ -595,8 +595,8 @@ router.post("/upload", (req, res) => {
 
   // File size validation (10MB max)
   const buffer = Buffer.from(data, "base64");
-  if (buffer.length > 10 * 1024 * 1024) {
-    return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: "10MB" });
+  if (buffer.length > 20 * 1024 * 1024) {
+    return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: "20MB" });
   }
 
   // Extension allowlist
