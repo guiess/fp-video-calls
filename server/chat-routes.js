@@ -253,7 +253,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize, plaintext, replyToId } = req.body || {};
+  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize, replyToId } = req.body || {};
 
   if (!type || !["text", "image", "file"].includes(type)) {
     return res.status(400).json({ ok: false, error: "BAD_TYPE" });
@@ -268,7 +268,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
   db.prepare(`
     INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, media_url, file_name, file_size, plaintext, reply_to_id, timestamp)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, plaintext || null, replyToId || null, now);
+  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, null, replyToId || null, now);
 
   db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(now, id);
 
@@ -281,7 +281,6 @@ router.post("/conversations/:id/messages", async (req, res) => {
     ciphertext,
     iv,
     encryptedKeys,
-    plaintext: plaintext || null,
     mediaUrl: mediaUrl || null,
     fileName: fileName || null,
     fileSize: fileSize || null,

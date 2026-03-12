@@ -104,11 +104,13 @@ export function ensureChatSocket(): Socket {
   return chatSocket;
 }
 
-/** Send chat_auth once we have a uid. Called on connect and can be called later. */
-export function authenticateSocket() {
+/** Send chat_auth with Firebase ID token. Called on connect and can be called later. */
+export async function authenticateSocket() {
   const uid = auth.currentUser?.uid;
   if (uid && chatSocket?.connected) {
-    chatSocket.emit("chat_auth", { uid });
+    let token: string | undefined;
+    try { token = await auth.currentUser?.getIdToken(); } catch {}
+    chatSocket.emit("chat_auth", { uid, token });
     console.log("[chat-socket] authenticated as", uid);
   }
 }

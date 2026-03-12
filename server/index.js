@@ -395,13 +395,25 @@ app.get("/room/:roomId/meta", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  // Chat: user identifies themselves so we can deliver chat messages
-  socket.on("chat_auth", ({ uid }) => {
-    if (uid) {
-      socket.join(`user:${uid}`);
-      socket._chatUid = uid;
-      console.log(`[chat] ${uid} joined user room via socket ${socket.id}`);
+  // Chat: user identifies themselves with Firebase ID token
+  socket.on("chat_auth", async ({ uid, token }) => {
+    if (!uid) return;
+    // Verify token if Firebase Admin is ready and token is provided
+    if (firebaseReady && token) {
+      try {
+        const decoded = await admin.auth().verifyIdToken(token);
+        if (decoded.uid !== uid) {
+          console.warn(`[chat] Token UID mismatch: claimed ${uid}, actual ${decoded.uid}`);
+          return socket.emit("error", { code: "AUTH_FAILED" });
+        }
+      } catch (e) {
+        console.warn(`[chat] Token verification failed for ${uid}:`, e.message);
+        return socket.emit("error", { code: "AUTH_FAILED" });
+      }
     }
+    socket.join(`user:${uid}`);
+    socket._chatUid = uid;
+    console.log(`[chat] ${uid} joined user room via socket ${socket.id}`);
   });
 
   // Chat: typing indicator

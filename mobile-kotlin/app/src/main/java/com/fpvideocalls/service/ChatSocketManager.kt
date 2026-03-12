@@ -5,6 +5,8 @@ import com.fpvideocalls.util.ChatEventBus
 import com.fpvideocalls.util.Constants
 import io.socket.client.IO
 import io.socket.client.Socket
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 import java.net.URI
 
@@ -37,7 +39,18 @@ object ChatSocketManager {
             socket = IO.socket(URI.create(Constants.SIGNALING_URL), opts).apply {
                 on(Socket.EVENT_CONNECT) {
                     Log.d(TAG, "Connected, authenticating uid=$uid")
-                    emit("chat_auth", JSONObject().apply { put("uid", uid) })
+                    // Send Firebase ID token for server-side verification
+                    kotlinx.coroutines.MainScope().launch {
+                        val token = try {
+                            com.google.firebase.auth.FirebaseAuth.getInstance()
+                                .currentUser?.getIdToken(false)
+                                ?.await()?.token
+                        } catch (_: Exception) { null }
+                        emit("chat_auth", JSONObject().apply {
+                            put("uid", uid)
+                            if (token != null) put("token", token)
+                        })
+                    }
                 }
 
                 on("chat_message") { args ->

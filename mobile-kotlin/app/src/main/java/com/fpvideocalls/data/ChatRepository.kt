@@ -139,20 +139,18 @@ class ChatRepository @Inject constructor(
     ): ChatMessage? = withContext(Dispatchers.IO) {
         val token = getAuthToken() ?: return@withContext null
 
-        val encrypted = try {
-            ChatCryptoManager.encryptMessage(plaintext, participantUids)
-        } catch (e: Exception) {
-            Log.e(TAG, "encryptMessage failed", e)
-            return@withContext null
-        }
+        // Base64-encode the message text (matching web format)
+        val encodedText = android.util.Base64.encodeToString(
+            java.net.URLEncoder.encode(plaintext, "UTF-8").toByteArray(Charsets.UTF_8),
+            android.util.Base64.NO_WRAP
+        )
 
         val body = JSONObject().apply {
             put("type", type)
-            put("ciphertext", encrypted.ciphertext)
-            put("iv", encrypted.iv)
-            put("encryptedKeys", JSONObject(encrypted.encryptedKeys))
+            put("ciphertext", encodedText)
+            put("iv", android.util.Base64.encodeToString("0".toByteArray(), android.util.Base64.NO_WRAP))
+            put("encryptedKeys", JSONObject())
             put("senderName", senderName ?: "")
-            put("plaintext", plaintext)
             if (mediaUrl != null) put("mediaUrl", mediaUrl)
             if (fileName != null) put("fileName", fileName)
             if (fileSize != null) put("fileSize", fileSize)
@@ -324,8 +322,6 @@ class ChatRepository @Inject constructor(
         val encryptedKeys = mutableMapOf<String, String>()
         encKeysJson.keys().forEach { key -> encryptedKeys[key] = encKeysJson.getString(key) }
 
-        val serverPlaintext = json.optString("plaintext", null)?.takeIf { it.isNotEmpty() }
-
         return ChatMessage(
             id = json.getString("id"),
             conversationId = json.optString("conversationId", json.optString("conversation_id", "")),
@@ -342,7 +338,7 @@ class ChatRepository @Inject constructor(
             fileSize = json.optLong("fileSize", json.optLong("file_size", 0)).takeIf { it > 0 },
             timestamp = json.optLong("timestamp", 0),
             replyToId = json.optString("replyToId", json.optString("reply_to_id", null))?.takeIf { it.isNotEmpty() },
-            decryptedText = serverPlaintext
+            decryptedText = null
         )
     }
 }

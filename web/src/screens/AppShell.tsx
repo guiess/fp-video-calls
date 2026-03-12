@@ -195,10 +195,11 @@ export default function AppShell() {
 
   function getPreview(c: Conversation): string {
     if (!c.lastMessage) return t.noMessages || "No messages yet";
-    if (c.lastMessage.plaintext) return c.lastMessage.plaintext;
-    if (c.lastMessage.type === "image") return "Photo";
-    if (c.lastMessage.type === "file") return "File";
-    return "Encrypted message";
+    if (c.lastMessage.type === "image") return "📷 Photo";
+    if (c.lastMessage.type === "file") return "📎 File";
+    try { return decodeURIComponent(atob(c.lastMessage.ciphertext)); } catch {}
+    try { return atob(c.lastMessage.ciphertext); } catch {}
+    return "🔒 Encrypted message";
   }
 
   function formatTime(ts?: number): string {

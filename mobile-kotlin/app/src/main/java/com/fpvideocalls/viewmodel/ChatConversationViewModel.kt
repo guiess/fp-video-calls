@@ -124,8 +124,24 @@ class ChatConversationViewModel @Inject constructor(
                     val r = ChatCryptoManager.decryptMessage(
                         msg.ciphertext, msg.iv, msg.encryptedKeys, msg.senderUid
                     )
-                    msg.copy(decryptedText = r?.plaintext ?: msg.decryptedText)
-                } catch (_: Exception) { msg }
+                    if (r?.plaintext != null) {
+                        msg.copy(decryptedText = r.plaintext)
+                    } else {
+                        // Fallback: try base64 decode (web sends btoa-encoded text)
+                        val decoded = try {
+                            val bytes = android.util.Base64.decode(msg.ciphertext, android.util.Base64.DEFAULT)
+                            java.net.URLDecoder.decode(String(bytes, Charsets.UTF_8), "UTF-8")
+                        } catch (_: Exception) { null }
+                        msg.copy(decryptedText = decoded ?: msg.decryptedText)
+                    }
+                } catch (_: Exception) {
+                    // Fallback: try base64 decode
+                    val decoded = try {
+                        val bytes = android.util.Base64.decode(msg.ciphertext, android.util.Base64.DEFAULT)
+                        java.net.URLDecoder.decode(String(bytes, Charsets.UTF_8), "UTF-8")
+                    } catch (_: Exception) { null }
+                    msg.copy(decryptedText = decoded ?: msg.decryptedText)
+                }
             }
             if (before != null) {
                 _messages.value = (_messages.value + decrypted).distinctBy { it.id }

@@ -149,7 +149,14 @@ private fun ConversationItem(
             }
         }
     }
-    val preview = conversation.lastMessage?.decryptedText
+    val preview = conversation.lastMessage?.decryptedText ?: run {
+        // Try base64 decode for preview (both platforms use btoa encoding)
+        val ct = conversation.lastMessage?.ciphertext ?: return@run null
+        try {
+            val bytes = android.util.Base64.decode(ct, android.util.Base64.DEFAULT)
+            java.net.URLDecoder.decode(String(bytes, Charsets.UTF_8), "UTF-8")
+        } catch (_: Exception) { null }
+    }
     val isGroup = conversation.type == "group"
 
     Box {
