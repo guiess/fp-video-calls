@@ -42,11 +42,14 @@ try {
 
 const app = express();
 app.set("trust proxy", 1);
-// Dev/Prod CORS: allowlist via env, fallback to permissive during dev
+// CORS: allowlist via env, warn if permissive
 const allowlist = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
   .split(",")
   .map(s => s.trim())
   .filter(Boolean);
+if (allowlist.length === 0) {
+  console.warn("[security] CORS_ORIGINS not set — accepting all origins. Set CORS_ORIGINS in production!");
+}
 const allowCredentials = (process.env.CORS_CREDENTIALS || "false").toLowerCase() === "true";
 const corsOptions = {
   origin: (origin, cb) => {
