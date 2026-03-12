@@ -2,23 +2,22 @@
  * E2E Encryption using Web Crypto API.
  * Compatible with the mobile app's X25519 + AES-256-GCM scheme.
  *
+ * Key wrapping format (must match mobile Kotlin):
+ *   [1-byte IV-length][IV bytes][wrapped key bytes]
+ *
  * Note: Web Crypto X25519 support varies by browser. For browsers without
  * native X25519, we fall back to plaintext (server stores plaintext column).
  */
 
+import {
+  arrayBufferToBase64,
+  base64ToArrayBuffer,
+  packWrappedKey,
+  unpackWrappedKey,
+} from "./encryptionHelpers";
+
 let keyPair: CryptoKeyPair | null = null;
 let publicKeyBase64: string | null = null;
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
-}
-
-function base64ToArrayBuffer(b64: string): ArrayBuffer {
-  const bin = atob(b64);
-  const buf = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-  return buf.buffer;
-}
 
 /** Check if browser supports X25519 */
 async function supportsX25519(): Promise<boolean> {
@@ -118,10 +117,8 @@ export async function encryptMessage(
           rawAesKey
         );
 
-        // Combine IV + encrypted key
-        const combined = new Uint8Array(12 + wrappedKey.byteLength);
-        combined.set(wrappedIv, 0);
-        combined.set(new Uint8Array(wrappedKey), 12);
+        // Pack as mobile-compatible format: [1-byte IV-len][IV][wrapped key]
+        const combined = packWrappedKey(wrappedIv, new Uint8Array(wrappedKey));
         encryptedKeys[uid] = arrayBufferToBase64(combined.buffer);
       } catch (err) {
         console.warn(`[encryption] Failed to encrypt key for ${uid}`, err);
@@ -171,10 +168,9 @@ export async function decryptMessage(
       ["decrypt"]
     );
 
-    // Split IV + encrypted AES key
+    // Unpack mobile-compatible format: [1-byte IV-len][IV][wrapped key]
     const combined = new Uint8Array(base64ToArrayBuffer(encryptedKeyForMe));
-    const wrappedIv = combined.slice(0, 12);
-    const wrappedKey = combined.slice(12);
+    const { iv: wrappedIv, wrappedKey } = unpackWrappedKey(combined);
 
     const rawAesKey = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: wrappedIv },

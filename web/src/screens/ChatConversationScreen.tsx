@@ -5,6 +5,8 @@ import { useLanguage } from "../i18n/LanguageContext";
 import { apiFetch, getBaseUrl } from "../services/api";
 import { subscribeChatEvents, emitTyping, ChatMessageEvent } from "../services/chatSocket";
 import { fetchContacts, addContact } from "../services/contacts";
+import { encryptMessage, decryptMessage, getOrCreateKeyPair } from "../services/encryption";
+import { getPublicKeysForUsers, getPublicKeyForUser, resolveDisplayText } from "../services/encryptionHelpers";
 
 interface Message {
   id: string;
@@ -21,6 +23,7 @@ interface Message {
   replyToId?: string;
   timestamp: number;
   pending?: boolean;
+  decryptedText?: string; // E2E decrypted plaintext (set client-side)
 }
 
 interface ConversationDetail {
@@ -55,6 +58,67 @@ export default function ChatConversationScreen() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialScrollDone = useRef(false);
+
+  // E2E encryption: cache of uid → base64 public key (avoids repeated Firestore reads)
+  const publicKeyCache = useRef<Record<string, string | null>>({});
+
+  /** Fetch a user's public key, using cache to avoid repeated Firestore reads */
+  async function getCachedPublicKey(uid: string): Promise<string | null> {
+    if (uid in publicKeyCache.current) return publicKeyCache.current[uid];
+    const key = await getPublicKeyForUser(uid);
+    publicKeyCache.current[uid] = key;
+    return key;
+  }
+
+  /**
+   * Try to E2E-decrypt a single message.
+   * Returns the decrypted plaintext, or null if decryption fails/not possible.
+   */
+  async function tryDecryptMessage(msg: Message): Promise<string | null> {
+    if (!user) return null;
+    // Skip if already decrypted or has plaintext
+    if (msg.decryptedText || msg.plaintext) return msg.decryptedText || msg.plaintext || null;
+    // Need: our encrypted key, sender's public key, ciphertext, and IV
+    const myEncryptedKey = msg.encryptedKeys?.[user.uid];
+    if (!myEncryptedKey || !msg.ciphertext || !msg.iv) return null;
+    const senderPubKey = await getCachedPublicKey(msg.senderUid);
+    if (!senderPubKey) return null;
+    return decryptMessage(msg.ciphertext, msg.iv, myEncryptedKey, senderPubKey);
+  }
+
+  /**
+   * Decrypt a batch of messages in parallel and update state with results.
+   * Only attempts decryption on messages that have encrypted keys for us.
+   */
+  async function decryptMessagesInPlace(msgs: Message[]): Promise<void> {
+    if (!user) return;
+    const toDecrypt = msgs.filter(
+      (m) => !m.decryptedText && !m.plaintext && m.encryptedKeys?.[user.uid]
+    );
+    if (toDecrypt.length === 0) return;
+
+    const results = await Promise.allSettled(
+      toDecrypt.map(async (m) => ({
+        id: m.id,
+        text: await tryDecryptMessage(m),
+      }))
+    );
+
+    const decryptedMap: Record<string, string> = {};
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.text) {
+        decryptedMap[result.value.id] = result.value.text;
+      }
+    }
+
+    if (Object.keys(decryptedMap).length > 0) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          decryptedMap[m.id] ? { ...m, decryptedText: decryptedMap[m.id] } : m
+        )
+      );
+    }
+  }
 
   const scrollToBottom = useCallback((instant = false) => {
     const el = messagesContainerRef.current;
@@ -91,6 +155,8 @@ export default function ChatConversationScreen() {
             return [...withoutPending, msg];
           });
           scrollToBottom();
+          // Attempt to decrypt the incoming message
+          decryptMessagesInPlace([msg as Message]);
           // Only mark as read if this message is from someone else and chat is visible
           if (msg.senderUid !== user?.uid && document.visibilityState === "visible") {
             markAsRead();
@@ -159,9 +225,12 @@ export default function ChatConversationScreen() {
       const res = await apiFetch(`/api/chat/conversations/${id}/messages?limit=50`);
       if (res.ok) {
         const data = await res.json();
-        setMessages((data.messages || []).reverse());
+        const msgs: Message[] = (data.messages || []).reverse();
+        setMessages(msgs);
         setHasMore(data.hasMore ?? false);
         if (data.readReceipts) setReadReceipts(data.readReceipts);
+        // Attempt E2E decryption on loaded messages
+        decryptMessagesInPlace(msgs);
       }
     } catch (err) {
       console.warn("[chat] load messages failed", err);
@@ -178,7 +247,7 @@ export default function ChatConversationScreen() {
       const res = await apiFetch(`/api/chat/conversations/${id}/messages?limit=50&before=${oldest}`);
       if (res.ok) {
         const data = await res.json();
-        const older = (data.messages || []).reverse();
+        const older: Message[] = (data.messages || []).reverse();
         if (older.length > 0) {
           // Preserve scroll position: remember distance from top before prepending
           const el = messagesContainerRef.current;
@@ -188,6 +257,8 @@ export default function ChatConversationScreen() {
           requestAnimationFrame(() => {
             if (el) el.scrollTop = el.scrollHeight - prevHeight;
           });
+          // Attempt E2E decryption on older messages
+          decryptMessagesInPlace(older);
         }
         setHasMore(data.hasMore ?? false);
       }
@@ -216,6 +287,42 @@ export default function ChatConversationScreen() {
     window.dispatchEvent(new CustomEvent("chat-read", { detail: { chatId: id } }));
   }
 
+  /**
+   * Encrypt a message for all participants in the current conversation.
+   *
+   * Fetches public keys for all participants (including self) from Firestore,
+   * then calls encryptMessage(). Returns null if encryption is unavailable
+   * (browser doesn't support X25519 or no key pair generated).
+   */
+  async function tryEncryptForConversation(
+    text: string
+  ): Promise<{ ciphertext: string; iv: string; encryptedKeys: Record<string, string> } | null> {
+    if (!conversation || !user) return null;
+
+    // Ensure we have our own key pair
+    const ourKeys = await getOrCreateKeyPair();
+    if (!ourKeys) return null;
+
+    // Collect all participant UIDs (including self — so we can decrypt our own messages)
+    const allUids = conversation.participants.map((p) => p.user_uid);
+
+    // Fetch public keys for all participants
+    const publicKeys = await getPublicKeysForUsers(allUids);
+
+    // Update cache with fetched keys
+    for (const [uid, key] of Object.entries(publicKeys)) {
+      publicKeyCache.current[uid] = key;
+    }
+
+    // We need at least our own key to encrypt
+    if (Object.keys(publicKeys).length === 0) {
+      console.warn("[chat] No public keys found for any participant");
+      return null;
+    }
+
+    return encryptMessage(text, publicKeys);
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || !user) return;
@@ -228,6 +335,7 @@ export default function ChatConversationScreen() {
       senderName: user.displayName || "User",
       type: "text",
       plaintext: text,
+      decryptedText: text,
       ciphertext: "",
       iv: "",
       encryptedKeys: {},
@@ -241,14 +349,32 @@ export default function ChatConversationScreen() {
     scrollToBottom();
 
     try {
-      const body: any = {
-        type: "text",
-        ciphertext: btoa(encodeURIComponent(text)),
-        iv: btoa("0"),
-        encryptedKeys: {},
-        senderName: user.displayName || "User",
-        plaintext: text,
-      };
+      // Attempt E2E encryption
+      let body: any;
+      const encrypted = await tryEncryptForConversation(text);
+
+      if (encrypted) {
+        // Real E2E encryption succeeded
+        body = {
+          type: "text",
+          ciphertext: encrypted.ciphertext,
+          iv: encrypted.iv,
+          encryptedKeys: encrypted.encryptedKeys,
+          senderName: user.displayName || "User",
+        };
+      } else {
+        // Fallback: btoa encoding (browser doesn't support X25519 or no keys available)
+        console.warn("[chat] E2E encryption unavailable — sending with btoa fallback");
+        body = {
+          type: "text",
+          ciphertext: btoa(encodeURIComponent(text)),
+          iv: btoa("0"),
+          encryptedKeys: {},
+          senderName: user.displayName || "User",
+          plaintext: text,
+        };
+      }
+
       if (pendingMsg.replyToId) {
         body.replyToId = pendingMsg.replyToId;
       }
@@ -265,7 +391,7 @@ export default function ChatConversationScreen() {
             // Socket already delivered — just remove the pending one
             return prev.filter((m) => m.id !== tempId);
           }
-          return prev.map((m) => (m.id === tempId ? { ...data.message, pending: false } : m));
+          return prev.map((m) => (m.id === tempId ? { ...data.message, decryptedText: text, pending: false } : m));
         });
       } else {
         // Mark as failed (remove pending flag but keep message)
@@ -357,8 +483,7 @@ export default function ChatConversationScreen() {
   }
 
   function getDisplayText(m: Message): string {
-    if (m.plaintext) return m.plaintext;
-    try { return atob(m.ciphertext); } catch { return "Encrypted message"; }
+    return resolveDisplayText(m);
   }
 
   function getConversationTitle(): string {
