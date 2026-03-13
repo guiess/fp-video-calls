@@ -225,20 +225,40 @@ app.post("/api/call/invite", requireAuth, async (req, res) => {
   }
   const callUUID = crypto.randomUUID();
   try {
-    // Emit socket event for web clients (always works, even without FCM)
+    // Emit socket event for web clients
+    const invitePayload = {
+      callUUID,
+      callerId: String(callerId),
+      callerName: String(callerName),
+      callerPhoto: String(callerPhoto || ""),
+      roomId: String(roomId),
+      callType: String(callType || "direct"),
+      roomPassword: String(roomPassword || ""),
+    };
+    const emptyRoomUids = [];
     for (const uid of calleeUids) {
       const room = `user:${uid}`;
       const sockets = await io.in(room).fetchSockets();
       console.log(`[call/invite] emitting call_invite to ${room}, sockets in room: ${sockets.length}`);
-      io.to(room).emit("call_invite", {
-        callUUID,
-        callerId: String(callerId),
-        callerName: String(callerName),
-        callerPhoto: String(callerPhoto || ""),
-        roomId: String(roomId),
-        callType: String(callType || "direct"),
-        roomPassword: String(roomPassword || ""),
-      });
+      io.to(room).emit("call_invite", invitePayload);
+      if (sockets.length === 0) emptyRoomUids.push(uid);
+    }
+
+    // Retry socket emit for users with 0 sockets (may be reconnecting after idle)
+    if (emptyRoomUids.length > 0) {
+      const retryEmit = async (delaySec) => {
+        await new Promise(r => setTimeout(r, delaySec * 1000));
+        for (const uid of emptyRoomUids) {
+          const room = `user:${uid}`;
+          const sockets = await io.in(room).fetchSockets();
+          if (sockets.length > 0) {
+            console.log(`[call/invite] RETRY emit to ${room} after ${delaySec}s, sockets: ${sockets.length}`);
+            io.to(room).emit("call_invite", invitePayload);
+          }
+        }
+      };
+      retryEmit(2);
+      retryEmit(5);
     }
 
     // Send FCM push notifications (only if Firebase Admin is configured)

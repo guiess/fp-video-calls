@@ -61,7 +61,20 @@ class FcmService : FirebaseMessagingService() {
 
         CallEventBus.post(CallEvent.Invite(callData))
         NotificationHelper.createCallChannel(applicationContext)
-        CallRingingService.start(applicationContext, callData)
+
+        // Show notification first — on Android 14+ this is needed before starting foreground service
+        NotificationHelper.showCallNotification(
+            applicationContext, callData.callerName, callData.callType.value,
+            callData.roomId, callData.callUUID, callData.callerId,
+            callData.callerPhoto, callData.roomPassword
+        )
+
+        try {
+            CallRingingService.start(applicationContext, callData)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start ringing service (background restriction?)", e)
+            // Notification is already showing — user can tap it to answer
+        }
 
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
             launchIncomingCallActivity(callData)
