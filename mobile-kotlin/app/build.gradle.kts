@@ -39,6 +39,22 @@ android {
         jvmTarget = "17"
     }
 
+    // Only include arm64 to reduce APK size (WebRTC native lib is ~11MB per ABI)
+    // x86/x86_64 are only needed for emulators
+    defaultConfig {
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
