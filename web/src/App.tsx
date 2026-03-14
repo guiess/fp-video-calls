@@ -292,10 +292,8 @@ export default function App() {
           </div>
         )}
 
-        <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid #e2e8f0", textAlign: "center", display: "flex", justifyContent: "center", gap: "16px" }}>
+        <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid #e2e8f0", textAlign: "center" }}>
           <a href="/login" style={{ color: "#667eea", textDecoration: "none", fontSize: "14px", fontWeight: "600" }}>{t.signIn || "Sign In"}</a>
-          <span style={{ color: "#e2e8f0" }}>|</span>
-          <a href="/dev" style={{ color: "#667eea", textDecoration: "none", fontSize: "14px", fontWeight: "500" }}>{t.switchToClassicView}</a>
         </div>
 
         {/* Language Switcher */}
