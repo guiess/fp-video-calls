@@ -130,7 +130,7 @@ fun LocationViewScreen(
                             )
                         }
 
-                        items(history, key = { it.timestamp }) { point ->
+                        items(history, key = { it.id.ifEmpty { "${it.timestamp}_${it.lat}" } }) { point ->
                             HistoryItem(
                                 location = point,
                                 contactName = contactName

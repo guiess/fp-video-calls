@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.tasks.await
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -88,6 +89,7 @@ private fun ContactsContent(
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showRemoveDialog by remember { mutableStateOf<Contact?>(null) }
+    var locationAvailableUids by remember { mutableStateOf(setOf<String>()) }
 
     LaunchedEffect(user) {
         try {
@@ -95,6 +97,23 @@ private fun ContactsContent(
         } catch (e: Exception) {
             android.util.Log.e("ContactsScreen", "Failed to subscribe to contacts", e)
         }
+    }
+
+    // Check which contacts share location
+    LaunchedEffect(contacts) {
+        try {
+            val available = mutableSetOf<String>()
+            for (c in contacts) {
+                try {
+                    val doc = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                        .collection("users").document(c.uid)
+                        .collection("location").document("current")
+                        .get().await()
+                    if (doc.exists()) available.add(c.uid)
+                } catch (_: Exception) {}
+            }
+            locationAvailableUids = available
+        } catch (_: Exception) {}
     }
 
     Column(modifier = Modifier.fillMaxSize().background(Background)) {
@@ -143,6 +162,7 @@ private fun ContactsContent(
                         contact = contact,
                         onClick = { onChatContact(contact) },
                         onViewLocation = { onViewLocation(contact) },
+                        showLocation = contact.uid in locationAvailableUids,
                         onCall = { onCallContact(contact) },
                         onRemove = { showRemoveDialog = contact }
                     )
@@ -271,7 +291,7 @@ private fun ContactsContent(
 }
 
 @Composable
-private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onViewLocation: () -> Unit = {}, onCall: () -> Unit, onRemove: () -> Unit) {
+private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onViewLocation: () -> Unit = {}, showLocation: Boolean = false, onCall: () -> Unit, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -287,8 +307,10 @@ private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onViewLocatio
             fontSize = 16.sp,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = onViewLocation) {
-            Icon(Icons.Default.LocationOn, stringResource(R.string.view_location), tint = Purple)
+        if (showLocation) {
+            IconButton(onClick = onViewLocation) {
+                Icon(Icons.Default.LocationOn, stringResource(R.string.view_location), tint = Purple)
+            }
         }
         IconButton(onClick = onCall) {
             Icon(Icons.Default.Phone, stringResource(R.string.cd_call), tint = Purple)

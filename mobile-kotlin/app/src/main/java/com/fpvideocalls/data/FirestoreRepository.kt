@@ -377,6 +377,7 @@ class FirestoreRepository @Inject constructor(
             snapshot.documents.mapNotNull { doc ->
                 try {
                     LocationPoint(
+                        id = doc.id,
                         lat = doc.getDouble("lat") ?: return@mapNotNull null,
                         lng = doc.getDouble("lng") ?: return@mapNotNull null,
                         accuracy = (doc.getDouble("accuracy") ?: 0.0).toFloat(),

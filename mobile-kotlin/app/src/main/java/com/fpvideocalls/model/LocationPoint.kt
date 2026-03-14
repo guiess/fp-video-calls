@@ -5,6 +5,7 @@ package com.fpvideocalls.model
  * Stored at `users/{uid}/location/current` and `users/{uid}/locationHistory`.
  */
 data class LocationPoint(
+    val id: String = "",
     val lat: Double,
     val lng: Double,
     val accuracy: Float,
