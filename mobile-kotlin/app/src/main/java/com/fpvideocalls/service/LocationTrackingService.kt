@@ -72,33 +72,39 @@ class LocationTrackingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand called")
+        try {
+            Log.d(TAG, "onStartCommand called")
 
-        // Must call startForeground within 5 seconds of startForegroundService()
-        NotificationHelper.createLocationTrackingChannel(this)
-        val notification = NotificationHelper.buildLocationTrackingNotification(this)
-        startForeground(
-            Constants.LOCATION_TRACKING_NOTIFICATION_ID,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        )
+            // Must call startForeground within 5 seconds of startForegroundService()
+            NotificationHelper.createLocationTrackingChannel(this)
+            val notification = NotificationHelper.buildLocationTrackingNotification(this)
+            startForeground(
+                Constants.LOCATION_TRACKING_NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
 
-        // Check permissions before requesting location updates
-        if (!hasLocationPermission()) {
-            Log.w(TAG, "Location permission not granted — stopping service")
+            // Check permissions before requesting location updates
+            if (!hasLocationPermission()) {
+                Log.w(TAG, "Location permission not granted — stopping service")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            val uid = auth.currentUser?.uid
+            if (uid == null) {
+                Log.w(TAG, "No authenticated user — stopping service")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            startLocationUpdates(uid)
+            return START_STICKY
+        } catch (e: Exception) {
+            Log.e(TAG, "Service start failed", e)
             stopSelf()
             return START_NOT_STICKY
         }
-
-        val uid = auth.currentUser?.uid
-        if (uid == null) {
-            Log.w(TAG, "No authenticated user — stopping service")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        startLocationUpdates(uid)
-        return START_STICKY
     }
 
     private fun hasLocationPermission(): Boolean {

@@ -89,73 +89,79 @@ class CallRingingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand called")
-        if (intent == null) {
-            Log.w(TAG, "Intent is null, stopping service")
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        try {
+            Log.d(TAG, "onStartCommand called")
+            if (intent == null) {
+                Log.w(TAG, "Intent is null, stopping service")
+                stopSelf()
+                return START_NOT_STICKY
+            }
 
-        val callUUID = intent.getStringExtra("callUUID") ?: ""
-        if (IncomingCallState.isCancelledRecently(callUUID)) {
-            Log.d(TAG, "Ignoring ringing start for cancelled call $callUUID")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        val roomId = intent.getStringExtra("roomId") ?: ""
-        val callerId = intent.getStringExtra("callerId") ?: ""
-        val callerName = intent.getStringExtra("callerName") ?: "Unknown"
-        val callerPhoto = intent.getStringExtra("callerPhoto")?.takeIf { it.isNotEmpty() }
-        val callType = intent.getStringExtra("callType") ?: "direct"
-        val roomPassword = intent.getStringExtra("roomPassword")?.takeIf { it.isNotEmpty() }
+            val callUUID = intent.getStringExtra("callUUID") ?: ""
+            if (IncomingCallState.isCancelledRecently(callUUID)) {
+                Log.d(TAG, "Ignoring ringing start for cancelled call $callUUID")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            val roomId = intent.getStringExtra("roomId") ?: ""
+            val callerId = intent.getStringExtra("callerId") ?: ""
+            val callerName = intent.getStringExtra("callerName") ?: "Unknown"
+            val callerPhoto = intent.getStringExtra("callerPhoto")?.takeIf { it.isNotEmpty() }
+            val callType = intent.getStringExtra("callType") ?: "direct"
+            val roomPassword = intent.getStringExtra("roomPassword")?.takeIf { it.isNotEmpty() }
 
-        // If already ringing for a different call, stop previous first
-        if (currentCallUUID != null && currentCallUUID != callUUID) {
-            Log.d(TAG, "New call $callUUID replacing previous $currentCallUUID")
-            stopRinging()
-        }
+            // If already ringing for a different call, stop previous first
+            if (currentCallUUID != null && currentCallUUID != callUUID) {
+                Log.d(TAG, "New call $callUUID replacing previous $currentCallUUID")
+                stopRinging()
+            }
 
-        currentCallUUID = callUUID
-        Log.d(TAG, "Processing call: uuid=$callUUID, caller=$callerName, type=$callType")
+            currentCallUUID = callUUID
+            Log.d(TAG, "Processing call: uuid=$callUUID, caller=$callerName, type=$callType")
 
-        // Build and show foreground notification
-        val notification = NotificationHelper.buildRingingNotification(
-            context = this,
-            callerName = callerName,
-            callType = callType,
-            roomId = roomId,
-            callUUID = callUUID,
-            callerId = callerId,
-            callerPhoto = callerPhoto,
-            roomPassword = roomPassword
-        )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NotificationHelper.notificationId(callUUID),
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            // Build and show foreground notification
+            val notification = NotificationHelper.buildRingingNotification(
+                context = this,
+                callerName = callerName,
+                callType = callType,
+                roomId = roomId,
+                callUUID = callUUID,
+                callerId = callerId,
+                callerPhoto = callerPhoto,
+                roomPassword = roomPassword
             )
-        } else {
-            startForeground(NotificationHelper.notificationId(callUUID), notification)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NotificationHelper.notificationId(callUUID),
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NotificationHelper.notificationId(callUUID), notification)
+            }
+
+            // Acquire wake lock
+            acquireWakeLock()
+
+            // Start ringtone — AudioAttributes handle DND/ringer mode, no manual gating
+            Log.d(TAG, "Starting ringtone...")
+            audioHelper?.startRingtone()
+
+            // Start vibration
+            Log.d(TAG, "Starting vibration...")
+            startVibration()
+
+            // Set timeout
+            handler.postDelayed(timeoutRunnable, Constants.CALL_TIMEOUT_MS)
+
+            Log.d(TAG, "Ringing fully started for call $callUUID from $callerName")
+            return START_NOT_STICKY
+        } catch (e: Exception) {
+            Log.e(TAG, "Service start failed", e)
+            stopSelf()
+            return START_NOT_STICKY
         }
-
-        // Acquire wake lock
-        acquireWakeLock()
-
-        // Start ringtone — AudioAttributes handle DND/ringer mode, no manual gating
-        Log.d(TAG, "Starting ringtone...")
-        audioHelper?.startRingtone()
-
-        // Start vibration
-        Log.d(TAG, "Starting vibration...")
-        startVibration()
-
-        // Set timeout
-        handler.postDelayed(timeoutRunnable, Constants.CALL_TIMEOUT_MS)
-
-        Log.d(TAG, "Ringing fully started for call $callUUID from $callerName")
-        return START_NOT_STICKY
     }
 
     private fun acquireWakeLock() {

@@ -42,7 +42,13 @@ fun ChatsScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     // Refresh on resume
-    LaunchedEffect(Unit) { chatListViewModel.loadConversations() }
+    LaunchedEffect(Unit) {
+        try {
+            chatListViewModel.loadConversations()
+        } catch (e: Exception) {
+            android.util.Log.e("ChatsScreen", "Failed to load conversations", e)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Background)) {
         if (loading && conversations.isEmpty()) {

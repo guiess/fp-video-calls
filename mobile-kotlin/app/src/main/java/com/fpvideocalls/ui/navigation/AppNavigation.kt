@@ -58,73 +58,72 @@ fun AppNavigation(
 
     // Handle FCM navigation events
     LaunchedEffect(Unit) {
-        callViewModel.navigationEvents.collect { event ->
-            when (event) {
-                is CallNavigationEvent.ShowIncomingCall -> {
-                    pendingCallData.value = event.data
-                    navController.navigate(Routes.INCOMING_CALL) {
-                        launchSingleTop = true
+        try {
+            callViewModel.navigationEvents.collect { event ->
+                try {
+                    when (event) {
+                        is CallNavigationEvent.ShowIncomingCall -> {
+                            pendingCallData.value = event.data
+                            navController.navigate(Routes.INCOMING_CALL) {
+                                launchSingleTop = true
+                            }
+                        }
+                        is CallNavigationEvent.DismissIncomingCall -> {
+                            if (navController.currentDestination?.route == Routes.INCOMING_CALL) {
+                                navController.popBackStack()
+                            }
+                        }
+                        is CallNavigationEvent.AnswerCall -> {
+                            val data = event.data
+                            val displayName = user?.displayName ?: data.callerName
+                            val userId = user?.uid ?: data.callerId
+                            navController.navigate(
+                                Routes.inCall(data.roomId, displayName, userId, data.callType.value, data.roomPassword)
+                            ) {
+                                popUpTo(Routes.MAIN) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        }
                     }
-                }
-                is CallNavigationEvent.DismissIncomingCall -> {
-                    if (navController.currentDestination?.route == Routes.INCOMING_CALL) {
-                        navController.popBackStack()
-                    }
-                }
-                is CallNavigationEvent.AnswerCall -> {
-                    val data = event.data
-                    val displayName = user?.displayName ?: data.callerName
-                    val userId = user?.uid ?: data.callerId
-                    navController.navigate(
-                        Routes.inCall(data.roomId, displayName, userId, data.callType.value, data.roomPassword)
-                    ) {
-                        popUpTo(Routes.MAIN) { inclusive = false }
-                        launchSingleTop = true
-                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AppNavigation", "Failed to handle navigation event: $event", e)
                 }
             }
+        } catch (e: Exception) {
+            android.util.Log.e("AppNavigation", "FCM navigation event collection failed", e)
         }
     }
 
     // Handle intent extras for killed-app notification tap
     LaunchedEffect(intent) {
-        if (intent == null) return@LaunchedEffect
-        val type = intent.getStringExtra("type")
-        val action = intent.getStringExtra("action")
+        try {
+            if (intent == null) return@LaunchedEffect
+            val type = intent.getStringExtra("type")
+            val action = intent.getStringExtra("action")
 
-        if (type == "call_invite") {
-            // Wait for nav graph to be ready (Activity may have just restarted)
-            var retries = 0
-            while (retries < 20) {
-                try { navController.graph; break } catch (_: Exception) { }
-                kotlinx.coroutines.delay(50)
-                retries++
-            }
+            if (type == "call_invite") {
+                // Wait for nav graph to be ready (Activity may have just restarted)
+                var retries = 0
+                while (retries < 20) {
+                    try { navController.graph; break } catch (_: Exception) { }
+                    kotlinx.coroutines.delay(50)
+                    retries++
+                }
 
-            val callData = IncomingCallData(
-                callUUID = intent.getStringExtra("callUUID") ?: "",
-                roomId = intent.getStringExtra("roomId") ?: "",
-                callerId = intent.getStringExtra("callerId") ?: "",
-                callerName = intent.getStringExtra("callerName") ?: "Unknown",
-                callerPhoto = intent.getStringExtra("callerPhoto")?.takeIf { it.isNotEmpty() },
-                callType = CallType.fromString(intent.getStringExtra("callType")),
-                roomPassword = intent.getStringExtra("roomPassword")?.takeIf { it.isNotEmpty() }
-            )
+                val callData = IncomingCallData(
+                    callUUID = intent.getStringExtra("callUUID") ?: "",
+                    roomId = intent.getStringExtra("roomId") ?: "",
+                    callerId = intent.getStringExtra("callerId") ?: "",
+                    callerName = intent.getStringExtra("callerName") ?: "Unknown",
+                    callerPhoto = intent.getStringExtra("callerPhoto")?.takeIf { it.isNotEmpty() },
+                    callType = CallType.fromString(intent.getStringExtra("callType")),
+                    roomPassword = intent.getStringExtra("roomPassword")?.takeIf { it.isNotEmpty() }
+                )
 
-            if (action == "ANSWER") {
-                // Answered from notification — go directly to InCall, skip IncomingCallScreen
-                val displayName = user?.displayName ?: callData.callerName
-                val userId = user?.uid ?: callData.callerId
-                try {
-                    navController.navigate(
-                        Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
-                    ) {
-                        popUpTo(0) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.w("AppNavigation", "Nav failed for ANSWER intent, retrying", e)
-                    kotlinx.coroutines.delay(200)
+                if (action == "ANSWER") {
+                    // Answered from notification — go directly to InCall, skip IncomingCallScreen
+                    val displayName = user?.displayName ?: callData.callerName
+                    val userId = user?.uid ?: callData.callerId
                     try {
                         navController.navigate(
                             Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
@@ -133,38 +132,51 @@ fun AppNavigation(
                             launchSingleTop = true
                         }
                     } catch (e: Exception) {
-                        android.util.Log.w("AppNavigation", "Nav retry failed", e)
+                        android.util.Log.w("AppNavigation", "Nav failed for ANSWER intent, retrying", e)
+                        kotlinx.coroutines.delay(200)
+                        try {
+                            navController.navigate(
+                                Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
+                            ) {
+                                popUpTo(0) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("AppNavigation", "Nav retry failed", e)
+                        }
+                    }
+                } else {
+                    // Tapped notification (not a specific action) — show IncomingCallScreen
+                    pendingCallData.value = callData
+                    try {
+                        navController.navigate(Routes.INCOMING_CALL) {
+                            launchSingleTop = true
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("AppNavigation", "Nav to incoming call failed", e)
                     }
                 }
-            } else {
-                // Tapped notification (not a specific action) — show IncomingCallScreen
-                pendingCallData.value = callData
-                try {
-                    navController.navigate(Routes.INCOMING_CALL) {
+
+                // Clear the intent extras so we don't re-handle on recomposition
+                intent.removeExtra("type")
+            }
+
+            // Handle RETURN_TO_CALL from active call notification
+            if (intent.action == "RETURN_TO_CALL") {
+                val callInfo = ActiveCallService.activeCallInfo
+                if (callInfo != null) {
+                    navController.navigate(
+                        Routes.inCall(callInfo.roomId, callInfo.displayName, callInfo.userId, callInfo.callType, callInfo.password)
+                    ) {
+                        popUpTo(Routes.MAIN) { inclusive = false }
                         launchSingleTop = true
                     }
-                } catch (e: Exception) {
-                    android.util.Log.w("AppNavigation", "Nav to incoming call failed", e)
                 }
+                // Clear the action so we don't re-handle on recomposition
+                intent.action = null
             }
-
-            // Clear the intent extras so we don't re-handle on recomposition
-            intent.removeExtra("type")
-        }
-
-        // Handle RETURN_TO_CALL from active call notification
-        if (intent.action == "RETURN_TO_CALL") {
-            val callInfo = ActiveCallService.activeCallInfo
-            if (callInfo != null) {
-                navController.navigate(
-                    Routes.inCall(callInfo.roomId, callInfo.displayName, callInfo.userId, callInfo.callType, callInfo.password)
-                ) {
-                    popUpTo(Routes.MAIN) { inclusive = false }
-                    launchSingleTop = true
-                }
-            }
-            // Clear the action so we don't re-handle on recomposition
-            intent.action = null
+        } catch (e: Exception) {
+            android.util.Log.e("AppNavigation", "Intent handling failed", e)
         }
     }
 

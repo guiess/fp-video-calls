@@ -60,26 +60,30 @@ fun OptionsScreen(
     // Load notification settings from Firestore
     val uid = FirebaseAuth.getInstance().currentUser?.uid
     LaunchedEffect(uid) {
-        if (uid == null) return@LaunchedEffect
-        FirebaseFirestore.getInstance().collection("users").document(uid).get()
-            .addOnSuccessListener { doc ->
-                callNotif = doc.getString("notifCalls") ?: "always"
-                chatNotif = doc.getString("notifChat") ?: "when_inactive"
-                NotifPrefs.save(context, callNotif, chatNotif)
-            }
-        // Load location sharing settings
-        FirebaseFirestore.getInstance().collection("users").document(uid)
-            .collection("private").document("userData").get()
-            .addOnSuccessListener { doc ->
-                @Suppress("UNCHECKED_CAST")
-                val locationSharing = doc.get("locationSharing") as? Map<String, Any>
-                if (locationSharing != null) {
-                    locationEnabled = locationSharing["enabled"] as? Boolean ?: false
-                    @Suppress("UNCHECKED_CAST")
-                    sharedWith = (locationSharing["sharedWith"] as? List<String>) ?: emptyList()
+        try {
+            if (uid == null) return@LaunchedEffect
+            FirebaseFirestore.getInstance().collection("users").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    callNotif = doc.getString("notifCalls") ?: "always"
+                    chatNotif = doc.getString("notifChat") ?: "when_inactive"
+                    NotifPrefs.save(context, callNotif, chatNotif)
                 }
-            }
-        contactsViewModel.subscribeToContacts(uid)
+            // Load location sharing settings
+            FirebaseFirestore.getInstance().collection("users").document(uid)
+                .collection("private").document("userData").get()
+                .addOnSuccessListener { doc ->
+                    @Suppress("UNCHECKED_CAST")
+                    val locationSharing = doc.get("locationSharing") as? Map<String, Any>
+                    if (locationSharing != null) {
+                        locationEnabled = locationSharing["enabled"] as? Boolean ?: false
+                        @Suppress("UNCHECKED_CAST")
+                        sharedWith = (locationSharing["sharedWith"] as? List<String>) ?: emptyList()
+                    }
+                }
+            contactsViewModel.subscribeToContacts(uid)
+        } catch (e: Exception) {
+            android.util.Log.e("OptionsScreen", "Failed to load settings", e)
+        }
     }
 
     fun saveNotifSettings() {

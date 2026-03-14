@@ -90,7 +90,11 @@ private fun ContactsContent(
     var showRemoveDialog by remember { mutableStateOf<Contact?>(null) }
 
     LaunchedEffect(user) {
-        user?.uid?.let { contactsViewModel.subscribeToContacts(it) }
+        try {
+            user?.uid?.let { contactsViewModel.subscribeToContacts(it) }
+        } catch (e: Exception) {
+            android.util.Log.e("ContactsScreen", "Failed to subscribe to contacts", e)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().background(Background)) {

@@ -59,10 +59,14 @@ fun InCallScreen(
         permissionsGranted = results.values.all { it }
     }
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(arrayOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
-        ))
+        try {
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.RECORD_AUDIO
+            ))
+        } catch (e: Exception) {
+            android.util.Log.e("InCallScreen", "Failed to request permissions", e)
+        }
     }
 
     // Back press moves app to background instead of ending the call
@@ -126,8 +130,12 @@ fun InCallScreen(
 
     // Start call only if not already active and permissions granted
     LaunchedEffect(roomId, permissionsGranted) {
-        if (permissionsGranted && !ActiveCallService.isCallActive.value) {
-            inCallViewModel.startCall(roomId, userId, displayName, password, callType)
+        try {
+            if (permissionsGranted && !ActiveCallService.isCallActive.value) {
+                inCallViewModel.startCall(roomId, userId, displayName, password, callType)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("InCallScreen", "Failed to start call", e)
         }
     }
 

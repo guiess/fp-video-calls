@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.ui.navigation.AppNavigation
 import com.fpvideocalls.ui.theme.FPVideoCallsTheme
+import com.fpvideocalls.util.CrashHandler
 import com.fpvideocalls.util.LocaleHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +56,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Install global crash handler — logs exceptions and stores crash info for next launch
+        Thread.setDefaultUncaughtExceptionHandler(CrashHandler(applicationContext))
+
+        // Check if a previous crash was recorded and log it
+        val crashPrefs = getSharedPreferences(CrashHandler.PREFS_NAME, Context.MODE_PRIVATE)
+        val lastCrash = crashPrefs.getString(CrashHandler.KEY_LAST_CRASH, null)
+        if (lastCrash != null) {
+            android.util.Log.w("MainActivity", "Previous crash detected: $lastCrash")
+            crashPrefs.edit().remove(CrashHandler.KEY_LAST_CRASH).remove(CrashHandler.KEY_LAST_CRASH_TIME).apply()
+        }
+
         currentIntent = intent
         checkLockScreenAnswer(intent)
         enableEdgeToEdge()

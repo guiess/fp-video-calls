@@ -101,12 +101,16 @@ fun ChatConversationScreen(
     }
 
     LaunchedEffect(conversationId) {
-        viewModel.init(conversationId, participantUids, displayName)
-        // Clear any chat notification for this conversation
-        com.fpvideocalls.service.NotificationHelper.cancelChatNotification(context, conversationId)
-        contactsViewModel.subscribeToContacts(myUid)
-        if (isGroup && !conversationId.startsWith("new")) {
-            groupInfoViewModel.init(conversationId, participantUids.map { ChatParticipant(it) })
+        try {
+            viewModel.init(conversationId, participantUids, displayName)
+            // Clear any chat notification for this conversation
+            com.fpvideocalls.service.NotificationHelper.cancelChatNotification(context, conversationId)
+            contactsViewModel.subscribeToContacts(myUid)
+            if (isGroup && !conversationId.startsWith("new")) {
+                groupInfoViewModel.init(conversationId, participantUids.map { ChatParticipant(it) })
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ChatConversationScreen", "Failed to initialize conversation", e)
         }
     }
 
