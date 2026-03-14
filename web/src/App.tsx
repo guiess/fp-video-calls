@@ -80,8 +80,8 @@ export default function App() {
     try {
       const loc = window.location;
       const b = `${loc.protocol}//${loc.host}`;
-      const query = createQuality ? `?q=${encodeURIComponent(createQuality)}` : "";
-      window.location.href = `${b}/room/${encodeURIComponent(data.roomId)}${query}`;
+      const params = new URLSearchParams({ room: data.roomId, cq: createQuality || "1080p" });
+      window.location.href = `${b}/?${params}`;
       return;
     } catch {
       fetchMeta(data.roomId);
