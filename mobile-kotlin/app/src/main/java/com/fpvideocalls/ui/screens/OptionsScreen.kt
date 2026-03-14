@@ -77,12 +77,15 @@ fun OptionsScreen(
         val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fineGranted || coarseGranted) {
             locationEnabled = true
+            context.getSharedPreferences("location_prefs", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("enabled", true).apply()
+            // Save sharedWith to Firestore
             val u = FirebaseAuth.getInstance().currentUser?.uid ?: return@rememberLauncherForActivityResult
             FirebaseFirestore.getInstance().collection("users").document(u)
                 .collection("private").document("userData")
-                .set(mapOf("locationSharing" to mapOf("enabled" to true, "sharedWith" to sharedWith, "intervalMinutes" to 10)), SetOptions.merge())
+                .set(mapOf("locationSharing" to mapOf("sharedWith" to sharedWith)), SetOptions.merge())
             LocationTrackingService.start(context)
-            // Now request background location (Android 11+)
+            // Request background location (Android 11+)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 val hasBg = androidx.core.content.ContextCompat.checkSelfPermission(
                     context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
@@ -108,15 +111,28 @@ fun OptionsScreen(
                     NotifPrefs.save(context, callNotif, chatNotif)
                 }
             // Load location sharing settings
+            val locPrefs = context.getSharedPreferences("location_prefs", android.content.Context.MODE_PRIVATE)
+            val wasEnabled = locPrefs.getBoolean("enabled", false)
             FirebaseFirestore.getInstance().collection("users").document(uid)
                 .collection("private").document("userData").get()
                 .addOnSuccessListener { doc ->
                     @Suppress("UNCHECKED_CAST")
                     val locationSharing = doc.get("locationSharing") as? Map<String, Any>
                     if (locationSharing != null) {
-                        locationEnabled = locationSharing["enabled"] as? Boolean ?: false
                         @Suppress("UNCHECKED_CAST")
                         sharedWith = (locationSharing["sharedWith"] as? List<String>) ?: emptyList()
+                    }
+                    if (wasEnabled) {
+                        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (hasPermission) {
+                            locationEnabled = true
+                            LocationTrackingService.start(context)
+                        } else {
+                            locationEnabled = false
+                            locPrefs.edit().putBoolean("enabled", false).apply()
+                        }
                     }
                 }
             contactsViewModel.subscribeToContacts(uid)
@@ -134,16 +150,13 @@ fun OptionsScreen(
 
     fun saveLocationSettings(enabled: Boolean, contacts: List<String>) {
         val u = uid ?: return
-        val payload = mapOf(
-            "locationSharing" to mapOf(
-                "enabled" to enabled,
-                "sharedWith" to contacts,
-                "intervalMinutes" to 10
-            )
-        )
+        // Device-local: enabled flag
+        context.getSharedPreferences("location_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().putBoolean("enabled", enabled).apply()
+        // Firestore: sharedWith list (needed for security rules)
         FirebaseFirestore.getInstance().collection("users").document(u)
             .collection("private").document("userData")
-            .set(payload, SetOptions.merge())
+            .set(mapOf("locationSharing" to mapOf("sharedWith" to contacts)), SetOptions.merge())
         if (enabled) {
             LocationTrackingService.start(context)
         } else {
