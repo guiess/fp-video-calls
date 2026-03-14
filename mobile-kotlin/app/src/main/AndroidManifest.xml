@@ -12,6 +12,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -69,6 +73,11 @@
         <service
             android:name=".service.ActiveCallService"
             android:foregroundServiceType="camera|microphone"
+            android:exported="false" />
+
+        <service
+            android:name=".service.LocationTrackingService"
+            android:foregroundServiceType="location"
             android:exported="false" />
 
         <receiver

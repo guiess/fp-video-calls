@@ -310,6 +310,31 @@ object NotificationHelper {
         manager.cancel(Constants.CHAT_NOTIFICATION_ID_BASE + conversationId.hashCode().and(0xFFF))
     }
 
+    // ---- Location tracking notifications ----
+
+    fun createLocationTrackingChannel(context: Context) {
+        val channel = NotificationChannel(
+            Constants.LOCATION_TRACKING_CHANNEL_ID,
+            context.getString(R.string.location_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = context.getString(R.string.location_channel_desc)
+            setSound(null, null)
+            enableVibration(false)
+        }
+        context.getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(channel)
+    }
+
+    fun buildLocationTrackingNotification(context: Context): Notification {
+        return NotificationCompat.Builder(context, Constants.LOCATION_TRACKING_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle(context.getString(R.string.location_sharing_active))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+    }
+
     /** Cancel all call-related notifications (ringing, active, per-UUID). */
     fun cancelAllCallNotifications(context: Context, callUUID: String? = null) {
         val manager = context.getSystemService(NotificationManager::class.java)

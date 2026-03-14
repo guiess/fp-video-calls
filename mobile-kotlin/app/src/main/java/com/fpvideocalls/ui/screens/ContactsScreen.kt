@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +32,7 @@ import com.fpvideocalls.viewmodel.ContactsViewModel
 @Composable
 fun ContactsScreen(
     onCallContact: (Contact) -> Unit,
+    onViewLocation: (Contact) -> Unit = {},
     onChatContact: (Contact) -> Unit = {},
     onGroupCall: () -> Unit,
     authViewModel: AuthViewModel = hiltViewModel(),
@@ -59,6 +61,7 @@ fun ContactsScreen(
         when (selectedTab) {
             0 -> ContactsContent(
                 onCallContact = onCallContact,
+                onViewLocation = onViewLocation,
                 onChatContact = onChatContact,
                 onGroupCall = onGroupCall,
                 authViewModel = authViewModel,
@@ -72,6 +75,7 @@ fun ContactsScreen(
 @Composable
 private fun ContactsContent(
     onCallContact: (Contact) -> Unit,
+    onViewLocation: (Contact) -> Unit = {},
     onChatContact: (Contact) -> Unit = {},
     onGroupCall: () -> Unit,
     authViewModel: AuthViewModel,
@@ -134,6 +138,7 @@ private fun ContactsContent(
                     ContactRow(
                         contact = contact,
                         onClick = { onChatContact(contact) },
+                        onViewLocation = { onViewLocation(contact) },
                         onCall = { onCallContact(contact) },
                         onRemove = { showRemoveDialog = contact }
                     )
@@ -262,7 +267,7 @@ private fun ContactsContent(
 }
 
 @Composable
-private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onCall: () -> Unit, onRemove: () -> Unit) {
+private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onViewLocation: () -> Unit = {}, onCall: () -> Unit, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -278,6 +283,9 @@ private fun ContactRow(contact: Contact, onClick: () -> Unit = {}, onCall: () ->
             fontSize = 16.sp,
             modifier = Modifier.weight(1f)
         )
+        IconButton(onClick = onViewLocation) {
+            Icon(Icons.Default.LocationOn, stringResource(R.string.view_location), tint = Purple)
+        }
         IconButton(onClick = onCall) {
             Icon(Icons.Default.Phone, stringResource(R.string.cd_call), tint = Purple)
         }

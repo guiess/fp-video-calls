@@ -452,6 +452,21 @@ fun AppNavigation(
                 onBack = { navController.popBackStack() }
             )
         }
+
+        // Location view screen
+        composable(
+            route = Routes.LOCATION_VIEW,
+            arguments = listOf(
+                navArgument("contactUid") { type = NavType.StringType },
+                navArgument("contactName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            LocationViewScreen(
+                contactUid = backStackEntry.arguments?.getString("contactUid") ?: "",
+                contactName = backStackEntry.arguments?.getString("contactName") ?: "",
+                onBack = { navController.popBackStack() }
+            )
+        }
     }
     } // Column
 }
@@ -581,6 +596,9 @@ fun MainScreen(navController: NavHostController, isDarkTheme: Boolean = true, on
                         pendingContacts.clear()
                         pendingContacts.addAll(listOf(contact))
                         navController.navigate(Routes.preCall("direct"))
+                    },
+                    onViewLocation = { contact ->
+                        navController.navigate(Routes.locationView(contact.uid, contact.displayName))
                     },
                     onChatContact = { contact ->
                         val currentUser = authViewModel.user.value ?: return@ContactsScreen

@@ -4,6 +4,7 @@ import com.fpvideocalls.model.CallRecord
 import com.fpvideocalls.model.CallRecordStatus
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.Group
+import com.fpvideocalls.model.LocationPoint
 import com.fpvideocalls.model.RecentGroup
 import com.fpvideocalls.model.User
 import com.google.firebase.firestore.FieldValue
@@ -316,5 +317,76 @@ class FirestoreRepository @Inject constructor(
                 trySend(records)
             }
         awaitClose { listener.remove() }
+    }
+
+    // --- Location ---
+
+    /** Check if a contact has shared their current location. */
+    suspend fun isLocationAvailable(contactUid: String): Boolean {
+        return try {
+            val doc = firestore.collection("users")
+                .document(contactUid)
+                .collection("location")
+                .document("current")
+                .get()
+                .await()
+            doc.exists()
+        } catch (e: Exception) {
+            android.util.Log.w("FirestoreRepository", "isLocationAvailable error", e)
+            false
+        }
+    }
+
+    /** Real-time subscription to a contact's current location. */
+    fun subscribeToCurrentLocation(contactUid: String): Flow<LocationPoint?> = callbackFlow {
+        val listener = firestore.collection("users")
+            .document(contactUid)
+            .collection("location")
+            .document("current")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    android.util.Log.w("FirestoreRepository", "subscribeToCurrentLocation error", error)
+                    trySend(null)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null || !snapshot.exists()) {
+                    trySend(null)
+                    return@addSnapshotListener
+                }
+                val point = LocationPoint(
+                    lat = snapshot.getDouble("lat") ?: 0.0,
+                    lng = snapshot.getDouble("lng") ?: 0.0,
+                    accuracy = (snapshot.getDouble("accuracy") ?: 0.0).toFloat(),
+                    timestamp = snapshot.getLong("timestamp") ?: 0L
+                )
+                trySend(point)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    /** Fetch location history entries, most recent first. */
+    suspend fun getLocationHistory(contactUid: String, limit: Int = 50): List<LocationPoint> {
+        return try {
+            val snapshot = firestore.collection("users")
+                .document(contactUid)
+                .collection("locationHistory")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { doc ->
+                try {
+                    LocationPoint(
+                        lat = doc.getDouble("lat") ?: return@mapNotNull null,
+                        lng = doc.getDouble("lng") ?: return@mapNotNull null,
+                        accuracy = (doc.getDouble("accuracy") ?: 0.0).toFloat(),
+                        timestamp = doc.getLong("timestamp") ?: 0L
+                    )
+                } catch (_: Exception) { null }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("FirestoreRepository", "getLocationHistory error", e)
+            emptyList()
+        }
     }
 }

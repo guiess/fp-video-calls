@@ -194,4 +194,18 @@
     <string name="delete_conversation">Delete</string>
     <string name="deleted_chat">[Deleted]</string>
     <string name="delete_conversation_confirm">Delete this chat? All message history will be permanently removed.</string>
+
+    <!-- Location -->
+    <string name="location_sharing_active">Location sharing active</string>
+    <string name="location_channel_name">Location Tracking</string>
+    <string name="location_channel_desc">Active location sharing</string>
+    <string name="share_location">Share Location</string>
+    <string name="location_sharing_desc">Share your location with selected contacts</string>
+    <string name="select_contacts_to_share">Select contacts</string>
+    <string name="view_location">View Location</string>
+    <string name="current_location">Current Location</string>
+    <string name="location_history">Location History</string>
+    <string name="open_in_maps">Open in Maps</string>
+    <string name="no_location_data">No location data</string>
+    <string name="location_accuracy">Accuracy: %1$dm</string>
 </resources>

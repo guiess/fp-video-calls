@@ -19,6 +19,9 @@ object Routes {
     const val TAB_ROOMS = "tab_rooms"
     const val TAB_OPTIONS = "tab_options"
 
+    // Location
+    const val LOCATION_VIEW = "location_view/{contactUid}/{contactName}"
+
     // Chat
     const val CHAT_CONVERSATION = "chat_conversation/{conversationId}/{displayName}/{participantUids}?type={type}"
     const val NEW_CHAT = "new_chat"
@@ -41,6 +44,9 @@ object Routes {
         val encUids = Uri.encode(participantUids.joinToString(","))
         return "chat_conversation/$conversationId/$encName/$encUids?type=$type"
     }
+    fun locationView(contactUid: String, contactName: String): String =
+        "location_view/${Uri.encode(contactUid)}/${Uri.encode(contactName)}"
+
     fun groupInfo(conversationId: String, groupName: String): String {
         val encName = Uri.encode(groupName)
         return "group_info/$conversationId/$encName"

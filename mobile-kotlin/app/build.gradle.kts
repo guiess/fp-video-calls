@@ -96,6 +96,9 @@ dependencies {
     // Google Sign-In (legacy, works reliably on emulators)
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
+    // Location services (GPS tracking for family location sharing)
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+
     // WebRTC (community build of official Google WebRTC, same org.webrtc.* API)
     implementation("io.github.webrtc-sdk:android:125.6422.07")
 

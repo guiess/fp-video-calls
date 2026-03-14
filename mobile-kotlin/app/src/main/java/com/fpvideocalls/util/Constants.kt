@@ -16,4 +16,12 @@ object Constants {
     const val CALL_TIMEOUT_MS = 45_000L
     const val OUTGOING_CALL_TIMEOUT_MS = 30_000L
     const val MAX_GROUP_CALL_MEMBERS = 8
+
+    // Location tracking
+    const val LOCATION_TRACKING_CHANNEL_ID = "location_tracking"
+    const val LOCATION_TRACKING_NOTIFICATION_ID = 9996
+    const val LOCATION_UPDATE_INTERVAL_MS = 10 * 60 * 1000L
+    const val LOCATION_HISTORY_MAX_AGE_DAYS = 7
+    const val LOCATION_CLEANUP_BATCH_LIMIT = 50
+    const val LOCATION_CLEANUP_INTERVAL = 10
 }

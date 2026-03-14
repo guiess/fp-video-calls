@@ -194,4 +194,18 @@
     <string name="delete_conversation">Удалить</string>
     <string name="deleted_chat">[Удалено]</string>
     <string name="delete_conversation_confirm">Удалить этот чат? Вся история сообщений будет удалена.</string>
+
+    <!-- Location -->
+    <string name="location_sharing_active">Отслеживание местоположения</string>
+    <string name="location_channel_name">Отслеживание</string>
+    <string name="location_channel_desc">Активное отслеживание</string>
+    <string name="share_location">Поделиться местоположением</string>
+    <string name="location_sharing_desc">Поделиться местоположением с выбранными контактами</string>
+    <string name="select_contacts_to_share">Выберите контакты</string>
+    <string name="view_location">Местоположение</string>
+    <string name="current_location">Текущее местоположение</string>
+    <string name="location_history">История местоположений</string>
+    <string name="open_in_maps">Открыть на карте</string>
+    <string name="no_location_data">Нет данных</string>
+    <string name="location_accuracy">Точность: %1$dм</string>
 </resources>
