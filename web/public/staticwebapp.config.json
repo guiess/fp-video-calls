@@ -1,12 +1,6 @@
 {
-  "environmentVariables": {
-    "VITE_SIGNALING_URL": "https://app-voice-video-server.azurewebsites.net"
-  },
-  "routes": [
-    {
-      "route": "/*",
-      "serve": "/index.html",
-      "statusCode": 200
-    }
-  ]
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/*.js", "/*.css", "/*.ico", "/*.png", "/*.svg"]
+  }
 }
