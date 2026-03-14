@@ -5,10 +5,12 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiFetch } from "../services/api";
 import { subscribeChatEvents, ensureChatSocket, authenticateSocket } from "../services/chatSocket";
 import { subscribeToCallHistory, CallRecord } from "../services/callHistoryService";
+import { checkLocationSharing } from "../services/locationService";
 import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
 import NewChatScreen from "./NewChatScreen";
 import NewGroupChatScreen from "./NewGroupChatScreen";
+import LocationPanel from "./LocationPanel";
 
 /* ------------------------------------------------------------------ */
 /*  Room history helpers (localStorage)                                */
@@ -76,6 +78,8 @@ export default function AppShell() {
   const [contacts, setContacts] = useState<{uid: string; displayName: string; photoUrl?: string}[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactMenuOpenId, setContactMenuOpenId] = useState<string | null>(null);
+  const [locationSharingUids, setLocationSharingUids] = useState<Set<string>>(new Set());
+  const [viewLocationContact, setViewLocationContact] = useState<{uid: string; name: string} | null>(null);
 
   function addRoomToHistory(roomId: string, quality: "720p" | "1080p") {
     setRoomHistory((prev) => {
@@ -176,6 +180,19 @@ export default function AppShell() {
       }
     })();
   }, [activeTab, user]);
+
+  // Check which contacts share their location
+  useEffect(() => {
+    if (contacts.length === 0 || !user) return;
+    (async () => {
+      const sharing = new Set<string>();
+      await Promise.all(contacts.map(async (c) => {
+        const available = await checkLocationSharing(c.uid);
+        if (available) sharing.add(c.uid);
+      }));
+      setLocationSharingUids(sharing);
+    })();
+  }, [contacts, user]);
 
   async function handleRemoveContact(contactUid: string) {
     if (!user) return;
@@ -657,6 +674,24 @@ export default function AppShell() {
                       </span>
                     </div>
 
+                    {/* Location icon */}
+                    {locationSharingUids.has(contact.uid) && (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewLocationContact({ uid: contact.uid, name: contact.displayName });
+                        }}
+                        style={{
+                          padding: 6, borderRadius: "50%", cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0, color: "#3390ec", fontSize: 18,
+                        }}
+                        title={t.location || "Location"}
+                      >
+                        📍
+                      </div>
+                    )}
+
                     {/* 3-dot menu trigger */}
                     <div
                       onClick={(e) => {
@@ -789,7 +824,13 @@ export default function AppShell() {
         overflow: "hidden",
         height: "100vh",
       }}>
-        {hasRightContent && activeTab !== "options" ? (
+        {viewLocationContact ? (
+          <LocationPanel
+            contactUid={viewLocationContact.uid}
+            contactName={viewLocationContact.name}
+            onClose={() => setViewLocationContact(null)}
+          />
+        ) : hasRightContent && activeTab !== "options" ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <Outlet />
           </div>

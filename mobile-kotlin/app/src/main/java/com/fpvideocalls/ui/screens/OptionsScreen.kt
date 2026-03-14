@@ -1,5 +1,7 @@
 package com.fpvideocalls.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -56,6 +58,43 @@ fun OptionsScreen(
     var sharedWith by remember { mutableStateOf<List<String>>(emptyList()) }
     var showContactPicker by remember { mutableStateOf(false) }
     val contacts by contactsViewModel.contacts.collectAsState()
+
+    // Location permission launcher
+    // Background location permission launcher (Android 11+, separate from foreground)
+    val bgLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        // Service is already started with foreground permission — background just allows updates when app is backgrounded
+        if (!granted) {
+            android.widget.Toast.makeText(context, "Background location needed for tracking when app is closed", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            locationEnabled = true
+            val u = FirebaseAuth.getInstance().currentUser?.uid ?: return@rememberLauncherForActivityResult
+            FirebaseFirestore.getInstance().collection("users").document(u)
+                .collection("private").document("userData")
+                .set(mapOf("locationSharing" to mapOf("enabled" to true, "sharedWith" to sharedWith, "intervalMinutes" to 10)), SetOptions.merge())
+            LocationTrackingService.start(context)
+            // Now request background location (Android 11+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val hasBg = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!hasBg) {
+                    bgLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                }
+            }
+        } else {
+            locationEnabled = false
+        }
+    }
 
     // Load notification settings from Firestore
     val uid = FirebaseAuth.getInstance().currentUser?.uid
@@ -287,8 +326,24 @@ fun OptionsScreen(
             Switch(
                 checked = locationEnabled,
                 onCheckedChange = { enabled ->
-                    locationEnabled = enabled
-                    saveLocationSettings(enabled, sharedWith)
+                    if (enabled) {
+                        // Check if permission already granted
+                        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (hasPermission) {
+                            locationEnabled = true
+                            saveLocationSettings(true, sharedWith)
+                        } else {
+                            locationPermissionLauncher.launch(arrayOf(
+                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                            ))
+                        }
+                    } else {
+                        locationEnabled = false
+                        saveLocationSettings(false, sharedWith)
+                    }
                 },
                 colors = SwitchDefaults.colors(checkedTrackColor = Purple)
             )

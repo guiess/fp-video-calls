@@ -56,7 +56,7 @@ class LocationTrackingService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
+    private var locationCallback: LocationCallback? = null
     private val firestore: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
     private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
 
@@ -115,6 +115,9 @@ class LocationTrackingService : Service() {
 
     @Suppress("MissingPermission") // Checked in onStartCommand before calling this
     private fun startLocationUpdates(uid: String) {
+        // Remove any previous callback to avoid duplicates
+        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+
         val intervalMs = Constants.LOCATION_UPDATE_INTERVAL_MS
 
         val locationRequest = LocationRequest.Builder(
@@ -125,7 +128,7 @@ class LocationTrackingService : Service() {
             setWaitForAccurateLocation(false)
         }.build()
 
-        locationCallback = object : LocationCallback() {
+        val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val location = result.lastLocation ?: return
                 val lat = location.latitude
@@ -133,7 +136,6 @@ class LocationTrackingService : Service() {
                 val accuracy = location.accuracy
                 val timestamp = location.time
 
-                // Validate: skip Null Island and invalid accuracy
                 if (lat == 0.0 && lng == 0.0) {
                     Log.d(TAG, "Skipping Null Island location (0,0)")
                     return
@@ -147,12 +149,27 @@ class LocationTrackingService : Service() {
                 writeLocationToFirestore(uid, lat, lng, accuracy, timestamp)
             }
         }
+        locationCallback = callback
 
         fusedLocationClient.requestLocationUpdates(
             locationRequest,
-            locationCallback,
+            callback,
             Looper.getMainLooper()
         )
+
+        // Get immediate first location
+        try {
+            fusedLocationClient.getCurrentLocation(
+                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, null
+            ).addOnSuccessListener { location ->
+                if (location != null) {
+                    Log.d(TAG, "Initial location: lat=${location.latitude}, lng=${location.longitude}")
+                    writeLocationToFirestore(uid, location.latitude, location.longitude, location.accuracy, System.currentTimeMillis())
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "No permission for initial location", e)
+        }
 
         Log.d(TAG, "Location updates started with interval ${intervalMs}ms")
     }
@@ -239,9 +256,7 @@ class LocationTrackingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::locationCallback.isInitialized) {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
-        }
+        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed, location updates stopped")
     }
