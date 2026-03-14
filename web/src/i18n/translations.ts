@@ -89,6 +89,13 @@ export interface Translations {
   homeTab: string;
   chatsTab: string;
   contactsTab: string;
+  location: string;
+  currentLocation: string;
+  locationHistory: string;
+  openInMaps: string;
+  noLocationData: string;
+  contactAdded: string;
+  deletedChat: string;
   contactAdded: string;
   roomsTab: string;
   optionsTab: string;
@@ -226,6 +233,12 @@ export const translations: Record<Language, Translations> = {
     chatsTab: 'Чаты',
     contactsTab: 'Контакты',
     contactAdded: 'Контакт добавлен',
+    location: 'Местоположение',
+    currentLocation: 'Текущее местоположение',
+    locationHistory: 'История местоположений',
+    openInMaps: 'Открыть на карте',
+    noLocationData: 'Нет данных о местоположении',
+    deletedChat: '[Удалено]',
     roomsTab: 'Комнаты',
     optionsTab: 'Настройки',
 
@@ -360,6 +373,12 @@ export const translations: Record<Language, Translations> = {
     chatsTab: 'Chats',
     contactsTab: 'Contacts',
     contactAdded: 'Contact added',
+    location: 'Location',
+    currentLocation: 'Current Location',
+    locationHistory: 'Location History',
+    openInMaps: 'Open in Maps',
+    noLocationData: 'No location data available',
+    deletedChat: '[Deleted]',
     roomsTab: 'Rooms',
     optionsTab: 'Options',
 

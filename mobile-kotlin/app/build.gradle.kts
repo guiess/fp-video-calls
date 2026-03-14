@@ -99,6 +99,9 @@ dependencies {
     // Location services (GPS tracking for family location sharing)
     implementation("com.google.android.gms:play-services-location:21.0.1")
 
+    // osmdroid (embedded OpenStreetMap for location history view)
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+
     // WebRTC (community build of official Google WebRTC, same org.webrtc.* API)
     implementation("io.github.webrtc-sdk:android:125.6422.07")
 

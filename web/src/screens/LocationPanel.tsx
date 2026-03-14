@@ -5,10 +5,13 @@
  * that shares their location. Uses Firestore real-time subscriptions for
  * current location and fetches history on mount.
  *
+ * Includes an embedded OpenStreetMap (Leaflet) showing the last 10 locations
+ * as pins, with sequential same-coordinate pins merged into time ranges.
+ *
  * Design: matches existing app patterns — inline styles, #3390ec accent,
  * #707579 secondary, borderRadius 10, consistent padding.
  */
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useLanguage } from "../i18n/LanguageContext";
 import {
   LocationData,
@@ -19,6 +22,69 @@ import {
   buildMapsUrl,
   formatLocationTimestamp,
 } from "../services/locationService";
+import {
+  mergeSequentialLocations,
+  formatMapTime,
+  MergedLocation,
+} from "../services/locationMapUtils";
+
+// Leaflet map components & CSS
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+
+// Hide the "Leaflet |" prefix from attribution, keep OSM credit
+const leafletHideStyle = document.createElement("style");
+leafletHideStyle.textContent = `.leaflet-control-attribution a[href*="leafletjs.com"] { display: none !important; } .leaflet-control-attribution span { display: none !important; }`;
+document.head.appendChild(leafletHideStyle);
+
+/* ------------------------------------------------------------------ */
+/*  Leaflet marker icon fix (Vite/Webpack strips default icon URLs)    */
+/* ------------------------------------------------------------------ */
+
+// @ts-ignore — Leaflet asset imports handled by Vite
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+// @ts-ignore
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+// @ts-ignore
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+});
+
+/** Blue circle marker for the current (latest) location. */
+function createCurrentIcon(): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width:16px;height:16px;border-radius:50%;
+      background:#3390ec;border:3px solid #fff;
+      box-shadow:0 1px 4px rgba(0,0,0,0.3);
+    "></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    popupAnchor: [0, -10],
+  });
+}
+
+/** Gray circle marker for history locations. */
+function createHistoryIcon(): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width:12px;height:12px;border-radius:50%;
+      background:#707579;border:2px solid #fff;
+      box-shadow:0 1px 3px rgba(0,0,0,0.25);
+    "></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -8],
+  });
+}
 
 interface LocationPanelProps {
   contactUid: string;
@@ -52,6 +118,32 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
     cleanupOldHistory();
     return () => { cancelled = true; };
   }, [contactUid]);
+
+  // Merge sequential nearby locations for map pins
+  const mergedPins = useMemo(() => {
+    const allEntries: LocationHistoryEntry[] = [];
+    // Include current location as the newest entry
+    if (currentLocation) {
+      allEntries.push({
+        id: "__current__",
+        lat: currentLocation.lat,
+        lng: currentLocation.lng,
+        timestamp: currentLocation.timestamp,
+        accuracy: currentLocation.accuracy,
+        address: currentLocation.address,
+      });
+    }
+    // history is already desc-sorted; prepend current (newest) if present
+    allEntries.push(...history);
+    return mergeSequentialLocations(allEntries);
+  }, [currentLocation, history]);
+
+  // Determine map center: latest location or first history entry
+  const mapCenter: [number, number] | null = useMemo(() => {
+    if (currentLocation) return [currentLocation.lat, currentLocation.lng];
+    if (history.length > 0) return [history[0].lat, history[0].lng];
+    return null;
+  }, [currentLocation, history]);
 
   return (
     <div style={{
@@ -119,6 +211,11 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
           </div>
         ) : (
           <>
+            {/* Embedded Map — shows merged location pins on OpenStreetMap */}
+            {mapCenter && mergedPins.length > 0 && (
+              <LocationMap pins={mergedPins} center={mapCenter} />
+            )}
+
             {/* Current Location */}
             {currentLocation && (
               <div style={{ marginTop: 16 }}>
@@ -255,6 +352,68 @@ function LocationCard({ lat, lng, timestamp, accuracy, address, t, highlight }: 
           🗺️ {t.openInMaps}
         </a>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  LocationMap — embedded OpenStreetMap with merged pins               */
+/* ------------------------------------------------------------------ */
+
+const currentIcon = createCurrentIcon();
+const historyIcon = createHistoryIcon();
+
+interface LocationMapProps {
+  pins: MergedLocation[];
+  center: [number, number];
+}
+
+function LocationMap({ pins, center }: LocationMapProps) {
+  const { t } = useLanguage();
+  return (
+    <div style={{
+      marginTop: 16,
+      borderRadius: 10,
+      overflow: "hidden",
+      border: "1px solid #f0f0f0",
+    }}>
+      <MapContainer
+        center={center}
+        zoom={14}
+        style={{ height: 300, width: "100%" }}
+        scrollWheelZoom={true}
+        attributionControl={true}
+      >
+        <TileLayer
+          attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {pins.map((pin, i) => (
+          <Marker
+            key={`${pin.lat}-${pin.lng}-${pin.startTime}-${i}`}
+            position={[pin.lat, pin.lng]}
+            icon={pin.isCurrent ? currentIcon : historyIcon}
+          >
+            <Popup>
+              <div style={{ fontSize: 13, lineHeight: 1.4 }}>
+                <div style={{
+                  fontWeight: 600,
+                  color: pin.isCurrent ? "#3390ec" : "#333",
+                  marginBottom: 2,
+                }}>
+                  {pin.isCurrent ? `📍 ${t.currentLocation || "Current"}` : `📌 ${t.locationHistory || "History"}`}
+                </div>
+                <div style={{ color: "#555" }}>
+                  {formatMapTime(pin.startTime, pin.endTime)}
+                </div>
+                <div style={{ fontSize: 12, color: "#707579", marginTop: 2 }}>
+                  {pin.lat.toFixed(6)}, {pin.lng.toFixed(6)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
     </div>
   );
 }
