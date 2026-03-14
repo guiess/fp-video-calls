@@ -66,11 +66,18 @@ class FirestoreRepository @Inject constructor(
                     return@addSnapshotListener
                 }
                 val contacts = snapshot?.documents?.map { doc ->
+                    val addedAtValue = doc.get("addedAt")
+                    val addedAtMs = when (addedAtValue) {
+                        is com.google.firebase.Timestamp -> addedAtValue.toDate().time
+                        is Long -> addedAtValue
+                        is Number -> addedAtValue.toLong()
+                        else -> null
+                    }
                     Contact(
                         uid = doc.id,
                         displayName = doc.getString("displayName") ?: "",
                         photoURL = doc.getString("photoURL"),
-                        addedAt = doc.getTimestamp("addedAt")?.toDate()?.time
+                        addedAt = addedAtMs
                     )
                 } ?: emptyList()
                 trySend(contacts)
