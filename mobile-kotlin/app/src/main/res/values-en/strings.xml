@@ -46,7 +46,7 @@
     <string name="status_group_suffix">" · Group"</string>
 
     <!-- Sign In Screen -->
-    <string name="app_title">FP Video Calls</string>
+    <string name="app_title">M² Calls</string>
     <string name="sign_in_subtitle">Call family &amp; friends</string>
     <string name="sign_in_google">🔵  Sign in with Google</string>
     <string name="continue_as_guest">Continue as Guest</string>
