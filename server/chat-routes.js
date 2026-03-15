@@ -6,11 +6,29 @@ import { fileURLToPath } from "url";
 import admin from "firebase-admin";
 import db from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
+import {
+  isBlobStorageConfigured,
+  uploadBlob,
+  deleteBlob,
+  generateSasUrl,
+  uploadLocal,
+  deleteLocal,
+} from "./blob-storage.js";
+import { isResizableImage, processImage } from "./image-processor.js";
+import { getAppSettings, getEffectiveStorageLimit } from "./app-config.js";
+import { getLinkPreview } from "./link-preview.js";
 
 const __filename2 = fileURLToPath(import.meta.url);
 const __dirname2 = path.dirname(__filename2);
 const UPLOAD_DIR = process.env.CHAT_UPLOAD_DIR || path.join(process.env.CHAT_DB_PATH ? path.dirname(process.env.CHAT_DB_PATH) : __dirname2, "uploads");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const useBlob = isBlobStorageConfigured();
+if (useBlob) {
+  console.log("[chat-routes] Azure Blob Storage configured — using cloud storage");
+} else {
+  console.log("[chat-routes] Azure Blob Storage not configured — using local filesystem");
+}
 
 const router = Router();
 router.use(requireAuth);
@@ -81,6 +99,76 @@ async function sendFcmToUids(uids, data) {
       });
     })
   );
+}
+
+// ── Storage helpers ─────────────────────────────────────────────────────────
+
+/** Image file extensions (for shared-files type filter). */
+const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"];
+/** Media file extensions (for shared-files type filter). */
+const MEDIA_EXTS = [".mp4", ".mp3", ".wav", ".ogg", ".webm", ".mov"];
+
+/**
+ * Queries total storage used by a user (sum of file_size for messages with media).
+ * @param {string} uid - User UID.
+ * @returns {number} Total bytes used.
+ */
+function getUserStorageUsed(uid) {
+  const row = db.prepare(
+    "SELECT COALESCE(SUM(file_size), 0) as total FROM messages WHERE sender_uid = ? AND media_url IS NOT NULL"
+  ).get(uid);
+  return row.total;
+}
+
+/**
+ * Infers MIME content type from file extension.
+ * @param {string} ext - Lowercase file extension (e.g. ".jpg").
+ * @returns {string} MIME type.
+ */
+function getContentType(ext) {
+  const types = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".webp": "image/webp", ".heic": "image/heic",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".pdf": "application/pdf", ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".txt": "text/plain", ".zip": "application/zip", ".rar": "application/x-rar-compressed",
+    ".7z": "application/x-7z-compressed",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+  };
+  return types[ext] || "application/octet-stream";
+}
+
+/**
+ * Classifies a file name into a type category for the shared-files filter.
+ * @param {string|null} fileName
+ * @returns {"images"|"media"|"other"}
+ */
+function classifyFileType(fileName) {
+  if (!fileName) return "other";
+  const ext = path.extname(fileName).toLowerCase();
+  if (IMAGE_EXTS.includes(ext)) return "images";
+  if (MEDIA_EXTS.includes(ext)) return "media";
+  return "other";
+}
+
+/**
+ * Deletes a file from storage (blob or local), best-effort.
+ * @param {string} mediaUrl - The media_url from the message.
+ */
+async function deleteFile(mediaUrl) {
+  try {
+    const fileName = mediaUrl.split("/").pop();
+    if (useBlob) {
+      await deleteBlob(fileName);
+    } else {
+      deleteLocal(fileName, UPLOAD_DIR);
+    }
+  } catch (_) { /* ignore cleanup errors */ }
 }
 
 // ── GET /api/chat/search-user?email=X — Search user by exact email match ────
@@ -371,13 +459,9 @@ router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
     return res.status(403).json({ ok: false, error: "NOT_SENDER" });
   }
 
-  // Delete file from disk if exists
+  // Delete file from storage (blob or local)
   if (row.media_url) {
-    try {
-      const fileName = row.media_url.split("/").pop();
-      const filePath = path.join(UPLOAD_DIR, fileName);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    } catch (_) { /* ignore cleanup errors */ }
+    await deleteFile(row.media_url);
   }
 
   db.prepare("DELETE FROM messages WHERE id = ? AND conversation_id = ?").run(msgId, id);
@@ -543,7 +627,7 @@ router.delete("/conversations/:id/members/:memberUid", (req, res) => {
 
 // ── DELETE /api/chat/conversations/:id — Leave conversation ─────────────────
 
-router.delete("/conversations/:id", (req, res) => {
+router.delete("/conversations/:id", async (req, res) => {
   const { id } = req.params;
   const uid = req.uid;
 
@@ -566,11 +650,7 @@ router.delete("/conversations/:id", (req, res) => {
       "SELECT media_url FROM messages WHERE conversation_id = ? AND media_url IS NOT NULL"
     ).all(id);
     for (const f of filesRows) {
-      try {
-        const fileName = f.media_url.split("/").pop();
-        const filePath = path.join(UPLOAD_DIR, fileName);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      } catch (_) {}
+      await deleteFile(f.media_url);
     }
     db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(id);
     db.prepare("DELETE FROM read_receipts WHERE conversation_id = ?").run(id);
@@ -582,7 +662,7 @@ router.delete("/conversations/:id", (req, res) => {
 
 // ── POST /api/chat/upload — Upload a file (base64 in JSON body) ─────────────
 
-router.post("/upload", (req, res) => {
+router.post("/upload", async (req, res) => {
   const uid = req.uid;
   const { conversationId, fileName, data } = req.body || {};
 
@@ -593,14 +673,14 @@ router.post("/upload", (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  // File size validation (10MB max)
-  const buffer = Buffer.from(data, "base64");
+  // Decode base64 to buffer
+  let buffer = Buffer.from(data, "base64");
   if (buffer.length > 20 * 1024 * 1024) {
     return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: "20MB" });
   }
 
   // Extension allowlist
-  const ext = path.extname(fileName).toLowerCase();
+  let ext = path.extname(fileName).toLowerCase();
   const allowedExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic",
     ".mp4", ".mov", ".webm", ".pdf", ".doc", ".docx", ".xls", ".xlsx",
     ".ppt", ".pptx", ".txt", ".zip", ".rar", ".7z", ".mp3", ".wav", ".ogg"];
@@ -609,16 +689,154 @@ router.post("/upload", (req, res) => {
   }
 
   try {
+    // ── Per-user storage quota check ──────────────────────────────────────
+    const usedBytes = getUserStorageUsed(uid);
+    const limitBytes = await getEffectiveStorageLimit(uid);
+    if (usedBytes + buffer.length > limitBytes) {
+      return res.status(413).json({
+        ok: false,
+        error: "STORAGE_QUOTA_EXCEEDED",
+        usedBytes,
+        limitBytes,
+        message: `Storage quota exceeded. Used ${Math.round(usedBytes / 1024 / 1024)}MB of ${Math.round(limitBytes / 1024 / 1024)}MB.`,
+      });
+    }
+
+    // ── Image resize on upload ────────────────────────────────────────────
+    let contentType = getContentType(ext);
+    if (isResizableImage(ext)) {
+      try {
+        const settings = await getAppSettings();
+        const result = await processImage(buffer, ext, {
+          maxWidth: settings.imageMaxWidth,
+          maxHeight: settings.imageMaxHeight,
+        });
+        buffer = result.buffer;
+        ext = result.ext;
+        contentType = result.contentType;
+      } catch (imgErr) {
+        console.warn("[chat/upload] Image processing failed, uploading original:", imgErr.message);
+        // Continue with original buffer on processing failure
+      }
+    }
+
+    // ── Store file ────────────────────────────────────────────────────────
     const fileId = crypto.randomUUID();
     const storedName = fileId + ext;
-    const filePath = path.join(UPLOAD_DIR, storedName);
-    fs.writeFileSync(filePath, buffer);
+    let downloadUrl;
 
-    const downloadUrl = `/api/chat/files/${storedName}`;
+    if (useBlob) {
+      await uploadBlob(storedName, buffer, contentType);
+      downloadUrl = `/api/chat/files/${storedName}`;
+    } else {
+      downloadUrl = uploadLocal(storedName, buffer, UPLOAD_DIR);
+    }
+
     return res.json({ ok: true, downloadUrl, fileSize: buffer.length });
   } catch (e) {
     console.error("[chat/upload] failed", e);
     return res.status(500).json({ ok: false, error: "UPLOAD_FAILED" });
+  }
+});
+
+// ── GET /api/chat/storage-usage — Per-user storage usage info ───────────────
+
+router.get("/storage-usage", async (req, res) => {
+  try {
+    const uid = req.uid;
+    const usedBytes = getUserStorageUsed(uid);
+    const limitBytes = await getEffectiveStorageLimit(uid);
+
+    return res.json({
+      ok: true,
+      usedBytes,
+      limitBytes,
+      usedMB: Math.round((usedBytes / 1024 / 1024) * 100) / 100,
+      limitMB: Math.round(limitBytes / 1024 / 1024),
+    });
+  } catch (e) {
+    console.error("[chat/storage-usage] failed", e);
+    return res.status(500).json({ ok: false, error: "STORAGE_USAGE_FAILED" });
+  }
+});
+
+// ── GET /api/chat/shared-files — List files in a conversation ───────────────
+
+router.get("/shared-files", (req, res) => {
+  const uid = req.uid;
+  const { conversationId, type = "all", limit: rawLimit, offset: rawOffset } = req.query;
+
+  if (!conversationId) {
+    return res.status(400).json({ ok: false, error: "MISSING_CONVERSATION_ID" });
+  }
+  if (!isParticipant(conversationId, uid)) {
+    return res.status(403).json({ ok: false, error: "FORBIDDEN" });
+  }
+
+  const limit = Math.min(Math.max(parseInt(rawLimit) || 20, 1), 100);
+  const offset = Math.max(parseInt(rawOffset) || 0, 0);
+
+  try {
+    const rows = db.prepare(`
+      SELECT id, file_name, file_size, sender_uid, sender_name, media_url, type AS msg_type, timestamp
+      FROM messages
+      WHERE conversation_id = ? AND media_url IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ? OFFSET ?
+    `).all(conversationId, limit + 50, offset); // Fetch extra for client-side type filter
+
+    let files = rows.map(r => ({
+      id: r.id,
+      fileName: r.file_name,
+      fileSize: r.file_size,
+      contentType: r.file_name ? getContentType(path.extname(r.file_name).toLowerCase()) : "application/octet-stream",
+      senderUid: r.sender_uid,
+      senderName: r.sender_name,
+      timestamp: r.timestamp,
+      url: r.media_url,
+      fileType: classifyFileType(r.file_name),
+    }));
+
+    // Apply type filter
+    if (type !== "all") {
+      files = files.filter(f => f.fileType === type);
+    }
+
+    // Apply limit after filtering
+    files = files.slice(0, limit);
+
+    return res.json({ ok: true, files });
+  } catch (e) {
+    console.error("[chat/shared-files] failed", e);
+    return res.status(500).json({ ok: false, error: "SHARED_FILES_FAILED" });
+  }
+});
+
+// ── GET /api/chat/link-preview — Fetch URL metadata ─────────────────────────
+
+router.get("/link-preview", async (req, res) => {
+  const { url } = req.query;
+
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ ok: false, error: "MISSING_URL" });
+  }
+
+  // Basic URL validation
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return res.status(400).json({ ok: false, error: "INVALID_URL" });
+    }
+  } catch {
+    return res.status(400).json({ ok: false, error: "INVALID_URL" });
+  }
+
+  try {
+    const preview = await getLinkPreview(url);
+    return res.json({ ok: true, ...preview });
+  } catch (e) {
+    console.error("[chat/link-preview] failed", e);
+    return res.json({ ok: true, title: "", description: "", image: "", siteName: "", url });
   }
 });
 
