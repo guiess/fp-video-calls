@@ -2,12 +2,13 @@ package com.fpvideocalls.data
 
 import android.content.Context
 import android.net.Uri
-import android.util.Base64
 import android.util.Log
+import android.webkit.MimeTypeMap
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -35,7 +36,8 @@ class ChatStorageService @Inject constructor(
         context: Context,
         uri: Uri,
         conversationId: String,
-        fileName: String
+        fileName: String,
+        skipResize: Boolean = false
     ): UploadResult? = withContext(Dispatchers.IO) {
         try {
             val token = getAuthToken() ?: return@withContext null
@@ -47,16 +49,23 @@ class ChatStorageService @Inject constructor(
             inputStream.close()
             val bytes = baos.toByteArray()
 
-            // Upload as base64 JSON
-            val body = JSONObject().apply {
-                put("conversationId", conversationId)
-                put("fileName", fileName)
-                put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
-            }
+            // Determine content type
+            val ext = MimeTypeMap.getFileExtensionFromUrl(fileName)
+            val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+
+            // Upload as multipart form-data
+            val multipartBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("conversationId", conversationId)
+                .addFormDataPart("fileName", fileName)
+                .addFormDataPart("file", fileName, bytes.toRequestBody(mimeType.toMediaType()))
+                .apply { if (skipResize) addFormDataPart("skipResize", "true") }
+                .build()
+
             val request = Request.Builder()
                 .url("$baseUrl/api/chat/upload")
                 .addHeader("Authorization", "Bearer $token")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .post(multipartBody)
                 .build()
 
             val response = okHttpClient.newCall(request).execute()
@@ -66,8 +75,9 @@ class ChatStorageService @Inject constructor(
                 return@withContext null
             }
 
+            val downloadUrl = json.getString("downloadUrl")
             UploadResult(
-                downloadUrl = "$baseUrl${json.getString("downloadUrl")}",
+                downloadUrl = if (downloadUrl.startsWith("http")) downloadUrl else "$baseUrl$downloadUrl",
                 fileSize = json.optLong("fileSize", bytes.size.toLong()),
                 fileName = fileName
             )
