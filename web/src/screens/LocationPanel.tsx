@@ -107,12 +107,20 @@ interface LocationPanelProps {
   onClose: () => void;
 }
 
+const PAGE_SIZE = 10;
+
 export default function LocationPanel({ contactUid, contactName, onClose }: LocationPanelProps) {
   const { t } = useLanguage();
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
-  const [history, setHistory] = useState<LocationHistoryEntry[]>([]);
+  const [allHistory, setAllHistory] = useState<LocationHistoryEntry[]>([]);
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [focusLocation, setFocusLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  // Visible slice of history
+  const history = useMemo(() => allHistory.slice(0, displayCount), [allHistory, displayCount]);
+  const hasMore = displayCount < allHistory.length;
 
   // Subscribe to real-time current location
   useEffect(() => {
@@ -124,16 +132,28 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
   }, [contactUid]);
 
   // Fetch location history on mount
+  const fetchHistory = async () => {
+    const entries = await fetchLocationHistory(contactUid, 200);
+    setAllHistory(entries);
+  };
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const entries = await fetchLocationHistory(contactUid);
-      if (!cancelled) setHistory(entries);
+      const entries = await fetchLocationHistory(contactUid, 200);
+      if (!cancelled) setAllHistory(entries);
     })();
-    // Clean up own old history entries when viewing the location panel
     cleanupOldHistory();
     return () => { cancelled = true; };
   }, [contactUid]);
+
+  // Infinite scroll — load more when near bottom
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el || !hasMore) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      setDisplayCount((c) => Math.min(c + PAGE_SIZE, allHistory.length));
+    }
+  };
 
   // Merge sequential nearby locations for map pins
   const mergedPins = useMemo(() => {
@@ -215,7 +235,7 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px" }}>
+      <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px" }}>
         {loading ? (
           <div style={{ padding: "40px 0", textAlign: "center", color: "#707579", fontSize: 14 }}>
             {t.loading || "Loading..."}
@@ -261,14 +281,41 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
             {history.length > 0 && (
               <div style={{ marginTop: 24 }}>
                 <div style={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "#3390ec",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
                   marginBottom: 8,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
                 }}>
-                  {t.locationHistory}
+                  <div style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "#3390ec",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}>
+                    {t.locationHistory}
+                  </div>
+                  <button
+                    onClick={() => { setDisplayCount(PAGE_SIZE); fetchHistory(); }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 4,
+                      borderRadius: "50%",
+                      display: "flex",
+                      alignItems: "center",
+                      color: "#3390ec",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                    title={t.refresh || "Refresh"}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="23 4 23 10 17 10" />
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                  </button>
                 </div>
                 {history.map((entry) => (
                   <div key={entry.id} onClick={() => setFocusLocation({ lat: entry.lat, lng: entry.lng })} style={{ cursor: "pointer" }}>
@@ -282,6 +329,16 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
                     />
                   </div>
                 ))}
+                {hasMore && (
+                  <div style={{
+                    textAlign: "center",
+                    padding: "12px 0",
+                    color: "#707579",
+                    fontSize: 13,
+                  }}>
+                    {t.loading || "Loading..."}
+                  </div>
+                )}
               </div>
             )}
           </>

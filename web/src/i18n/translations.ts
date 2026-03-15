@@ -94,6 +94,7 @@ export interface Translations {
   locationHistory: string;
   openInMaps: string;
   noLocationData: string;
+  refresh: string;
   contactAdded: string;
   deletedChat: string;
   contactAdded: string;
@@ -238,6 +239,7 @@ export const translations: Record<Language, Translations> = {
     locationHistory: 'История местоположений',
     openInMaps: 'Открыть на карте',
     noLocationData: 'Нет данных о местоположении',
+    refresh: 'Обновить',
     deletedChat: '[Удалено]',
     roomsTab: 'Комнаты',
     optionsTab: 'Настройки',
@@ -378,6 +380,7 @@ export const translations: Record<Language, Translations> = {
     locationHistory: 'Location History',
     openInMaps: 'Open in Maps',
     noLocationData: 'No location data available',
+    refresh: 'Refresh',
     deletedChat: '[Deleted]',
     roomsTab: 'Rooms',
     optionsTab: 'Options',

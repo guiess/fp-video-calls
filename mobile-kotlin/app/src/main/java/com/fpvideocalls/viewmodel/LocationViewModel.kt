@@ -12,14 +12,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * ViewModel for LocationViewScreen. Manages real-time current location
- * subscription and location history fetching from Firestore.
- */
 @HiltViewModel
 class LocationViewModel @Inject constructor(
     private val firestoreRepository: FirestoreRepository
 ) : ViewModel() {
+
+    companion object {
+        private const val PAGE_SIZE = 10
+    }
 
     private val _currentLocation = MutableStateFlow<LocationPoint?>(null)
     val currentLocation: StateFlow<LocationPoint?> = _currentLocation.asStateFlow()
@@ -30,18 +30,24 @@ class LocationViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isLoadingMore = MutableStateFlow(false)
+    val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
+
+    private val _hasMore = MutableStateFlow(true)
+    val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    /**
-     * Starts observing a contact's location. Call once when the screen opens.
-     * Sets up a real-time listener for current location and fetches history.
-     */
+    private var currentContactUid: String = ""
+    private var currentLimit = PAGE_SIZE
+
     fun observeLocation(contactUid: String) {
+        currentContactUid = contactUid
+        currentLimit = PAGE_SIZE
         _isLoading.value = true
         _error.value = null
 
-        // Real-time listener for current location
         viewModelScope.launch {
             try {
                 firestoreRepository.subscribeToCurrentLocation(contactUid).collect { point ->
@@ -55,13 +61,46 @@ class LocationViewModel @Inject constructor(
             }
         }
 
-        // One-shot fetch for history
         viewModelScope.launch {
             try {
-                val history = firestoreRepository.getLocationHistory(contactUid)
-                _locationHistory.value = history
+                val history = firestoreRepository.getLocationHistory(contactUid, currentLimit + 1)
+                _hasMore.value = history.size > currentLimit
+                _locationHistory.value = history.take(currentLimit)
             } catch (e: Exception) {
                 Log.w("LocationViewModel", "History fetch failed", e)
+            }
+        }
+    }
+
+    fun loadMore() {
+        if (_isLoadingMore.value || !_hasMore.value || currentContactUid.isEmpty()) return
+        _isLoadingMore.value = true
+        currentLimit += PAGE_SIZE
+
+        viewModelScope.launch {
+            try {
+                val history = firestoreRepository.getLocationHistory(currentContactUid, currentLimit + 1)
+                _hasMore.value = history.size > currentLimit
+                _locationHistory.value = history.take(currentLimit)
+            } catch (e: Exception) {
+                Log.w("LocationViewModel", "Load more failed", e)
+            } finally {
+                _isLoadingMore.value = false
+            }
+        }
+    }
+
+    fun refreshHistory() {
+        if (currentContactUid.isEmpty()) return
+        currentLimit = PAGE_SIZE
+
+        viewModelScope.launch {
+            try {
+                val history = firestoreRepository.getLocationHistory(currentContactUid, currentLimit + 1)
+                _hasMore.value = history.size > currentLimit
+                _locationHistory.value = history.take(currentLimit)
+            } catch (e: Exception) {
+                Log.w("LocationViewModel", "Refresh failed", e)
             }
         }
     }

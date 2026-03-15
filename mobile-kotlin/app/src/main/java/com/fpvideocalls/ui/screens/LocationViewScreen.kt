@@ -7,11 +7,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -55,6 +57,8 @@ fun LocationViewScreen(
     val currentLocation by viewModel.currentLocation.collectAsState()
     val history by viewModel.locationHistory.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val hasMore by viewModel.hasMore.collectAsState()
     val error by viewModel.error.collectAsState()
 
     LaunchedEffect(contactUid) {
@@ -165,16 +169,34 @@ fun LocationViewScreen(
                         }
                     }
 
-                    // History section header
+                    // History section header with refresh button
                     if (history.isNotEmpty()) {
                         item {
-                            Text(
-                                stringResource(R.string.location_history),
-                                color = OnBackground,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stringResource(R.string.location_history),
+                                    color = OnBackground,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                IconButton(
+                                    onClick = { viewModel.refreshHistory() },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = stringResource(R.string.refresh),
+                                        tint = Purple,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
                         }
 
                         items(history, key = { it.id.ifEmpty { "${it.timestamp}_${it.lat}" } }) { point ->
@@ -183,6 +205,29 @@ fun LocationViewScreen(
                                     location = point,
                                     contactName = contactName
                                 )
+                            }
+                        }
+
+                        // Load more indicator / trigger
+                        if (hasMore) {
+                            item {
+                                LaunchedEffect(history.size) {
+                                    viewModel.loadMore()
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isLoadingMore) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            color = Purple,
+                                            strokeWidth = 2.dp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
