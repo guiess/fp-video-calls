@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { useLanguage } from "../i18n/LanguageContext";
 import { createRoom, sendCallInvite, cancelCall } from "../services/callService";
 import { saveCallRecord } from "../services/callHistoryService";
 import { subscribeChatEvents } from "../services/chatSocket";
@@ -10,9 +11,10 @@ type CallState = "setting_up" | "ringing" | "answered" | "declined" | "timeout" 
 export default function OutgoingCallScreen() {
   const [params] = useSearchParams();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [state, setState] = useState<CallState>("setting_up");
   const calleeUids = (params.get("callees") || "").split(",").filter(Boolean);
-  const calleeName = params.get("name") || "Unknown";
+  const calleeName = params.get("name") || t.unknown;
   const callType = params.get("type") || "direct";
   const quality = (params.get("quality") || "1080p") as "720p" | "1080p";
 
@@ -126,13 +128,13 @@ export default function OutgoingCallScreen() {
     return unsub;
   }, [state]);
 
-  const stateText = {
-    setting_up: "Setting up call...",
-    ringing: "Calling...",
-    answered: "Connecting...",
-    declined: "Call declined",
-    timeout: "No answer",
-    error: "Call failed",
+  const stateText: Record<CallState, string> = {
+    setting_up: t.settingUpCall,
+    ringing: t.calling,
+    answered: t.connecting,
+    declined: t.callDeclined,
+    timeout: t.noAnswer,
+    error: t.callFailed,
   };
 
   return (
@@ -197,7 +199,7 @@ export default function OutgoingCallScreen() {
             background: "rgba(255,255,255,0.15)", border: "none",
             color: "#fff", fontSize: 16, cursor: "pointer",
           }}>
-            Go Back
+            {t.goBack}
           </button>
         )}
       </div>

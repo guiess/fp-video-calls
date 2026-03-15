@@ -141,6 +141,22 @@ export interface Translations {
   groupNamePlaceholder: string;
   selectMembers: string;
   createGroup: string;
+
+  // Call states (outgoing call screen)
+  settingUpCall: string;
+  calling: string;
+  connecting: string;
+  callDeclined: string;
+  noAnswer: string;
+  callFailed: string;
+  goBack: string;
+  unknown: string;
+
+  // Location extras
+  locationUpdated: string;
+  search: string;
+  noContactsYet: string;
+  remove: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -284,6 +300,22 @@ export const translations: Record<Language, Translations> = {
     groupNamePlaceholder: 'Название группы...',
     selectMembers: 'Выберите участников',
     createGroup: 'Создать группу',
+
+    // Call states
+    settingUpCall: 'Подготовка звонка...',
+    calling: 'Вызов...',
+    connecting: 'Подключение...',
+    callDeclined: 'Вызов отклонён',
+    noAnswer: 'Нет ответа',
+    callFailed: 'Ошибка вызова',
+    goBack: 'Назад',
+    unknown: 'Неизвестный',
+
+    // Location extras
+    locationUpdated: 'Обновлено',
+    search: 'Поиск',
+    noContactsYet: 'Контактов пока нет. Найдите по email в «Новый чат», чтобы добавить.',
+    remove: 'Удалить',
   },
   en: {
     // Pre-join view
@@ -425,5 +457,21 @@ export const translations: Record<Language, Translations> = {
     groupNamePlaceholder: 'Group name...',
     selectMembers: 'Select members',
     createGroup: 'Create Group',
+
+    // Call states
+    settingUpCall: 'Setting up call...',
+    calling: 'Calling...',
+    connecting: 'Connecting...',
+    callDeclined: 'Call declined',
+    noAnswer: 'No answer',
+    callFailed: 'Call failed',
+    goBack: 'Go Back',
+    unknown: 'Unknown',
+
+    // Location extras
+    locationUpdated: 'Updated',
+    search: 'Search',
+    noContactsYet: 'No contacts yet. Search by email in New Chat to add contacts.',
+    remove: 'Remove',
   },
 };

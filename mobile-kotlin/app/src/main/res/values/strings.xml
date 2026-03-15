@@ -209,4 +209,5 @@
     <string name="no_location_data">Нет данных</string>
     <string name="location_accuracy">Точность: %1$dм</string>
     <string name="refresh">Обновить</string>
+    <string name="location_bg_permission_required">Разрешение на фоновое местоположение требуется для отслеживания при закрытии приложения</string>
 </resources>

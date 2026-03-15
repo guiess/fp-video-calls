@@ -66,7 +66,7 @@ fun OptionsScreen(
     ) { granted ->
         // Service is already started with foreground permission — background just allows updates when app is backgrounded
         if (!granted) {
-            android.widget.Toast.makeText(context, "Background location needed for tracking when app is closed", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(context, context.getString(R.string.location_bg_permission_required), android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

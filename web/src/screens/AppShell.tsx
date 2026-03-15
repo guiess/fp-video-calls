@@ -343,7 +343,7 @@ export default function AppShell() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search"
+              placeholder={t.search}
               style={{
                 flex: 1, padding: "9px 8px", fontSize: 14,
                 border: "none", outline: "none", background: "transparent", color: "#000",
@@ -604,9 +604,7 @@ export default function AppShell() {
             ) : contacts.length === 0 ? (
               <div style={{ padding: "60px 16px", textAlign: "center", color: "#707579" }}>
                 <p style={{ fontSize: 14 }}>
-                  {language === "ru"
-                    ? "Контактов пока нет. Найдите по email в «Новый чат», чтобы добавить."
-                    : "No contacts yet. Search by email in New Chat to add contacts."}
+                  {t.noContactsYet}
                 </p>
               </div>
             ) : (
@@ -742,7 +740,7 @@ export default function AppShell() {
                             <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
                             <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                           </svg>
-                          {language === "ru" ? "Удалить" : "Remove"}
+                          {t.remove}
                         </button>
                       </div>
                     </>

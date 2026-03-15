@@ -209,4 +209,5 @@
     <string name="no_location_data">No location data</string>
     <string name="location_accuracy">Accuracy: %1$dm</string>
     <string name="refresh">Refresh</string>
+    <string name="location_bg_permission_required">Background location needed for tracking when app is closed</string>
 </resources>
