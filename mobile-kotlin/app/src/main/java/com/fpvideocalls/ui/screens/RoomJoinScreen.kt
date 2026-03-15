@@ -24,10 +24,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.R
+import com.fpvideocalls.data.FirestoreRepository
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.util.RecentRoom
 import com.fpvideocalls.util.RecentRoomsStore
 import com.fpvideocalls.viewmodel.AuthViewModel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -36,20 +38,35 @@ fun RoomJoinScreen(
     isGuest: Boolean = false,
     onBack: (() -> Unit)? = null,
     onJoinRoom: (roomId: String, displayName: String, userId: String) -> Unit,
-    authViewModel: AuthViewModel = hiltViewModel()
+    authViewModel: AuthViewModel = hiltViewModel(),
+    firestoreRepository: FirestoreRepository = hiltViewModel<AuthViewModel>().let {
+        // Get FirestoreRepository from Hilt — reuse the singleton
+        com.fpvideocalls.data.FirestoreRepository(com.google.firebase.firestore.FirebaseFirestore.getInstance())
+    }
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val user by authViewModel.user.collectAsState()
     var roomId by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf(user?.displayName ?: "") }
     var joining by remember { mutableStateOf(false) }
-    var recentRooms by remember { mutableStateOf(RecentRoomsStore.getRecentRooms(context)) }
+    var recentRooms by remember { mutableStateOf<List<RecentRoom>>(emptyList()) }
 
     // Update displayName when user loads (may arrive after initial compose)
     LaunchedEffect(user?.displayName) {
         val name = user?.displayName
         if (!name.isNullOrBlank() && displayName.isBlank()) {
             displayName = name
+        }
+    }
+
+    // Load room history from Firestore for authenticated users, SharedPrefs for guests
+    LaunchedEffect(user?.uid) {
+        val uid = user?.uid
+        recentRooms = if (uid != null) {
+            firestoreRepository.getRecentRooms(uid)
+        } else {
+            RecentRoomsStore.getRecentRooms(context)
         }
     }
 
@@ -60,8 +77,15 @@ fun RoomJoinScreen(
         val uid = user?.uid ?: UUID.randomUUID().toString()
         if (room.isNotEmpty()) {
             joining = true
-            RecentRoomsStore.addRoom(context, room)
-            recentRooms = RecentRoomsStore.getRecentRooms(context)
+            scope.launch {
+                if (user?.uid != null) {
+                    firestoreRepository.addRecentRoom(user!!.uid, room)
+                    recentRooms = firestoreRepository.getRecentRooms(user!!.uid)
+                } else {
+                    RecentRoomsStore.addRoom(context, room)
+                    recentRooms = RecentRoomsStore.getRecentRooms(context)
+                }
+            }
             onJoinRoom(room, name, uid)
         }
     }
@@ -162,8 +186,15 @@ fun RoomJoinScreen(
                         room = room,
                         onJoin = { doJoin(room.roomId) },
                         onRemove = {
-                            RecentRoomsStore.removeRoom(context, room.roomId)
-                            recentRooms = RecentRoomsStore.getRecentRooms(context)
+                            scope.launch {
+                                if (user?.uid != null) {
+                                    firestoreRepository.removeRecentRoom(user!!.uid, room.roomId)
+                                    recentRooms = firestoreRepository.getRecentRooms(user!!.uid)
+                                } else {
+                                    RecentRoomsStore.removeRoom(context, room.roomId)
+                                    recentRooms = RecentRoomsStore.getRecentRooms(context)
+                                }
+                            }
                         }
                     )
                 }

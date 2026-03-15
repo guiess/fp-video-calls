@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { createRoom } from "../services/callService";
+import { addRoomToFirestore } from "../services/roomHistoryService";
 import RoomView from "../components/RoomView";
 
 /**
@@ -58,19 +59,12 @@ export default function AuthRoomScreen() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------------- */
-  /*  Persist to room_history once roomId is known                     */
+  /*  Persist to Firestore room history once roomId is known           */
   /* ---------------------------------------------------------------- */
 
   useEffect(() => {
-    if (!roomId) return;
-    try {
-      const raw = localStorage.getItem("room_history");
-      const history: Array<{ roomId: string; quality: string; joinedAt: number }> =
-        raw ? JSON.parse(raw) : [];
-      const filtered = history.filter((h) => h.roomId !== roomId);
-      const updated = [{ roomId, quality, joinedAt: Date.now() }, ...filtered].slice(0, 50);
-      localStorage.setItem("room_history", JSON.stringify(updated));
-    } catch { /* ignore corrupt data */ }
+    if (!roomId || !user) return;
+    addRoomToFirestore(user.uid, roomId, quality as "720p" | "1080p");
   }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------------- */

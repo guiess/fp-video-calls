@@ -7,6 +7,7 @@ import com.fpvideocalls.model.Group
 import com.fpvideocalls.model.LocationPoint
 import com.fpvideocalls.model.RecentGroup
 import com.fpvideocalls.model.User
+import com.fpvideocalls.util.RecentRoom
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -387,6 +388,61 @@ class FirestoreRepository @Inject constructor(
             }
         } catch (e: Exception) {
             android.util.Log.w("FirestoreRepository", "getLocationHistory error", e)
+            emptyList()
+        }
+    }
+
+    // ---- Room History ----
+
+    /** Add or update a room in the user's room history (dedup by roomId as doc ID). */
+    suspend fun addRecentRoom(uid: String, roomId: String, quality: String = "1080p") {
+        try {
+            val data = hashMapOf<String, Any>(
+                "roomId" to roomId,
+                "quality" to quality,
+                "joinedAt" to System.currentTimeMillis()
+            )
+            firestore.collection("users").document(uid)
+                .collection("recentRooms").document(roomId)
+                .set(data)
+                .await()
+        } catch (e: Exception) {
+            android.util.Log.w("FirestoreRepository", "addRecentRoom error", e)
+        }
+    }
+
+    /** Remove a room from the user's history. */
+    suspend fun removeRecentRoom(uid: String, roomId: String) {
+        try {
+            firestore.collection("users").document(uid)
+                .collection("recentRooms").document(roomId)
+                .delete()
+                .await()
+        } catch (e: Exception) {
+            android.util.Log.w("FirestoreRepository", "removeRecentRoom error", e)
+        }
+    }
+
+    /** Fetch room history, most recent first, with pagination. */
+    suspend fun getRecentRooms(uid: String, limit: Int = 20): List<RecentRoom> {
+        return try {
+            val snapshot = firestore.collection("users").document(uid)
+                .collection("recentRooms")
+                .orderBy("joinedAt", Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { doc ->
+                try {
+                    RecentRoom(
+                        roomId = doc.getString("roomId") ?: return@mapNotNull null,
+                        quality = doc.getString("quality") ?: "1080p",
+                        joinedAt = doc.getLong("joinedAt") ?: 0L
+                    )
+                } catch (_: Exception) { null }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("FirestoreRepository", "getRecentRooms error", e)
             emptyList()
         }
     }

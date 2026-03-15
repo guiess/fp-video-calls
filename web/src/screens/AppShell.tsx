@@ -12,29 +12,7 @@ import NewChatScreen from "./NewChatScreen";
 import NewGroupChatScreen from "./NewGroupChatScreen";
 import LocationPanel from "./LocationPanel";
 
-/* ------------------------------------------------------------------ */
-/*  Room history helpers (localStorage)                                */
-/* ------------------------------------------------------------------ */
-
-interface RoomHistoryItem {
-  roomId: string;
-  quality: "720p" | "1080p";
-  joinedAt: number;
-}
-
-const ROOM_HISTORY_KEY = "room_history";
-
-function loadRoomHistory(): RoomHistoryItem[] {
-  try {
-    return JSON.parse(localStorage.getItem(ROOM_HISTORY_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function persistRoomHistory(history: RoomHistoryItem[]): void {
-  localStorage.setItem(ROOM_HISTORY_KEY, JSON.stringify(history));
-}
+import { addRoomToFirestore, removeRoomFromFirestore, fetchRoomHistory, RoomHistoryItem } from "../services/roomHistoryService";
 
 interface Conversation {
   id: string;
@@ -74,7 +52,7 @@ export default function AppShell() {
   const [activeTab, setActiveTab] = useState<"chats" | "contacts" | "rooms" | "calls" | "options">("chats");
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
-  const [roomHistory, setRoomHistory] = useState<RoomHistoryItem[]>(loadRoomHistory);
+  const [roomHistory, setRoomHistory] = useState<RoomHistoryItem[]>([]);
   const [contacts, setContacts] = useState<{uid: string; displayName: string; photoUrl?: string}[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactMenuOpenId, setContactMenuOpenId] = useState<string | null>(null);
@@ -82,20 +60,19 @@ export default function AppShell() {
   const [viewLocationContact, setViewLocationContact] = useState<{uid: string; name: string} | null>(null);
 
   function addRoomToHistory(roomId: string, quality: "720p" | "1080p") {
+    if (!user) return;
+    // Optimistic update
     setRoomHistory((prev) => {
       const filtered = prev.filter((h) => h.roomId !== roomId);
-      const next = [{ roomId, quality, joinedAt: Date.now() }, ...filtered].slice(0, 50);
-      persistRoomHistory(next);
-      return next;
+      return [{ roomId, quality, joinedAt: Date.now() }, ...filtered];
     });
+    addRoomToFirestore(user.uid, roomId, quality);
   }
 
   function removeRoomFromHistory(roomId: string) {
-    setRoomHistory((prev) => {
-      const next = prev.filter((h) => h.roomId !== roomId);
-      persistRoomHistory(next);
-      return next;
-    });
+    if (!user) return;
+    setRoomHistory((prev) => prev.filter((h) => h.roomId !== roomId));
+    removeRoomFromFirestore(user.uid, roomId);
   }
 
   // Determine if a conversation is open (to highlight in sidebar)
@@ -104,13 +81,12 @@ export default function AppShell() {
   const isSidebarScreen = ["/app/chats/new", "/app/chats/new-group"].includes(location.pathname);
   const hasRightContent = location.pathname !== "/app" && location.pathname !== "/app/" && !isSidebarScreen;
 
-  // Refresh room history from localStorage when navigating back from a room
-  // (AuthRoomScreen also writes to room_history on the create-flow)
+  // Fetch room history from Firestore when switching to rooms tab
   useEffect(() => {
-    if (activeTab === "rooms") {
-      setRoomHistory(loadRoomHistory());
+    if (activeTab === "rooms" && user) {
+      fetchRoomHistory(user.uid).then(setRoomHistory);
     }
-  }, [activeTab, location.pathname]);
+  }, [activeTab, location.pathname, user]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -932,6 +908,19 @@ function RoomsSidebarPanel({ history, onDelete, onJoin }: {
 }) {
   const { t } = useLanguage();
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [displayCount, setDisplayCount] = useState(20);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  const visibleHistory = history.slice(0, displayCount);
+  const hasMore = displayCount < history.length;
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el || !hasMore) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      setDisplayCount((c) => Math.min(c + 20, history.length));
+    }
+  };
 
   function formatJoinedAt(ts: number): string {
     const d = new Date(ts);
@@ -944,7 +933,7 @@ function RoomsSidebarPanel({ history, onDelete, onJoin }: {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
+    <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
       <div style={{ fontSize: 14, fontWeight: 500, color: "#3390ec", padding: "8px 12px 4px" }}>
         {t.recentRooms || "Recent Rooms"}
       </div>
@@ -958,7 +947,7 @@ function RoomsSidebarPanel({ history, onDelete, onJoin }: {
           <span style={{ fontSize: 14 }}>{t.noRecentRooms || "No recent rooms"}</span>
         </div>
       ) : (
-        history.map((item) => (
+        visibleHistory.map((item) => (
           <div key={item.roomId} style={{ position: "relative", padding: "0 4px" }}>
             <button
               onClick={() => onJoin(item.roomId, item.quality)}

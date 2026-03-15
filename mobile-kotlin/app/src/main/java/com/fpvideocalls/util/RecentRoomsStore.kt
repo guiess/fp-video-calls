@@ -6,6 +6,7 @@ import org.json.JSONObject
 
 data class RecentRoom(
     val roomId: String,
+    val quality: String = "1080p",
     val joinedAt: Long = System.currentTimeMillis()
 )
 
