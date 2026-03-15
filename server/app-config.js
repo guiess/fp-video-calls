@@ -12,8 +12,11 @@ import admin from "firebase-admin";
 /** @type {object|null} Cached global settings from Firestore. */
 let _cachedSettings = null;
 
-/** @type {boolean} Whether we've attempted to load settings at least once. */
-let _loaded = false;
+/** @type {number} Timestamp of last fetch. */
+let _cachedAt = 0;
+
+/** Cache TTL: 5 minutes. */
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Default configuration values. */
 const DEFAULTS = {
@@ -39,12 +42,12 @@ const DEFAULTS = {
  * @returns {Promise<object>} Merged settings (Firestore overrides + defaults).
  */
 export async function getAppSettings() {
-  if (_loaded && _cachedSettings) return _cachedSettings;
+  if (_cachedSettings && (Date.now() - _cachedAt) < CACHE_TTL_MS) return _cachedSettings;
 
   try {
     if (!admin.apps.length) {
-      _loaded = true;
       _cachedSettings = { ...DEFAULTS };
+      _cachedAt = Date.now();
       return _cachedSettings;
     }
 
@@ -64,7 +67,7 @@ export async function getAppSettings() {
     _cachedSettings = { ...DEFAULTS };
   }
 
-  _loaded = true;
+  _cachedAt = Date.now();
   return _cachedSettings;
 }
 
@@ -119,5 +122,5 @@ export async function getEffectiveStorageLimit(uid) {
  */
 export function resetConfigCache() {
   _cachedSettings = null;
-  _loaded = false;
+  _cachedAt = 0;
 }
