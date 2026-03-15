@@ -63,6 +63,13 @@ class LocationTrackingService : Service() {
     /** Counter for throttling cleanup — runs every N updates to reduce Firestore reads */
     private var locationUpdateCounter = 0
 
+    /** Tracks last write time to enforce minimum interval between Firestore writes */
+    private var lastWriteTimestamp = 0L
+
+    /** Resolved from Firestore AppConfig on start; fallback to Constants */
+    private var intervalMs = Constants.LOCATION_UPDATE_INTERVAL_MS
+    private var historyMaxAgeDays = Constants.LOCATION_HISTORY_MAX_AGE_DAYS
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -98,7 +105,19 @@ class LocationTrackingService : Service() {
                 return START_NOT_STICKY
             }
 
-            startLocationUpdates(uid)
+            // Fetch remote config (interval, history days) then start updates
+            serviceScope.launch {
+                try {
+                    val configRepo = com.fpvideocalls.data.AppConfigRepository(firestore)
+                    val config = configRepo.getConfig()
+                    intervalMs = config.locationIntervalMinutes * 60 * 1000L
+                    historyMaxAgeDays = config.locationHistoryDays
+                    Log.d(TAG, "Config loaded: interval=${config.locationIntervalMinutes}min, historyDays=$historyMaxAgeDays")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to load config, using defaults", e)
+                }
+                startLocationUpdates(uid)
+            }
             return START_STICKY
         } catch (e: Exception) {
             Log.e(TAG, "Service start failed", e)
@@ -118,13 +137,11 @@ class LocationTrackingService : Service() {
         // Remove any previous callback to avoid duplicates
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
 
-        val intervalMs = Constants.LOCATION_UPDATE_INTERVAL_MS
-
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
             intervalMs
         ).apply {
-            setMinUpdateIntervalMillis(intervalMs / 2)
+            setMinUpdateIntervalMillis(intervalMs)
             setWaitForAccurateLocation(false)
         }.build()
 
@@ -142,6 +159,13 @@ class LocationTrackingService : Service() {
                 }
                 if (accuracy <= 0f) {
                     Log.d(TAG, "Skipping location with invalid accuracy: $accuracy")
+                    return
+                }
+
+                // Enforce minimum interval between writes
+                val now = System.currentTimeMillis()
+                if (lastWriteTimestamp > 0 && now - lastWriteTimestamp < intervalMs) {
+                    Log.d(TAG, "Skipping early update (${(now - lastWriteTimestamp) / 1000}s since last)")
                     return
                 }
 
@@ -208,6 +232,7 @@ class LocationTrackingService : Service() {
                     .add(historyData)
                     .await()
 
+                lastWriteTimestamp = System.currentTimeMillis()
                 Log.d(TAG, "Location written to Firestore: ($lat, $lng)")
 
                 // Periodically clean up old location history entries
@@ -229,7 +254,7 @@ class LocationTrackingService : Service() {
     private suspend fun cleanupOldLocationHistory(uid: String) {
         try {
             val cutoff = System.currentTimeMillis() -
-                (Constants.LOCATION_HISTORY_MAX_AGE_DAYS * 24 * 60 * 60 * 1000L)
+                (historyMaxAgeDays * 24 * 60 * 60 * 1000L)
 
             val oldEntries = firestore.collection("users")
                 .document(uid)
@@ -248,7 +273,7 @@ class LocationTrackingService : Service() {
                 doc.reference.delete()
             }
 
-            Log.d(TAG, "Location history cleanup: deleted ${oldEntries.size()} entries older than ${Constants.LOCATION_HISTORY_MAX_AGE_DAYS} days")
+            Log.d(TAG, "Location history cleanup: deleted ${oldEntries.size()} entries older than $historyMaxAgeDays days")
         } catch (e: Exception) {
             Log.e(TAG, "Location history cleanup failed", e)
         }
