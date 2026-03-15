@@ -157,6 +157,12 @@ export interface Translations {
   search: string;
   noContactsYet: string;
   remove: string;
+
+  // Calls tab & in-call controls
+  callsTab: string;
+  cancel: string;
+  cameraOff: string;
+  cameraOn: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -316,6 +322,12 @@ export const translations: Record<Language, Translations> = {
     search: 'Поиск',
     noContactsYet: 'Контактов пока нет. Найдите по email в «Новый чат», чтобы добавить.',
     remove: 'Удалить',
+
+    // Calls tab & in-call controls
+    callsTab: 'Звонки',
+    cancel: 'Отмена',
+    cameraOff: 'Камера выкл',
+    cameraOn: 'Камера вкл',
   },
   en: {
     // Pre-join view
@@ -473,5 +485,11 @@ export const translations: Record<Language, Translations> = {
     search: 'Search',
     noContactsYet: 'No contacts yet. Search by email in New Chat to add contacts.',
     remove: 'Remove',
+
+    // Calls tab & in-call controls
+    callsTab: 'Calls',
+    cancel: 'Cancel',
+    cameraOff: 'Camera Off',
+    cameraOn: 'Camera On',
   },
 };

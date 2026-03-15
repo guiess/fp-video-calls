@@ -20,7 +20,7 @@ export default function ActiveCallScreen() {
   const { t } = useLanguage();
 
   const calleeUids = (params.get("callees") || "").split(",").filter(Boolean);
-  const calleeName = params.get("name") || "Unknown";
+  const calleeName = params.get("name") || t.unknown;
   const callType = params.get("type") || "direct";
   const quality = (params.get("quality") || "1080p") as "720p" | "1080p";
   // For incoming calls (callee accepting)
@@ -507,7 +507,7 @@ export default function ActiveCallScreen() {
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .8-.13 1.56-.36 2.28"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
                 )}
               </button>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{micEnabled ? "Mute" : "Unmute"}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{micEnabled ? t.mute : t.unmute}</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
               <button onClick={handleEndCall} style={{
@@ -517,7 +517,7 @@ export default function ActiveCallScreen() {
               }}>
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.1-.7-.28-.79-.73-1.68-1.36-2.66-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
               </button>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>Cancel</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{t.cancel}</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
               <button onClick={toggleCam} style={{
@@ -533,7 +533,7 @@ export default function ActiveCallScreen() {
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
                 )}
               </button>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{camEnabled ? "Camera Off" : "Camera On"}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{camEnabled ? t.cameraOff : t.cameraOn}</span>
             </div>
           </div>
         </div>
