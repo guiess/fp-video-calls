@@ -2,14 +2,19 @@ package com.fpvideocalls.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -54,13 +59,29 @@ fun SignInScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("\uD83D\uDCF9", fontSize = 72.sp)
-        Spacer(Modifier.height(16.dp))
+        // App icon foreground
+        Image(
+            painter = painterResource(R.drawable.ic_launcher_foreground),
+            contentDescription = null,
+            modifier = Modifier.size(120.dp)
+        )
+        Spacer(Modifier.height(8.dp))
+        // Metallic gradient title
+        val metallicBrush = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFFF0F2FF),
+                Color(0xFF9AA0B8),
+                Color(0xFFFFFFFF),
+                Color(0xFF6F7395)
+            ),
+            start = Offset.Zero,
+            end = Offset(400f, 400f)
+        )
         Text(
             stringResource(R.string.app_title),
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
-            color = OnBackground
+            style = TextStyle(brush = metallicBrush)
         )
         Spacer(Modifier.height(8.dp))
         Text(
