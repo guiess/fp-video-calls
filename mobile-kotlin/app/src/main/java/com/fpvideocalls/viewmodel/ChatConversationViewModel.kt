@@ -65,6 +65,9 @@ class ChatConversationViewModel @Inject constructor(
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending.asStateFlow()
 
+    private val _uploadingFileName = MutableStateFlow<String?>(null)
+    val uploadingFileName: StateFlow<String?> = _uploadingFileName.asStateFlow()
+
     private val _typingUsers = MutableStateFlow<Set<String>>(emptySet())
     val typingUsers: StateFlow<Set<String>> = _typingUsers.asStateFlow()
 
@@ -253,12 +256,17 @@ class ChatConversationViewModel @Inject constructor(
     }
 
     fun sendMedia(context: Context, uri: Uri, type: String, senderName: String?) {
-        val convoId = currentConversationId ?: return
-        if (convoId.startsWith("new")) return // Must send text first to create conversation
+        val convoId = currentConversationId
+        android.util.Log.d("ChatConvVM", "sendMedia: convoId=$convoId type=$type uri=$uri")
+        if (convoId == null) { android.util.Log.w("ChatConvVM", "sendMedia: no conversationId"); return }
+        if (convoId.startsWith("new")) { android.util.Log.w("ChatConvVM", "sendMedia: conversation not created yet"); return }
         val fileName = getFileName(context, uri) ?: "file"
         viewModelScope.launch {
             _sending.value = true
+            _uploadingFileName.value = fileName
+            android.util.Log.d("ChatConvVM", "sendMedia: uploading $fileName to $convoId")
             val result = chatStorageService.uploadFile(context, uri, convoId, fileName)
+            android.util.Log.d("ChatConvVM", "sendMedia: upload result=${result != null}")
             if (result != null) {
                 val msg = chatRepository.sendMessage(
                     conversationId = convoId,
@@ -276,6 +284,7 @@ class ChatConversationViewModel @Inject constructor(
                 }
             }
             _sending.value = false
+            _uploadingFileName.value = null
         }
     }
 

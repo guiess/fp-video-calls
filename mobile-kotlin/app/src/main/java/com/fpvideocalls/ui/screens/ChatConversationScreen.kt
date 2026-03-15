@@ -73,6 +73,7 @@ fun ChatConversationScreen(
 ) {
     val messages by viewModel.messages.collectAsState()
     val sending by viewModel.sending.collectAsState()
+    val uploadingFileName by viewModel.uploadingFileName.collectAsState()
     val typingUsers by viewModel.typingUsers.collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
     val loadingOlder by viewModel.loadingOlder.collectAsState()
@@ -194,6 +195,42 @@ fun ChatConversationScreen(
             reverseLayout = true,
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
+            // Uploading indicator (appears at bottom since reverseLayout=true)
+            item(key = "__uploading__") {
+                if (uploadingFileName != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFE8F4FD),
+                            tonalElevation = 1.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color(0xFF3390EC)
+                                )
+                                Text(
+                                    uploadingFileName ?: "",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF707579),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 200.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
             items(messages, key = { it.id }) { msg ->
                 val isMine = msg.senderUid == myUid
                 val repliedMsg = if (msg.replyToId != null) messages.find { it.id == msg.replyToId } else null

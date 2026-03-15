@@ -75,9 +75,9 @@ class ChatStorageService @Inject constructor(
                 return@withContext null
             }
 
-            val downloadUrl = json.getString("downloadUrl")
+            val rawDownloadUrl = json.getString("downloadUrl")
             UploadResult(
-                downloadUrl = if (downloadUrl.startsWith("http")) downloadUrl else "$baseUrl$downloadUrl",
+                downloadUrl = rawDownloadUrl,
                 fileSize = json.optLong("fileSize", bytes.size.toLong()),
                 fileName = fileName
             )
