@@ -210,4 +210,7 @@
     <string name="location_accuracy">Accuracy: %1$dm</string>
     <string name="refresh">Refresh</string>
     <string name="location_bg_permission_required">Background location needed for tracking when app is closed</string>
+    <string name="image_upload_choice">How do you want to send the image?</string>
+    <string name="compress">Compressed</string>
+    <string name="full_size">Full size</string>
 </resources>

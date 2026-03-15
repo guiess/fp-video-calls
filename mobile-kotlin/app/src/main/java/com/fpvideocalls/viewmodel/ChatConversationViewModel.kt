@@ -255,18 +255,15 @@ class ChatConversationViewModel @Inject constructor(
         }
     }
 
-    fun sendMedia(context: Context, uri: Uri, type: String, senderName: String?) {
+    fun sendMedia(context: Context, uri: Uri, type: String, senderName: String?, skipResize: Boolean = false) {
         val convoId = currentConversationId
-        android.util.Log.d("ChatConvVM", "sendMedia: convoId=$convoId type=$type uri=$uri")
-        if (convoId == null) { android.util.Log.w("ChatConvVM", "sendMedia: no conversationId"); return }
-        if (convoId.startsWith("new")) { android.util.Log.w("ChatConvVM", "sendMedia: conversation not created yet"); return }
+        if (convoId == null) return
+        if (convoId.startsWith("new")) return
         val fileName = getFileName(context, uri) ?: "file"
         viewModelScope.launch {
             _sending.value = true
             _uploadingFileName.value = fileName
-            android.util.Log.d("ChatConvVM", "sendMedia: uploading $fileName to $convoId")
-            val result = chatStorageService.uploadFile(context, uri, convoId, fileName)
-            android.util.Log.d("ChatConvVM", "sendMedia: upload result=${result != null}")
+            val result = chatStorageService.uploadFile(context, uri, convoId, fileName, skipResize)
             if (result != null) {
                 val msg = chatRepository.sendMessage(
                     conversationId = convoId,

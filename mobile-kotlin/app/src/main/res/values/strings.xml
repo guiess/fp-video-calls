@@ -210,4 +210,7 @@
     <string name="location_accuracy">Точность: %1$dм</string>
     <string name="refresh">Обновить</string>
     <string name="location_bg_permission_required">Разрешение на фоновое местоположение требуется для отслеживания при закрытии приложения</string>
+    <string name="image_upload_choice">Как отправить изображение?</string>
+    <string name="compress">Сжатое</string>
+    <string name="full_size">Оригинал</string>
 </resources>

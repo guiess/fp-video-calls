@@ -43,7 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import coil.request.ImageRequest
 import com.fpvideocalls.R
 import com.fpvideocalls.model.ChatMessage
@@ -92,10 +93,11 @@ fun ChatConversationScreen(
     var confirmRemove by remember { mutableStateOf<ChatParticipant?>(null) }
 
     var showAttachMenu by remember { mutableStateOf(false) }
+    var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
 
     // Media picker
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let { viewModel.sendMedia(context, it, "image", myName) }
+        uri?.let { pendingImageUri = it }
     }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { viewModel.sendMedia(context, it, "file", myName) }
@@ -399,6 +401,33 @@ fun ChatConversationScreen(
         )
     }
 
+    // Image upload size choice dialog
+    pendingImageUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingImageUri = null },
+            title = { Text(stringResource(R.string.chat_photo), fontWeight = FontWeight.SemiBold) },
+            text = { Text(stringResource(R.string.image_upload_choice)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val u = uri
+                    pendingImageUri = null
+                    viewModel.sendMedia(context, u, "image", myName, skipResize = false)
+                }) {
+                    Text("📷 ${stringResource(R.string.compress)}", color = Purple)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val u = uri
+                    pendingImageUri = null
+                    viewModel.sendMedia(context, u, "image", myName, skipResize = true)
+                }) {
+                    Text("🖼️ ${stringResource(R.string.full_size)}")
+                }
+            }
+        )
+    }
+
     // Add member dialog
     if (showAddDialog) {
         val existingUids = participants.map { it.userUid }.toSet()
@@ -691,8 +720,8 @@ private fun MessageBubble(
 
                 when {
                     message.type == "image" && hasMedia -> {
-                        // Image preview
-                        AsyncImage(
+                        // Image preview with loading indicator
+                        SubcomposeAsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
                                 .data(message.mediaUrl)
                                 .crossfade(true)
@@ -703,7 +732,34 @@ private fun MessageBubble(
                                 .fillMaxWidth()
                                 .heightIn(min = 80.dp, max = 200.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { onImageClick(message.mediaUrl!!) }
+                                .clickable { onImageClick(message.mediaUrl!!) },
+                            loading = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(120.dp)
+                                        .background(Color(0xFFF0F0F0), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(28.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color(0xFF3390EC)
+                                    )
+                                }
+                            },
+                            error = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(80.dp)
+                                        .background(Color(0xFFFDE8E8), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("⚠️", fontSize = 24.sp)
+                                }
+                            },
+                            success = { SubcomposeAsyncImageContent() }
                         )
                         Spacer(Modifier.height(4.dp))
                         // Download link
@@ -818,7 +874,7 @@ private fun FullscreenImageViewer(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            AsyncImage(
+            SubcomposeAsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)

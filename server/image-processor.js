@@ -56,7 +56,7 @@ export async function processImage(buffer, ext, options = {}) {
     return { buffer, ext: ".gif", contentType: "image/gif" };
   }
 
-  const image = sharp(buffer);
+  const image = sharp(buffer, { failOn: "none" }).rotate();
   const metadata = await image.metadata();
 
   const width = metadata.width || 0;

@@ -760,18 +760,21 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     // ── Image resize on upload ────────────────────────────────────────────
     let contentType = getContentType(ext);
+    let resized = false;
+    console.log(`[chat/upload] ext=${ext} isResizable=${isResizableImage(ext)} skipResize=${skipResize} bufferLen=${buffer.length}`);
     if (isResizableImage(ext) && !skipResize) {
       try {
         const result = await processImage(buffer, ext, {
           maxWidth: settings.imageMaxWidth,
           maxHeight: settings.imageMaxHeight,
         });
+        console.log(`[chat/upload] resize: before=${buffer.length} after=${result.buffer.length} ext=${result.ext}`);
+        if (result.buffer.length !== buffer.length) resized = true;
         buffer = result.buffer;
         ext = result.ext;
         contentType = result.contentType;
       } catch (imgErr) {
-        console.warn("[chat/upload] Image processing failed, uploading original:", imgErr.message);
-        // Continue with original buffer on processing failure
+        console.error("[chat/upload] Image processing FAILED:", imgErr.message, imgErr.stack);
       }
     }
 
@@ -789,7 +792,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
     // Resolve to SAS URL for the response, keep blob ref for storage
     const clientUrl = await resolveMediaUrl(downloadUrl);
-    return res.json({ ok: true, downloadUrl, signedUrl: clientUrl, fileSize: buffer.length });
+    return res.json({ ok: true, downloadUrl, signedUrl: clientUrl, fileSize: buffer.length, resized });
   } catch (e) {
     console.error("[chat/upload] failed", e);
     return res.status(500).json({ ok: false, error: "UPLOAD_FAILED" });
