@@ -3,6 +3,7 @@ package com.fpvideocalls.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -128,6 +129,7 @@ fun LocationViewScreen(
                     currentLocation?.let { GeoPoint(it.lat, it.lng) }
                         ?: history.firstOrNull()?.let { GeoPoint(it.lat, it.lng) }
                 }
+                var focusMapOn by remember { mutableStateOf<GeoPoint?>(null) }
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -139,17 +141,28 @@ fun LocationViewScreen(
                         item {
                             LocationMapView(
                                 pins = mergedPins,
-                                center = mapCenter
+                                center = focusMapOn ?: mapCenter,
+                                selectedPoint = focusMapOn
                             )
                         }
                     }
 
                     // Current location card
                     item {
-                        CurrentLocationCard(
-                            location = currentLocation,
-                            contactName = contactName
-                        )
+                        if (currentLocation != null) {
+                            val loc = currentLocation!!
+                            Box(Modifier.clickable { focusMapOn = GeoPoint(loc.lat, loc.lng) }) {
+                                CurrentLocationCard(
+                                    location = loc,
+                                    contactName = contactName
+                                )
+                            }
+                        } else {
+                            CurrentLocationCard(
+                                location = currentLocation,
+                                contactName = contactName
+                            )
+                        }
                     }
 
                     // History section header
@@ -165,10 +178,12 @@ fun LocationViewScreen(
                         }
 
                         items(history, key = { it.id.ifEmpty { "${it.timestamp}_${it.lat}" } }) { point ->
-                            HistoryItem(
-                                location = point,
-                                contactName = contactName
-                            )
+                            Box(Modifier.clickable { focusMapOn = GeoPoint(point.lat, point.lng) }) {
+                                HistoryItem(
+                                    location = point,
+                                    contactName = contactName
+                                )
+                            }
                         }
                     }
                 }
@@ -424,7 +439,8 @@ private fun formatMapTime(startTime: Long, endTime: Long?): String {
 @Composable
 private fun LocationMapView(
     pins: List<MergedLocation>,
-    center: GeoPoint
+    center: GeoPoint,
+    selectedPoint: GeoPoint? = null
 ) {
     val context = LocalContext.current
     val purpleColor = Purple
@@ -460,20 +476,32 @@ private fun LocationMapView(
                 mapView.overlays.clear()
                 mapView.controller.setCenter(center)
 
-                for (pin in pins) {
+                // Add history pins first, current pin last (on top)
+                val sorted = pins.sortedBy { it.isCurrent }
+                for (pin in sorted) {
                     val marker = Marker(mapView).apply {
                         position = GeoPoint(pin.lat, pin.lng)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         title = if (pin.isCurrent) "📍 ${context.getString(R.string.current_location)}" else "📌 ${context.getString(R.string.location_history)}"
                         snippet = formatMapTime(pin.startTime, pin.endTime)
 
-                        // Current location: blue circle icon; history: red default
                         if (pin.isCurrent) {
                             icon = createCircleDrawable(ctx = mapView.context, color = purpleColor)
                         }
                     }
                     mapView.overlays.add(marker)
                 }
+
+                // Temporary red highlight marker for selected history item
+                if (selectedPoint != null) {
+                    val sel = Marker(mapView).apply {
+                        position = selectedPoint
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        icon = createCircleDrawable(ctx = mapView.context, color = Color.Red)
+                    }
+                    mapView.overlays.add(sel)
+                }
+
                 mapView.invalidate()
             }
         )

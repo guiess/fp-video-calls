@@ -31,7 +31,7 @@ import {
 // Leaflet map components & CSS
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 
 // Hide the "Leaflet |" prefix from attribution, keep OSM credit
 const leafletHideStyle = document.createElement("style");
@@ -71,6 +71,21 @@ function createCurrentIcon(): L.DivIcon {
   });
 }
 
+/** Red circle marker for the selected / highlighted location. */
+function createSelectedIcon(): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width:18px;height:18px;border-radius:50%;
+      background:#e53935;border:3px solid #fff;
+      box-shadow:0 2px 6px rgba(0,0,0,0.35);
+    "></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    popupAnchor: [0, -10],
+  });
+}
+
 /** Gray circle marker for history locations. */
 function createHistoryIcon(): L.DivIcon {
   return L.divIcon({
@@ -97,6 +112,7 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
   const [history, setHistory] = useState<LocationHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [focusLocation, setFocusLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   // Subscribe to real-time current location
   useEffect(() => {
@@ -213,12 +229,12 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
           <>
             {/* Embedded Map — shows merged location pins on OpenStreetMap */}
             {mapCenter && mergedPins.length > 0 && (
-              <LocationMap pins={mergedPins} center={mapCenter} />
+              <LocationMap pins={mergedPins} center={mapCenter} focusLocation={focusLocation} />
             )}
 
             {/* Current Location */}
             {currentLocation && (
-              <div style={{ marginTop: 16 }}>
+              <div style={{ marginTop: 16, cursor: "pointer" }} onClick={() => setFocusLocation({ lat: currentLocation.lat, lng: currentLocation.lng })}>
                 <div style={{
                   fontSize: 13,
                   fontWeight: 500,
@@ -255,15 +271,16 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
                   {t.locationHistory}
                 </div>
                 {history.map((entry) => (
-                  <LocationCard
-                    key={entry.id}
-                    lat={entry.lat}
-                    lng={entry.lng}
-                    timestamp={entry.timestamp}
-                    accuracy={entry.accuracy}
-                    address={entry.address}
-                    t={t}
-                  />
+                  <div key={entry.id} onClick={() => setFocusLocation({ lat: entry.lat, lng: entry.lng })} style={{ cursor: "pointer" }}>
+                    <LocationCard
+                      lat={entry.lat}
+                      lng={entry.lng}
+                      timestamp={entry.timestamp}
+                      accuracy={entry.accuracy}
+                      address={entry.address}
+                      t={t}
+                    />
+                  </div>
                 ))}
               </div>
             )}
@@ -362,13 +379,22 @@ function LocationCard({ lat, lng, timestamp, accuracy, address, t, highlight }: 
 
 const currentIcon = createCurrentIcon();
 const historyIcon = createHistoryIcon();
+const selectedIcon = createSelectedIcon();
 
 interface LocationMapProps {
   pins: MergedLocation[];
   center: [number, number];
+  focusLocation?: { lat: number; lng: number } | null;
 }
 
-function LocationMap({ pins, center }: LocationMapProps) {
+/** Helper to fly map to a location when focusLocation changes */
+function MapFlyTo({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  useEffect(() => { map.flyTo([lat, lng], 16, { duration: 0.5 }); }, [lat, lng, map]);
+  return null;
+}
+
+function LocationMap({ pins, center, focusLocation }: LocationMapProps) {
   const { t } = useLanguage();
   return (
     <div style={{
@@ -393,6 +419,7 @@ function LocationMap({ pins, center }: LocationMapProps) {
             key={`${pin.lat}-${pin.lng}-${pin.startTime}-${i}`}
             position={[pin.lat, pin.lng]}
             icon={pin.isCurrent ? currentIcon : historyIcon}
+            zIndexOffset={pin.isCurrent ? 1000 : 0}
           >
             <Popup>
               <div style={{ fontSize: 13, lineHeight: 1.4 }}>
@@ -413,6 +440,14 @@ function LocationMap({ pins, center }: LocationMapProps) {
             </Popup>
           </Marker>
         ))}
+        {focusLocation && (
+          <Marker
+            position={[focusLocation.lat, focusLocation.lng]}
+            icon={selectedIcon}
+            zIndexOffset={2000}
+          />
+        )}
+        {focusLocation && <MapFlyTo lat={focusLocation.lat} lng={focusLocation.lng} />}
       </MapContainer>
     </div>
   );
