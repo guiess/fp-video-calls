@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">FP Video Calls</string>
+    <string name="app_name">Metallic Moon Caller</string>
 
     <!-- Home Screen -->
     <string name="home_greeting">Привет, %1$s 👋</string>
