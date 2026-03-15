@@ -11,6 +11,7 @@ import {
   uploadBlob,
   deleteBlob,
   generateSasUrl,
+  listBlobs,
   uploadLocal,
   deleteLocal,
 } from "./blob-storage.js";
@@ -190,19 +191,32 @@ function classifyFileType(fileName) {
  * @param {string} mediaUrl - The media_url from the message.
  */
 async function deleteFile(mediaUrl) {
+  if (!mediaUrl) return;
   try {
     let fileName;
     if (mediaUrl.startsWith("blob:")) {
       fileName = mediaUrl.slice(5);
+    } else if (mediaUrl.includes("/api/chat/files/")) {
+      fileName = mediaUrl.split("/api/chat/files/").pop();
+    } else if (mediaUrl.startsWith("http")) {
+      // SAS URL or full blob URL — extract blob name from path
+      try {
+        const url = new URL(mediaUrl);
+        fileName = url.pathname.split("/").pop();
+      } catch { return; }
     } else {
-      fileName = mediaUrl.split("/").pop();
+      fileName = mediaUrl;
     }
+    if (!fileName) return;
+    console.log(`[deleteFile] Deleting: ${fileName} (from mediaUrl=${mediaUrl.slice(0, 60)})`);
     if (useBlob) {
       await deleteBlob(fileName);
     } else {
       deleteLocal(fileName, UPLOAD_DIR);
     }
-  } catch (_) { /* ignore cleanup errors */ }
+  } catch (e) {
+    console.warn(`[deleteFile] Failed to delete: ${e.message}`);
+  }
 }
 
 // ── GET /api/chat/search-user?email=X — Search user by exact email match ────
@@ -897,6 +911,47 @@ router.get("/link-preview", async (req, res) => {
   } catch (e) {
     console.error("[chat/link-preview] failed", e);
     return res.json({ ok: true, title: "", description: "", image: "", siteName: "", url });
+  }
+});
+
+// ── POST /api/chat/cleanup-orphaned-blobs — Delete blobs not referenced by messages ─
+
+router.post("/cleanup-orphaned-blobs", async (req, res) => {
+  if (!useBlob) {
+    return res.json({ ok: true, message: "Blob storage not configured", deleted: 0 });
+  }
+
+  try {
+    // Get all blob names from Azure
+    const allBlobs = await listBlobs();
+
+    // Get all media_url values from messages
+    const rows = db.prepare("SELECT media_url FROM messages WHERE media_url IS NOT NULL").all();
+    const referencedNames = new Set();
+    for (const r of rows) {
+      const url = r.media_url;
+      if (url.startsWith("blob:")) {
+        referencedNames.add(url.slice(5));
+      } else if (url.includes("/api/chat/files/")) {
+        referencedNames.add(url.split("/api/chat/files/").pop());
+      }
+    }
+
+    // Find orphans
+    const orphans = allBlobs.filter(name => !referencedNames.has(name));
+    const dryRun = req.query.dryRun === "true";
+
+    if (!dryRun) {
+      for (const name of orphans) {
+        await deleteBlob(name);
+      }
+    }
+
+    console.log(`[cleanup] Found ${orphans.length} orphaned blobs (${dryRun ? "dry run" : "deleted"})`);
+    return res.json({ ok: true, total: allBlobs.length, referenced: referencedNames.size, orphans: orphans.length, deleted: dryRun ? 0 : orphans.length, dryRun, orphanNames: orphans });
+  } catch (e) {
+    console.error("[cleanup] failed", e);
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 

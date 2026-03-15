@@ -146,6 +146,19 @@ export async function generateSasUrl(fileName, expiresInMinutes = 60) {
   return `${blockBlobClient.url}?${sasToken}`;
 }
 
+/**
+ * Lists all blob names in the container.
+ * @returns {Promise<string[]>} Array of blob names.
+ */
+export async function listBlobs() {
+  const containerClient = await getContainerClient();
+  const names = [];
+  for await (const blob of containerClient.listBlobsFlat()) {
+    names.push(blob.name);
+  }
+  return names;
+}
+
 // ── Local filesystem fallback functions ─────────────────────────────────────
 
 /**
