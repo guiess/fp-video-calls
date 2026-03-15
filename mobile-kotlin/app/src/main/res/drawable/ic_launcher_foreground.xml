@@ -1,21 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Chat bubble shape (main body centered at Y=54) -->
+    <!-- Metallic moon behind the chat icon, rotated 30deg -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="30">
+        <!-- Moon base with metallic gradient -->
+        <path android:pathData="M54,22 A32,32 0,1,1 53.99,22 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="22"
+                    android:startY="22"
+                    android:endX="86"
+                    android:endY="86">
+                    <item android:offset="0" android:color="#fff0f2ff"/>
+                    <item android:offset="0.4" android:color="#ff9aa0b8"/>
+                    <item android:offset="0.7" android:color="#ffffffff"/>
+                    <item android:offset="1" android:color="#ff6f7395"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- Shadow overlay for depth -->
+        <path android:pathData="M54,22 A32,32 0,1,1 53.99,22 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="22"
+                    android:startY="54"
+                    android:endX="86"
+                    android:endY="54">
+                    <item android:offset="0.4" android:color="#00000000"/>
+                    <item android:offset="1" android:color="#73000000"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+
+    <!-- Chat bubble shape (original, unchanged) -->
     <path
         android:pathData="M30,40 C30,36.7 32.7,34 36,34 L72,34 C75.3,34 78,36.7 78,40 L78,68 C78,71.3 75.3,74 72,74 L50,74 L40,84 L40,74 L36,74 C32.7,74 30,71.3 30,68 Z"
         android:fillColor="#6C63FF" />
 
-    <!-- Video camera body (centered in bubble body) -->
+    <!-- Video camera body (original, unchanged) -->
     <path
         android:pathData="M39,44 L59,44 C60.66,44 62,45.34 62,47 L62,61 C62,62.66 60.66,64 59,64 L39,64 C37.34,64 36,62.66 36,61 L36,47 C36,45.34 37.34,44 39,44 Z"
         android:fillColor="#FFFFFF" />
 
-    <!-- Video camera lens/triangle -->
+    <!-- Video camera lens/triangle (original, unchanged) -->
     <path
         android:pathData="M64,48 L73,43 L73,65 L64,60 Z"
         android:fillColor="#FFFFFF" />
