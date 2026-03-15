@@ -45,6 +45,14 @@ fun RoomJoinScreen(
     var joining by remember { mutableStateOf(false) }
     var recentRooms by remember { mutableStateOf(RecentRoomsStore.getRecentRooms(context)) }
 
+    // Update displayName when user loads (may arrive after initial compose)
+    LaunchedEffect(user?.displayName) {
+        val name = user?.displayName
+        if (!name.isNullOrBlank() && displayName.isBlank()) {
+            displayName = name
+        }
+    }
+
     val guestDefaultName = stringResource(R.string.guest_default_name)
 
     val doJoin = { room: String ->
