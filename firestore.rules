@@ -41,6 +41,11 @@ service cloud.firestore {
       match /recentRooms/{roomDocId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Admin-only subcollection — server uses Admin SDK, clients denied
+      match /admin/{docId} {
+        allow read, write: if false;
+      }
     }
   }
 }

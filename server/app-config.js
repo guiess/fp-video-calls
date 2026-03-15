@@ -19,7 +19,17 @@ let _loaded = false;
 const DEFAULTS = {
   imageMaxWidth: 1280,
   imageMaxHeight: 960,
-  defaultStorageLimitMB: 500,
+  defaultStorageLimitMB: 1024,
+  maxFileUploadMB: 20,
+  allowedFileExtensions: [
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic",
+    ".svg", ".bmp", ".tiff",
+    ".mp4", ".mov", ".webm", ".avi", ".mkv",
+    ".mp3", ".wav", ".ogg", ".flac",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".txt", ".csv", ".json", ".xml",
+    ".zip", ".rar", ".7z",
+  ],
 };
 
 /**
@@ -74,8 +84,8 @@ export async function getUserStorageLimit(uid) {
       .firestore()
       .collection("users")
       .doc(uid)
-      .collection("private")
-      .doc("settings")
+      .collection("admin")
+      .doc("quota")
       .get();
 
     if (doc.exists && typeof doc.data().storageLimitMB === "number") {

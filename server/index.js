@@ -15,7 +15,7 @@ import chatRoutes from "./chat-routes.js";
 import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
-import { isBlobStorageConfigured, generateSasUrl, downloadBlob } from "./blob-storage.js";
+import { isBlobStorageConfigured } from "./blob-storage.js";
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
 // Set FIREBASE_SERVICE_ACCOUNT_JSON to a base64-encoded service-account JSON,
@@ -94,12 +94,13 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "100mb" }));
 
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: false, // CSP would break WebRTC/WebSocket
   crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
 // Rate limiting
@@ -372,28 +373,14 @@ app.post("/api/call/answer", requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ── Public file serving (no auth — UUID filenames are unguessable) ──────────
-app.get("/api/chat/files/:name", async (req, res) => {
+// ── File serving — local storage only (blob files use SAS URLs in message data) ─
+app.get("/api/chat/files/:name", (req, res) => {
   const fileName = path.basename(req.params.name);
-
-  if (isBlobStorageConfigured()) {
-    // Azure Blob Storage: redirect to time-limited SAS URL
-    try {
-      const sasUrl = await generateSasUrl(fileName, 60);
-      return res.redirect(302, sasUrl);
-    } catch (e) {
-      console.error("[files] SAS URL generation failed:", e.message);
-      return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-    }
-  }
-
-  // Local filesystem fallback
   const filePath = path.join(UPLOAD_DIR, fileName);
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   }
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
   return res.sendFile(filePath);
 });
 

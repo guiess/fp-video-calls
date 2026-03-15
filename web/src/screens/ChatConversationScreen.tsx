@@ -20,6 +20,9 @@ interface Message {
   replyToId?: string;
   timestamp: number;
   pending?: boolean;
+  uploading?: boolean;
+  uploadFailed?: boolean;
+  uploadError?: string;
   decryptedText?: string;
 }
 
@@ -45,6 +48,7 @@ export default function ChatConversationScreen() {
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [showMembers, setShowMembers] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   // Read receipts: map of uid -> last_read_at timestamp (other participants)
   const [readReceipts, setReadReceipts] = useState<Record<string, number>>({});
   const [isContact, setIsContact] = useState(true); // assume yes until checked
@@ -84,11 +88,12 @@ export default function ChatConversationScreen() {
         if (msg.conversationId === id) {
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
-            // If this is our own message arriving via socket, remove the pending version
-            const withoutPending = msg.senderUid === user?.uid
-              ? prev.filter((m) => !(m.pending && m.senderUid === msg.senderUid && Math.abs(m.timestamp - msg.timestamp) < 5000))
+            // Remove pending text messages and uploading file placeholders for own messages
+            const cleaned = msg.senderUid === user?.uid
+              ? prev.filter((m) => !(m.pending && m.senderUid === msg.senderUid && Math.abs(m.timestamp - msg.timestamp) < 5000)
+                && !(m.uploading && m.senderUid === msg.senderUid))
               : prev;
-            return [...withoutPending, msg];
+            return [...cleaned, msg];
           });
           scrollToBottom();
           // Only mark as read if this message is from someone else and chat is visible
@@ -310,41 +315,56 @@ export default function ChatConversationScreen() {
     }
   }
 
-  async function uploadFile(file: File) {
+  async function uploadFile(file: File, skipResize = false) {
     if (!user) return;
-    setSending(true);
-    try {
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(",")[1]);
-        };
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
+    const isImage = file.type.startsWith("image/");
+    const label = isImage ? "📷 Photo" : `📎 ${file.name}`;
+    const tempId = `upload-${Date.now()}`;
 
-      // Upload file
-      const uploadRes = await apiFetch("/api/chat/upload", {
+    // Show uploading placeholder immediately
+    const placeholder: Message = {
+      id: tempId,
+      senderUid: user.uid,
+      senderName: user.displayName || "User",
+      type: isImage ? "image" : "file",
+      ciphertext: btoa(encodeURIComponent(label)),
+      iv: btoa("0"),
+      encryptedKeys: {},
+      fileName: file.name,
+      fileSize: file.size,
+      timestamp: Date.now(),
+      uploading: true,
+    };
+    setMessages((prev) => [...prev, placeholder]);
+    scrollToBottom();
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("fileName", file.name);
+      formData.append("conversationId", id!);
+      if (skipResize) formData.append("skipResize", "true");
+
+      const token = await (await import("../firebase")).auth.currentUser?.getIdToken();
+      const uploadRes = await fetch(`${getBaseUrl()}/api/chat/upload`, {
         method: "POST",
-        body: JSON.stringify({
-          conversationId: id,
-          fileName: file.name,
-          data: base64,
-        }),
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+        mode: "cors",
       });
-      if (!uploadRes.ok) throw new Error("Upload failed");
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Upload failed");
+      }
       const uploadData = await uploadRes.json();
 
-      const isImage = file.type.startsWith("image/");
-      const label = isImage ? "📷 Photo" : `📎 ${file.name}`;
       const body: any = {
         type: isImage ? "image" : "file",
         ciphertext: btoa(encodeURIComponent(label)),
         iv: btoa("0"),
         encryptedKeys: {},
         senderName: user.displayName || "User",
-        mediaUrl: uploadData.downloadUrl.startsWith("/") ? `${getBaseUrl()}${uploadData.downloadUrl}` : uploadData.downloadUrl,
+        mediaUrl: uploadData.downloadUrl,
         fileName: file.name,
         fileSize: uploadData.fileSize,
       };
@@ -355,16 +375,16 @@ export default function ChatConversationScreen() {
       });
       if (res.ok) {
         const data = await res.json();
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.message.id)) return prev;
-          return [...prev, data.message];
-        });
+        // Replace placeholder with real message
+        setMessages((prev) => prev.map((m) => m.id === tempId ? data.message : m));
         scrollToBottom();
+      } else {
+        throw new Error("Send failed");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("[chat] upload failed", err);
-    } finally {
-      setSending(false);
+      const errorMsg = err?.message || "Upload failed";
+      setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, uploading: false, uploadFailed: true, uploadError: errorMsg } : m));
     }
   }
 
@@ -645,8 +665,51 @@ export default function ChatConversationScreen() {
                   boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
                   wordBreak: "break-word",
                 }}>
+                  {/* Uploading indicator */}
+                  {m.uploading && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 0", color: "#707579",
+                    }}>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: 8,
+                        background: "#f0f0f0",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <div style={{
+                          width: 20, height: 20, border: "2px solid #3390ec",
+                          borderTopColor: "transparent", borderRadius: "50%",
+                          animation: "spin 0.8s linear infinite",
+                        }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 500 }}>{m.fileName || "Uploading..."}</div>
+                        <div style={{ fontSize: 12 }}>{t.loading || "Uploading..."}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upload failed */}
+                  {m.uploadFailed && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 0", color: "#e53935",
+                    }}>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: 8,
+                        background: "#fde8e8",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 20,
+                      }}>✕</div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 500 }}>{m.fileName || "File"}</div>
+                        <div style={{ fontSize: 12 }}>{m.uploadError || "Upload failed"}</div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Image message */}
-                  {m.type === "image" && m.mediaUrl && (
+                  {m.type === "image" && m.mediaUrl && !m.uploading && !m.uploadFailed && (
                     <div style={{ marginBottom: 4 }}>
                       <img
                         src={getMediaFullUrl(m.mediaUrl)}
@@ -658,7 +721,7 @@ export default function ChatConversationScreen() {
                   )}
 
                   {/* File message */}
-                  {m.type === "file" && m.mediaUrl && (
+                  {m.type === "file" && m.mediaUrl && !m.uploading && !m.uploadFailed && (
                     <a
                       href={getMediaFullUrl(m.mediaUrl)}
                       target="_blank"
@@ -790,7 +853,13 @@ export default function ChatConversationScreen() {
             style={{ display: "none" }}
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file) uploadFile(file);
+              if (file) {
+                if (file.type.startsWith("image/")) {
+                  setPendingFile(file);
+                } else {
+                  uploadFile(file);
+                }
+              }
               e.target.value = "";
             }}
           />
@@ -878,6 +947,52 @@ export default function ChatConversationScreen() {
             }}
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+      {/* Image upload size choice */}
+      {pendingFile && (
+        <div
+          onClick={() => setPendingFile(null)}
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: "#fff", borderRadius: 16, padding: "24px 28px",
+            minWidth: 280, boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+              {pendingFile.name}
+            </div>
+            <div style={{ fontSize: 13, color: "#707579", marginBottom: 20 }}>
+              {(pendingFile.size / 1024 / 1024).toFixed(1)} MB
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => { const f = pendingFile; setPendingFile(null); uploadFile(f, false); }}
+                style={{
+                  flex: 1, padding: "10px 0", borderRadius: 10,
+                  background: "#3390ec", color: "#fff", border: "none",
+                  fontSize: 14, fontWeight: 500, cursor: "pointer",
+                }}
+              >
+                📷 {t.compress || "Compressed"}
+              </button>
+              <button
+                onClick={() => { const f = pendingFile; setPendingFile(null); uploadFile(f, true); }}
+                style={{
+                  flex: 1, padding: "10px 0", borderRadius: 10,
+                  background: "#f4f4f5", color: "#000", border: "none",
+                  fontSize: 14, fontWeight: 500, cursor: "pointer",
+                }}
+              >
+                🖼️ {t.fullSize || "Full size"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

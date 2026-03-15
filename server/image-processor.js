@@ -61,20 +61,24 @@ export async function processImage(buffer, ext, options = {}) {
 
   const width = metadata.width || 0;
   const height = metadata.height || 0;
+  const isPng = ext === ".png";
 
   const needsResize = width > maxWidth || height > maxHeight;
-  const isPng = ext === ".png";
+
+  // If no resize needed, return original buffer unchanged
+  if (!needsResize) {
+    const contentType = isPng ? "image/png" : (ext === ".webp" ? "image/webp" : "image/jpeg");
+    return { buffer, ext, contentType };
+  }
 
   let pipeline = image;
 
-  if (needsResize) {
-    pipeline = pipeline.resize({
-      width: maxWidth,
-      height: maxHeight,
-      fit: "inside",           // Fit within bounds maintaining aspect ratio
-      withoutEnlargement: true, // Don't upscale
-    });
-  }
+  pipeline = pipeline.resize({
+    width: maxWidth,
+    height: maxHeight,
+    fit: "inside",
+    withoutEnlargement: true,
+  });
 
   if (isPng) {
     // Keep PNG format

@@ -33,6 +33,35 @@ if (useBlob) {
 const router = Router();
 router.use(requireAuth);
 
+/**
+ * Resolve a stored media_url to a client-accessible URL.
+ * - Blob files (blob:filename): generate a 60-min SAS URL
+ * - Legacy /api/chat/files/filename: generate SAS URL from filename
+ * - Already full URLs: return as-is
+ */
+async function resolveMediaUrl(mediaUrl) {
+  if (!mediaUrl) return null;
+  if (!useBlob) return mediaUrl; // local storage — paths work as-is
+
+  // Extract blob name from stored URL patterns
+  let blobName = null;
+  if (mediaUrl.startsWith("blob:")) {
+    blobName = mediaUrl.slice(5);
+  } else if (mediaUrl.includes("/api/chat/files/")) {
+    blobName = mediaUrl.split("/api/chat/files/").pop();
+  } else if (mediaUrl.startsWith("http")) {
+    return mediaUrl; // already a full URL
+  } else {
+    blobName = mediaUrl;
+  }
+
+  try {
+    return await generateSasUrl(blobName, 60);
+  } catch {
+    return mediaUrl; // fallback if blob not found
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function isParticipant(conversationId, uid) {
@@ -162,7 +191,12 @@ function classifyFileType(fileName) {
  */
 async function deleteFile(mediaUrl) {
   try {
-    const fileName = mediaUrl.split("/").pop();
+    let fileName;
+    if (mediaUrl.startsWith("blob:")) {
+      fileName = mediaUrl.slice(5);
+    } else {
+      fileName = mediaUrl.split("/").pop();
+    }
     if (useBlob) {
       await deleteBlob(fileName);
     } else {
@@ -369,7 +403,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     ciphertext,
     iv,
     encryptedKeys,
-    mediaUrl: mediaUrl || null,
+    mediaUrl: await resolveMediaUrl(mediaUrl || null),
     fileName: fileName || null,
     fileSize: fileSize || null,
     replyToId: replyToId || null,
@@ -400,7 +434,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
 
 // ── GET /api/chat/conversations/:id/messages — Get messages (paginated) ─────
 
-router.get("/conversations/:id/messages", (req, res) => {
+router.get("/conversations/:id/messages", async (req, res) => {
   const { id } = req.params;
   if (!isParticipant(id, req.uid)) {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
@@ -418,17 +452,17 @@ router.get("/conversations/:id/messages", (req, res) => {
     LIMIT ?
   `).all(id, before, limit);
 
-  const messages = rows.map(r => ({
+  const messages = await Promise.all(rows.map(async r => ({
     ...r,
     conversationId: id,
     senderUid: r.sender_uid,
     senderName: r.sender_name,
     encryptedKeys: JSON.parse(r.encrypted_keys),
-    mediaUrl: r.media_url,
+    mediaUrl: await resolveMediaUrl(r.media_url),
     fileName: r.file_name,
     fileSize: r.file_size,
     replyToId: r.reply_to_id,
-  }));
+  })));
 
   // Get read receipts for other participants (to show double-check marks)
   const receipts = db.prepare(
@@ -660,31 +694,53 @@ router.delete("/conversations/:id", async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ── POST /api/chat/upload — Upload a file (base64 in JSON body) ─────────────
+// ── POST /api/chat/upload — Upload a file (multipart or base64 JSON) ─────────
 
-router.post("/upload", async (req, res) => {
+import multer from "multer";
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+
+router.post("/upload", upload.single("file"), async (req, res) => {
   const uid = req.uid;
-  const { conversationId, fileName, data } = req.body || {};
 
-  if (!conversationId || !fileName || !data) {
+  // Support both multipart form-data and legacy base64 JSON
+  let buffer, fileName, conversationId, skipResize;
+
+  if (req.file) {
+    // Multipart upload
+    buffer = req.file.buffer;
+    fileName = req.body.fileName || req.file.originalname;
+    conversationId = req.body.conversationId;
+    skipResize = req.body.skipResize === "true" || req.body.skipResize === true;
+  } else {
+    // Legacy base64 JSON
+    const { conversationId: cid, fileName: fn, data, skipResize: sr } = req.body || {};
+    if (!cid || !fn || !data) {
+      return res.status(400).json({ ok: false, error: "MISSING_FIELDS" });
+    }
+    buffer = Buffer.from(data, "base64");
+    fileName = fn;
+    conversationId = cid;
+    skipResize = !!sr;
+  }
+
+  if (!conversationId || !fileName) {
     return res.status(400).json({ ok: false, error: "MISSING_FIELDS" });
   }
   if (!isParticipant(conversationId, uid)) {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  // Decode base64 to buffer
-  let buffer = Buffer.from(data, "base64");
-  if (buffer.length > 20 * 1024 * 1024) {
-    return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: "20MB" });
+  const settings = await getAppSettings();
+  const maxFileMB = settings.maxFileUploadMB || 20;
+  if (buffer.length > maxFileMB * 1024 * 1024) {
+    return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: `${maxFileMB}MB` });
   }
 
-  // Extension allowlist
+  // Extension allowlist from config (* = allow all)
   let ext = path.extname(fileName).toLowerCase();
-  const allowedExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic",
-    ".mp4", ".mov", ".webm", ".pdf", ".doc", ".docx", ".xls", ".xlsx",
-    ".ppt", ".pptx", ".txt", ".zip", ".rar", ".7z", ".mp3", ".wav", ".ogg"];
-  if (ext && !allowedExts.includes(ext)) {
+  const allowedExts = settings.allowedFileExtensions || [];
+  const allowAll = Array.isArray(allowedExts) && allowedExts.includes("*");
+  if (ext && !allowAll && !allowedExts.includes(ext)) {
     return res.status(400).json({ ok: false, error: "FILE_TYPE_NOT_ALLOWED" });
   }
 
@@ -704,9 +760,8 @@ router.post("/upload", async (req, res) => {
 
     // ── Image resize on upload ────────────────────────────────────────────
     let contentType = getContentType(ext);
-    if (isResizableImage(ext)) {
+    if (isResizableImage(ext) && !skipResize) {
       try {
-        const settings = await getAppSettings();
         const result = await processImage(buffer, ext, {
           maxWidth: settings.imageMaxWidth,
           maxHeight: settings.imageMaxHeight,
@@ -726,13 +781,15 @@ router.post("/upload", async (req, res) => {
     let downloadUrl;
 
     if (useBlob) {
-      await uploadBlob(storedName, buffer, contentType);
-      downloadUrl = `/api/chat/files/${storedName}`;
+      await uploadBlob(storedName, buffer, contentType, fileName);
+      downloadUrl = `blob:${storedName}`;
     } else {
       downloadUrl = uploadLocal(storedName, buffer, UPLOAD_DIR);
     }
 
-    return res.json({ ok: true, downloadUrl, fileSize: buffer.length });
+    // Resolve to SAS URL for the response, keep blob ref for storage
+    const clientUrl = await resolveMediaUrl(downloadUrl);
+    return res.json({ ok: true, downloadUrl, signedUrl: clientUrl, fileSize: buffer.length });
   } catch (e) {
     console.error("[chat/upload] failed", e);
     return res.status(500).json({ ok: false, error: "UPLOAD_FAILED" });
@@ -762,7 +819,7 @@ router.get("/storage-usage", async (req, res) => {
 
 // ── GET /api/chat/shared-files — List files in a conversation ───────────────
 
-router.get("/shared-files", (req, res) => {
+router.get("/shared-files", async (req, res) => {
   const uid = req.uid;
   const { conversationId, type = "all", limit: rawLimit, offset: rawOffset } = req.query;
 
@@ -785,7 +842,7 @@ router.get("/shared-files", (req, res) => {
       LIMIT ? OFFSET ?
     `).all(conversationId, limit + 50, offset); // Fetch extra for client-side type filter
 
-    let files = rows.map(r => ({
+    let files = await Promise.all(rows.map(async r => ({
       id: r.id,
       fileName: r.file_name,
       fileSize: r.file_size,
@@ -793,9 +850,9 @@ router.get("/shared-files", (req, res) => {
       senderUid: r.sender_uid,
       senderName: r.sender_name,
       timestamp: r.timestamp,
-      url: r.media_url,
+      url: await resolveMediaUrl(r.media_url),
       fileType: classifyFileType(r.file_name),
-    }));
+    })));
 
     // Apply type filter
     if (type !== "all") {

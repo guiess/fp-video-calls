@@ -15,6 +15,22 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Fetch timeout in milliseconds. */
 const FETCH_TIMEOUT_MS = 5000;
 
+/** Private/internal IP patterns to block (SSRF protection). */
+const PRIVATE_PATTERNS = [
+  /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
+  /^0\./, /^169\.254\./, /^::1$/, /^fc00:/i, /^fe80:/i, /^fd/i,
+];
+
+function isPrivateUrl(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (hostname === "localhost" || hostname === "[::1]") return true;
+    return PRIVATE_PATTERNS.some((p) => p.test(hostname));
+  } catch {
+    return true; // block malformed URLs
+  }
+}
+
 // ── Ensure the link_previews table exists ───────────────────────────────────
 
 db.exec(`
@@ -35,6 +51,11 @@ db.exec(`
  * @returns {Promise<{ title: string, description: string, image: string, siteName: string, url: string }>}
  */
 export async function getLinkPreview(url) {
+  // SSRF protection — block private/internal IPs
+  if (isPrivateUrl(url)) {
+    return { title: "", description: "", image: "", siteName: "", url };
+  }
+
   // Check cache first
   const cached = getCachedPreview(url);
   if (cached) return cached;

@@ -18,7 +18,7 @@ describe("app-config", () => {
 
       expect(settings.imageMaxWidth).toBe(1280);
       expect(settings.imageMaxHeight).toBe(960);
-      expect(settings.defaultStorageLimitMB).toBe(500);
+      expect(settings.defaultStorageLimitMB).toBe(1024);
     });
 
     it("caches settings after first call", async () => {
@@ -42,10 +42,10 @@ describe("app-config", () => {
   });
 
   describe("getEffectiveStorageLimit()", () => {
-    it("returns default limit (500MB) when Firebase is not available", async () => {
+    it("returns default limit (1024MB) when Firebase is not available", async () => {
       const limit = await getEffectiveStorageLimit("test-uid");
 
-      const expectedBytes = 500 * 1024 * 1024; // 500 MB
+      const expectedBytes = 1024 * 1024 * 1024; // 1 GB
       expect(limit).toBe(expectedBytes);
     });
 

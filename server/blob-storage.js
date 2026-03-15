@@ -63,12 +63,14 @@ async function getContainerClient() {
  * @param {string} contentType - MIME content type (e.g. "image/jpeg").
  * @returns {Promise<string>} The blob URL.
  */
-export async function uploadBlob(fileName, buffer, contentType) {
+export async function uploadBlob(fileName, buffer, contentType, originalName) {
   const containerClient = await getContainerClient();
   const blockBlobClient = containerClient.getBlockBlobClient(fileName);
-  await blockBlobClient.uploadData(buffer, {
-    blobHTTPHeaders: { blobContentType: contentType },
-  });
+  const headers = { blobContentType: contentType };
+  if (originalName) {
+    headers.blobContentDisposition = `inline; filename="${originalName}"`;
+  }
+  await blockBlobClient.uploadData(buffer, { blobHTTPHeaders: headers });
   return blockBlobClient.url;
 }
 

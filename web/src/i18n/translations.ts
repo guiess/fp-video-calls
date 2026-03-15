@@ -164,6 +164,8 @@ export interface Translations {
   cancel: string;
   cameraOff: string;
   cameraOn: string;
+  compress: string;
+  fullSize: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -330,6 +332,8 @@ export const translations: Record<Language, Translations> = {
     cancel: 'Отмена',
     cameraOff: 'Камера выкл',
     cameraOn: 'Камера вкл',
+    compress: 'Сжатое',
+    fullSize: 'Оригинал',
   },
   en: {
     // Pre-join view
@@ -494,5 +498,7 @@ export const translations: Record<Language, Translations> = {
     cancel: 'Cancel',
     cameraOff: 'Camera Off',
     cameraOn: 'Camera On',
+    compress: 'Compressed',
+    fullSize: 'Full size',
   },
 };
