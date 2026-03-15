@@ -52,19 +52,22 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
   const isMobile = dimensions.width < 768;
   const isPortrait = dimensions.height > dimensions.width;
   
+  const singleTile = tiles.length === 1;
+
   return (
     <div style={{
-      display: "grid",
-      gridTemplateColumns: isMobile
+      display: singleTile ? "flex" : "grid",
+      flexDirection: singleTile ? "column" : undefined,
+      gridTemplateColumns: singleTile ? undefined : (isMobile
         ? "repeat(auto-fit, minmax(min(100%, 280px), 1fr))"
-        : "repeat(auto-fit, minmax(280px, 1fr))",
+        : "repeat(auto-fit, minmax(280px, 1fr))"),
       gap: isMobile ? 8 : 12,
       width: "100%",
-      alignContent: "start"
+      height: "100%",
+      alignContent: singleTile ? undefined : "start",
     }}>
       {tiles.map(({ userId, displayName, stream, muted, fullscreen }) => {
         const tileEl = getTileEl?.(userId) || null;
-        // Use prop from parent (App) to determine fullscreen state reliably
         const fsActive = !!fullscreen;
         return (
           <div
@@ -74,17 +77,17 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
               setTileEl?.(userId, el);
             }}
             style={{
-              // Fullscreen tile becomes fixed and centers the video while preserving aspect ratio
               position: fsActive ? "fixed" : "relative",
               inset: fsActive ? 0 : undefined,
               zIndex: fsActive ? 9999 : undefined,
-              background: fsActive ? "#000" : undefined,
-              width: fsActive ? "100vw" : undefined,
-              height: fsActive ? "100vh" : undefined,
-              overflow: fsActive ? "hidden" : undefined,
-              display: fsActive ? "flex" : undefined,
+              background: fsActive ? "#000" : "#000",
+              width: fsActive ? "100vw" : "100%",
+              height: fsActive ? "100vh" : (singleTile ? "100%" : undefined),
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
               alignItems: fsActive ? "center" : undefined,
-              justifyContent: fsActive ? "center" : undefined
+              justifyContent: fsActive ? "center" : undefined,
             }}
           >
             <div style={{ display: fsActive ? "none" : "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -146,17 +149,16 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 }
               }}
               style={{
-                // Centered, fully visible in fullscreen (letterboxed as needed)
                 position: "relative",
-                width: fsActive ? "100%" : "100%",
-                height: fsActive ? "100%" : "auto",
+                width: "100%",
+                flex: (fsActive || singleTile) ? 1 : undefined,
+                height: (fsActive || singleTile) ? undefined : "auto",
                 maxWidth: fsActive ? "100vw" : undefined,
                 maxHeight: fsActive ? "100vh" : undefined,
-                aspectRatio: fsActive ? undefined : "16/9",
+                aspectRatio: (fsActive || singleTile) ? undefined : "16/9",
                 background: "#000",
                 objectFit: "contain",
                 display: "block",
-                // Ensure overlay stays interactive; block native double-click fullscreen on video
                 zIndex: fsActive ? 1 : undefined,
                 pointerEvents: "none",
                 userSelect: "none",

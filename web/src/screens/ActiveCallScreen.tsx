@@ -34,6 +34,7 @@ export default function ActiveCallScreen() {
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(!startWithCamOff);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -45,6 +46,7 @@ export default function ActiveCallScreen() {
   const hadRemoteRef = useRef(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+  const remoteTileRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Build signaling handlers (same logic as App.tsx)
   const buildSignalingHandlers = useCallback((): SignalingHandlers => {
@@ -419,15 +421,45 @@ export default function ActiveCallScreen() {
     setCamEnabled(newEnabled);
   }
 
+  // Fullscreen helpers
+  function requestFullscreen(el?: HTMLElement | null) {
+    if (!el) return;
+    const rfs = el.requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).mozRequestFullScreen;
+    rfs?.call(el).catch(() => {});
+  }
+  function exitFullscreen() {
+    const efs = document.exitFullscreen || (document as any).webkitExitFullscreen || (document as any).mozCancelFullScreen;
+    efs?.call(document).catch(() => {});
+  }
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement;
+      setIsFullscreen(!!fsEl);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange as any);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange as any);
+    };
+  }, []);
+
   const inCall = phase === "in_call";
   const tiles: RemoteTile[] = participants
     .filter(p => p.userId !== userIdRef.current)
-    .map(p => ({
-      userId: p.userId,
-      displayName: p.displayName,
-      stream: remoteStreams[p.userId] || null,
-      muted: p.micMuted,
-    }));
+    .map(p => {
+      const container = remoteTileRefs.current[p.userId] || null;
+      const fsEl = document.fullscreenElement;
+      const isTileFs = !!(isFullscreen && container && fsEl && (fsEl === container || container.contains(fsEl as any)));
+      return {
+        userId: p.userId,
+        displayName: p.displayName,
+        stream: remoteStreams[p.userId] || null,
+        muted: p.micMuted,
+        fullscreen: isTileFs,
+      };
+    });
 
   return (
     <div style={{
@@ -485,7 +517,7 @@ export default function ActiveCallScreen() {
               animation: "pulse 1.5s infinite",
               textShadow: "0 1px 4px rgba(0,0,0,0.5)",
             }}>
-              {phase === "setting_up" ? "Setting up..." : "Calling..."}
+              {phase === "setting_up" ? t.settingUpCall : t.calling}
             </div>
           </div>
           {/* Controls at bottom */}
@@ -542,7 +574,7 @@ export default function ActiveCallScreen() {
       {/* In-call video area */}
       {inCall && (
         <>
-          <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          <div ref={el => { if (el) remoteTileRefs.current["__container__"] = el; }} style={{ flex: 1, position: "relative", overflow: "hidden" }}>
             {tiles.length === 0 ? (
               // Only local video (waiting for remote)
               <video
@@ -552,16 +584,52 @@ export default function ActiveCallScreen() {
               />
             ) : (
               <>
-                <VideoGrid
-                  tiles={tiles}
-                  isFullscreen={false}
-                  micEnabled={micEnabled}
-                  camEnabled={camEnabled}
-                  localStream={svcRef.current?.getLocalStream() || null}
+                {/* Remote video — fills entire area */}
+                <video
+                  autoPlay
+                  playsInline
+                  ref={(el) => {
+                    const stream = tiles[0]?.stream;
+                    if (el && stream && el.srcObject !== stream) {
+                      el.srcObject = stream;
+                      el.play().catch(() => {});
+                    }
+                  }}
+                  style={{
+                    position: "absolute", inset: 0,
+                    width: "100%", height: "100%",
+                    objectFit: "contain", background: "#000",
+                  }}
                 />
+                {/* Fullscreen toggle */}
+                <button
+                  onClick={() => {
+                    const container = remoteTileRefs.current["__container__"];
+                    const fsEl = document.fullscreenElement;
+                    if (fsEl) exitFullscreen(); else requestFullscreen(container);
+                  }}
+                  style={{
+                    position: "absolute", top: 12, right: 12, zIndex: 10,
+                    padding: "8px 14px", borderRadius: 8,
+                    background: "rgba(0,0,0,0.5)", border: "none",
+                    color: "#fff", fontSize: 13, cursor: "pointer",
+                    backdropFilter: "blur(4px)",
+                  }}
+                >
+                  {isFullscreen ? t.exitFullscreen : t.fullscreen}
+                </button>
+                {/* Callee name overlay */}
+                <div style={{
+                  position: "absolute", top: 12, left: 12, zIndex: 10,
+                  padding: "6px 12px", borderRadius: 8,
+                  background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
+                  fontSize: 14, fontWeight: 500,
+                }}>
+                  {tiles[0]?.displayName}
+                </div>
                 {/* Local video PiP */}
                 <div style={{
-                  position: "absolute", bottom: 80, right: 16,
+                  position: "absolute", bottom: 80, right: 16, zIndex: 10,
                   width: 120, height: 160, borderRadius: 12,
                   overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
                   border: "2px solid rgba(255,255,255,0.2)",
@@ -624,14 +692,14 @@ export default function ActiveCallScreen() {
           alignItems: "center", justifyContent: "center",
         }}>
           <div style={{ fontSize: 20, marginBottom: 24 }}>
-            {phase === "error" ? "Call failed" : "Call ended"}
+            {phase === "error" ? t.callFailed : t.callEnded}
           </div>
           <button onClick={() => { window.location.href = "/app"; }} style={{
             padding: "12px 32px", borderRadius: 24,
             background: "rgba(255,255,255,0.15)", border: "none",
             color: "#fff", fontSize: 16, cursor: "pointer",
           }}>
-            Go Back
+            {t.goBack}
           </button>
         </div>
       )}

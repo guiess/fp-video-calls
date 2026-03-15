@@ -149,6 +149,7 @@ export interface Translations {
   callDeclined: string;
   noAnswer: string;
   callFailed: string;
+  callEnded: string;
   goBack: string;
   unknown: string;
 
@@ -314,6 +315,7 @@ export const translations: Record<Language, Translations> = {
     callDeclined: 'Вызов отклонён',
     noAnswer: 'Нет ответа',
     callFailed: 'Ошибка вызова',
+    callEnded: 'Звонок завершён',
     goBack: 'Назад',
     unknown: 'Неизвестный',
 
@@ -477,6 +479,7 @@ export const translations: Record<Language, Translations> = {
     callDeclined: 'Call declined',
     noAnswer: 'No answer',
     callFailed: 'Call failed',
+    callEnded: 'Call ended',
     goBack: 'Go Back',
     unknown: 'Unknown',
 
