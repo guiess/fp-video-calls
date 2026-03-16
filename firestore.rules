@@ -42,6 +42,18 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
+      // Location current — owner writes, shared contacts can read
+      match /location/{docId} {
+        allow write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null;
+      }
+
+      // Location history — owner writes, shared contacts can read
+      match /locationHistory/{docId} {
+        allow write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null;
+      }
+
       // Admin-only subcollection — server uses Admin SDK, clients denied
       match /admin/{docId} {
         allow read, write: if false;
