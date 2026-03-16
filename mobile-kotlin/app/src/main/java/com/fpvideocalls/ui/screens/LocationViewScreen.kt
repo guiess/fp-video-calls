@@ -135,24 +135,23 @@ fun LocationViewScreen(
                 }
                 var focusMapOn by remember { mutableStateOf<GeoPoint?>(null) }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Embedded Map — shows merged location pins on OpenStreetMap
-                    if (mapCenter != null && mergedPins.isNotEmpty()) {
-                        item {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Fixed top: map + current location
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Embedded Map
+                        if (mapCenter != null && mergedPins.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
                             LocationMapView(
                                 pins = mergedPins,
                                 center = focusMapOn ?: mapCenter,
                                 selectedPoint = focusMapOn
                             )
                         }
-                    }
 
-                    // Current location card
-                    item {
+                        // Current location card
                         if (currentLocation != null) {
                             val loc = currentLocation!!
                             Box(Modifier.clickable { focusMapOn = GeoPoint(loc.lat, loc.lng) }) {
@@ -169,63 +168,69 @@ fun LocationViewScreen(
                         }
                     }
 
-                    // History section header with refresh button
+                    // Scrollable history list
                     if (history.isNotEmpty()) {
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                stringResource(R.string.location_history),
+                                color = OnBackground,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            IconButton(
+                                onClick = { viewModel.refreshHistory() },
+                                modifier = Modifier.size(32.dp)
                             ) {
-                                Text(
-                                    stringResource(R.string.location_history),
-                                    color = OnBackground,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = stringResource(R.string.refresh),
+                                    tint = Purple,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                IconButton(
-                                    onClick = { viewModel.refreshHistory() },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = stringResource(R.string.refresh),
-                                        tint = Purple,
-                                        modifier = Modifier.size(20.dp)
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(history, key = { it.id.ifEmpty { "${it.timestamp}_${it.lat}" } }) { point ->
+                                Box(Modifier.clickable { focusMapOn = GeoPoint(point.lat, point.lng) }) {
+                                    HistoryItem(
+                                        location = point,
+                                        contactName = contactName
                                     )
                                 }
                             }
-                        }
 
-                        items(history, key = { it.id.ifEmpty { "${it.timestamp}_${it.lat}" } }) { point ->
-                            Box(Modifier.clickable { focusMapOn = GeoPoint(point.lat, point.lng) }) {
-                                HistoryItem(
-                                    location = point,
-                                    contactName = contactName
-                                )
-                            }
-                        }
-
-                        // Load more indicator / trigger
-                        if (hasMore) {
-                            item {
-                                LaunchedEffect(history.size) {
-                                    viewModel.loadMore()
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isLoadingMore) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(24.dp),
-                                            color = Purple,
-                                            strokeWidth = 2.dp
-                                        )
+                            // Load more indicator / trigger
+                            if (hasMore) {
+                                item {
+                                    LaunchedEffect(history.size) {
+                                        viewModel.loadMore()
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isLoadingMore) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp),
+                                                color = Purple,
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
                                     }
                                 }
                             }

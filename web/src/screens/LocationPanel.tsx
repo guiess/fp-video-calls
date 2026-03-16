@@ -235,18 +235,21 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
       </div>
 
       {/* Content */}
-      <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px" }}>
-        {loading ? (
-          <div style={{ padding: "40px 0", textAlign: "center", color: "#707579", fontSize: 14 }}>
-            {t.loading || "Loading..."}
-          </div>
-        ) : !currentLocation && history.length === 0 ? (
-          <div style={{ padding: "60px 0", textAlign: "center", color: "#707579" }}>
+      {loading ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#707579", fontSize: 14 }}>
+          {t.loading || "Loading..."}
+        </div>
+      ) : !currentLocation && history.length === 0 ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#707579" }}>
+          <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📍</div>
             <p style={{ fontSize: 14 }}>{t.noLocationData}</p>
           </div>
-        ) : (
-          <>
+        </div>
+      ) : (
+        <>
+          {/* Fixed top: map + current location */}
+          <div style={{ flexShrink: 0, padding: "0 16px" }}>
             {/* Embedded Map — shows merged location pins on OpenStreetMap */}
             {mapCenter && mergedPins.length > 0 && (
               <LocationMap pins={mergedPins} center={mapCenter} focusLocation={focusLocation} />
@@ -276,47 +279,51 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
                 />
               </div>
             )}
+          </div>
 
-            {/* Location History */}
-            {history.length > 0 && (
-              <div style={{ marginTop: 24 }}>
+          {/* Scrollable history list */}
+          {history.length > 0 && (
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "0 16px" }}>
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: 24,
+                marginBottom: 8,
+                flexShrink: 0,
+              }}>
                 <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 8,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "#3390ec",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
                 }}>
-                  <div style={{
-                    fontSize: 13,
-                    fontWeight: 500,
-                    color: "#3390ec",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.5,
-                  }}>
-                    {t.locationHistory}
-                  </div>
-                  <button
-                    onClick={() => { setDisplayCount(PAGE_SIZE); fetchHistory(); }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: 4,
-                      borderRadius: "50%",
-                      display: "flex",
-                      alignItems: "center",
-                      color: "#3390ec",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                    title={t.refresh || "Refresh"}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="23 4 23 10 17 10" />
-                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                    </svg>
-                  </button>
+                  {t.locationHistory}
                 </div>
+                <button
+                  onClick={() => { setDisplayCount(PAGE_SIZE); fetchHistory(); }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 4,
+                    borderRadius: "50%",
+                    display: "flex",
+                    alignItems: "center",
+                    color: "#3390ec",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  title={t.refresh || "Refresh"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10" />
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                  </svg>
+                </button>
+              </div>
+              <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
                 {history.map((entry) => (
                   <div key={entry.id} onClick={() => setFocusLocation({ lat: entry.lat, lng: entry.lng })} style={{ cursor: "pointer" }}>
                     <LocationCard
@@ -340,10 +347,10 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
                   </div>
                 )}
               </div>
-            )}
-          </>
-        )}
-      </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
