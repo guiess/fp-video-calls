@@ -136,34 +136,14 @@ fun LocationViewScreen(
                 var focusMapOn by remember { mutableStateOf<GeoPoint?>(null) }
 
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Fixed top: map + current location
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Embedded Map
-                        if (mapCenter != null && mergedPins.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
+                    // Fixed top: map
+                    if (mapCenter != null && mergedPins.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                             LocationMapView(
                                 pins = mergedPins,
                                 center = focusMapOn ?: mapCenter,
                                 selectedPoint = focusMapOn
-                            )
-                        }
-
-                        // Current location card
-                        if (currentLocation != null) {
-                            val loc = currentLocation!!
-                            Box(Modifier.clickable { focusMapOn = GeoPoint(loc.lat, loc.lng) }) {
-                                CurrentLocationCard(
-                                    location = loc,
-                                    contactName = contactName
-                                )
-                            }
-                        } else {
-                            CurrentLocationCard(
-                                location = currentLocation,
-                                contactName = contactName
                             )
                         }
                     }
@@ -200,7 +180,12 @@ fun LocationViewScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 4.dp,
+                                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 4.dp
+                            ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(history, key = { it.id.ifEmpty { "${it.timestamp}_${it.lat}" } }) { point ->
