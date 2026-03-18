@@ -73,6 +73,9 @@ class LocationTrackingService : Service() {
     private var intervalMs = Constants.LOCATION_UPDATE_INTERVAL_MS
     private var historyMaxAgeDays = Constants.LOCATION_HISTORY_MAX_AGE_DAYS
 
+    /** True while location updates are actively registered */
+    private var isTrackingActive = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -119,7 +122,11 @@ class LocationTrackingService : Service() {
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to load config, using defaults", e)
                 }
-                startLocationUpdates(uid)
+                if (!isTrackingActive) {
+                    startLocationUpdates(uid)
+                } else {
+                    Log.d(TAG, "Location updates already active — skipping duplicate registration")
+                }
             }
             return START_STICKY
         } catch (e: Exception) {
@@ -138,7 +145,11 @@ class LocationTrackingService : Service() {
     @Suppress("MissingPermission") // Checked in onStartCommand before calling this
     private fun startLocationUpdates(uid: String) {
         // Remove any previous callback to avoid duplicates
-        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+        locationCallback?.let {
+            fusedLocationClient.removeLocationUpdates(it)
+            locationCallback = null
+        }
+        isTrackingActive = true
 
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
@@ -291,6 +302,7 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+        isTrackingActive = false
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed, location updates stopped")
     }
