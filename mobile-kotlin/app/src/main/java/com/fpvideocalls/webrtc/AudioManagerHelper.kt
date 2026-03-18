@@ -2,16 +2,23 @@ package com.fpvideocalls.webrtc
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.media.ToneGenerator
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * Audio output route — cycles: SPEAKER → BLUETOOTH (if available) → EARPIECE → SPEAKER
+ */
+enum class AudioRoute { SPEAKER, BLUETOOTH, EARPIECE }
 
 class AudioManagerHelper(private val context: Context) {
 
@@ -28,6 +35,9 @@ class AudioManagerHelper(private val context: Context) {
 
     private val _isSpeakerOn = MutableStateFlow(true)
     val isSpeakerOn: StateFlow<Boolean> = _isSpeakerOn.asStateFlow()
+
+    private val _audioRoute = MutableStateFlow(AudioRoute.SPEAKER)
+    val audioRoute: StateFlow<AudioRoute> = _audioRoute.asStateFlow()
 
     private val ringtoneAudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
@@ -77,17 +87,132 @@ class AudioManagerHelper(private val context: Context) {
         previousSpeakerOn = audioManager.isSpeakerphoneOn
         requestAudioFocus(AudioAttributes.USAGE_VOICE_COMMUNICATION)
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = true
-        _isSpeakerOn.value = true
+
+        // Auto-route to Bluetooth if connected, otherwise speaker
+        val btDevice = findBluetoothDevice()
+        if (btDevice != null) {
+            routeTo(AudioRoute.BLUETOOTH)
+        } else {
+            routeTo(AudioRoute.SPEAKER)
+        }
     }
 
+    /**
+     * Cycles to the next audio output: SPEAKER → BLUETOOTH → EARPIECE → SPEAKER.
+     * Skips BLUETOOTH if no Bluetooth device is connected.
+     */
     fun toggleSpeaker() {
-        val newState = !audioManager.isSpeakerphoneOn
-        audioManager.isSpeakerphoneOn = newState
-        _isSpeakerOn.value = newState
+        val hasBluetooth = findBluetoothDevice() != null
+        val next = when (_audioRoute.value) {
+            AudioRoute.SPEAKER -> if (hasBluetooth) AudioRoute.BLUETOOTH else AudioRoute.EARPIECE
+            AudioRoute.BLUETOOTH -> AudioRoute.EARPIECE
+            AudioRoute.EARPIECE -> AudioRoute.SPEAKER
+        }
+        routeTo(next)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun routeTo(route: AudioRoute) {
+        Log.d(TAG, "Routing audio to: $route")
+
+        // On API 31+ use setCommunicationDevice for all routes
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice()
+            stopBluetoothSco()
+            val targetType = when (route) {
+                AudioRoute.SPEAKER -> AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                AudioRoute.EARPIECE -> AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+                AudioRoute.BLUETOOTH -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            }
+            val device = audioManager.availableCommunicationDevices.firstOrNull {
+                it.type == targetType
+            } ?: if (route == AudioRoute.BLUETOOTH) {
+                // Also try BLE headset
+                audioManager.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                }
+            } else null
+
+            if (device != null) {
+                val ok = audioManager.setCommunicationDevice(device)
+                Log.d(TAG, "setCommunicationDevice(${device.type}) -> $ok")
+            } else {
+                Log.w(TAG, "No device found for $route, falling back to speaker")
+                // Fallback: set speaker explicitly
+                val speaker = audioManager.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                }
+                speaker?.let { audioManager.setCommunicationDevice(it) }
+            }
+        } else {
+            // Pre-API 31: use legacy APIs
+            when (route) {
+                AudioRoute.SPEAKER -> {
+                    stopBluetoothSco()
+                    audioManager.isSpeakerphoneOn = true
+                }
+                AudioRoute.BLUETOOTH -> {
+                    audioManager.isSpeakerphoneOn = false
+                    startBluetoothSco()
+                }
+                AudioRoute.EARPIECE -> {
+                    stopBluetoothSco()
+                    audioManager.isSpeakerphoneOn = false
+                }
+            }
+        }
+
+        _audioRoute.value = route
+        _isSpeakerOn.value = route == AudioRoute.SPEAKER
+    }
+
+    private fun findBluetoothDevice(): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return audioManager.availableCommunicationDevices.firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+            }
+        }
+        // Pre-S: check via getDevices
+        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        }
+    }
+
+    private fun clearCommunicationDevice() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun startBluetoothSco() {
+        try {
+            if (!audioManager.isBluetoothScoOn) {
+                audioManager.startBluetoothSco()
+                audioManager.isBluetoothScoOn = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start Bluetooth SCO", e)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopBluetoothSco() {
+        try {
+            if (audioManager.isBluetoothScoOn) {
+                audioManager.isBluetoothScoOn = false
+                audioManager.stopBluetoothSco()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to stop Bluetooth SCO", e)
+        }
     }
 
     fun resetAudioMode() {
+        clearCommunicationDevice()
+        stopBluetoothSco()
         audioManager.mode = previousMode
         audioManager.isSpeakerphoneOn = previousSpeakerOn
     }

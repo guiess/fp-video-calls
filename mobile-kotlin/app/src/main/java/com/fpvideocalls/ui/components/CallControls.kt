@@ -15,19 +15,21 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.fpvideocalls.R
 import com.fpvideocalls.ui.theme.ErrorRed
+import com.fpvideocalls.webrtc.AudioRoute
 
 @Composable
 fun CallControls(
     micMuted: Boolean,
     camEnabled: Boolean,
     isSpeakerOn: Boolean,
+    audioRoute: AudioRoute = if (isSpeakerOn) AudioRoute.SPEAKER else AudioRoute.EARPIECE,
     onToggleMic: () -> Unit,
     onToggleCam: () -> Unit,
     onToggleSpeaker: () -> Unit,
     onSwitchCamera: () -> Unit,
     onEndCall: () -> Unit,
     modifier: Modifier = Modifier
-) {
+){
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -55,10 +57,18 @@ fun CallControls(
             onClick = onToggleCam
         )
 
-        // Speaker / earpiece
+        // Audio output route
         ControlButton(
-            icon = if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.Headphones,
-            contentDescription = if (isSpeakerOn) stringResource(R.string.cd_earpiece) else stringResource(R.string.cd_speaker),
+            icon = when (audioRoute) {
+                AudioRoute.SPEAKER -> Icons.Default.VolumeUp
+                AudioRoute.BLUETOOTH -> Icons.Default.BluetoothAudio
+                AudioRoute.EARPIECE -> Icons.Default.Headphones
+            },
+            contentDescription = when (audioRoute) {
+                AudioRoute.SPEAKER -> stringResource(R.string.cd_speaker)
+                AudioRoute.BLUETOOTH -> stringResource(R.string.cd_bluetooth)
+                AudioRoute.EARPIECE -> stringResource(R.string.cd_earpiece)
+            },
             isActive = true,
             onClick = onToggleSpeaker
         )

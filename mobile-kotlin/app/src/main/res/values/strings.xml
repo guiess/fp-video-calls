@@ -129,6 +129,7 @@
     <string name="cd_enable_camera">Включить камеру</string>
     <string name="cd_earpiece">Динамик телефона</string>
     <string name="cd_speaker">Громкая связь</string>
+    <string name="cd_bluetooth">Bluetooth</string>
     <string name="cd_end_call">Завершить звонок</string>
     <string name="cd_switch_camera">Переключить камеру</string>
     <string name="cd_camera_off">Камера выключена</string>
