@@ -28,6 +28,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.fpvideocalls.R
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.service.LocationTrackingService
+import com.fpvideocalls.service.LocationKeepAliveWorker
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.util.LocaleHelper
 import com.fpvideocalls.util.NotifPrefs
@@ -94,6 +95,8 @@ fun OptionsScreen(
                     bgLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                 }
             }
+            // Request battery optimization exemption so Doze won't kill the service
+            requestBatteryOptimizationExemption(context)
         } else {
             locationEnabled = false
         }
@@ -129,6 +132,7 @@ fun OptionsScreen(
                         if (hasPermission) {
                             locationEnabled = true
                             LocationTrackingService.start(context)
+                            LocationKeepAliveWorker.schedule(context)
                         } else {
                             locationEnabled = false
                             locPrefs.edit().putBoolean("enabled", false).apply()
@@ -159,8 +163,10 @@ fun OptionsScreen(
             .set(mapOf("locationSharing" to mapOf("sharedWith" to contacts)), SetOptions.merge())
         if (enabled) {
             LocationTrackingService.start(context)
+            LocationKeepAliveWorker.schedule(context)
         } else {
             LocationTrackingService.stop(context)
+            LocationKeepAliveWorker.cancel(context)
         }
     }
 
@@ -523,5 +529,22 @@ private fun NotifDropdown(
                 )
             }
         }
+    }
+}
+
+/** Prompts the user to disable battery optimization for reliable background location. */
+private fun requestBatteryOptimizationExemption(context: android.content.Context) {
+    try {
+        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:${context.packageName}")
+            )
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("OptionsScreen", "Failed to request battery optimization exemption", e)
     }
 }

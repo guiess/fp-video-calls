@@ -1,6 +1,8 @@
 package com.fpvideocalls.service
 
 import android.Manifest
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -8,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.fpvideocalls.util.Constants
@@ -279,10 +282,34 @@ class LocationTrackingService : Service() {
         }
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "App swiped from recents — scheduling service restart")
+        scheduleRestart()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed, location updates stopped")
+    }
+
+    /**
+     * Schedules a restart via AlarmManager so the service recovers
+     * after being killed by the system or swiped from recents.
+     */
+    private fun scheduleRestart() {
+        val restartIntent = Intent(this, LocationTrackingService::class.java)
+        val pendingIntent = PendingIntent.getService(
+            this, 1, restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + 5_000,
+            pendingIntent
+        )
     }
 }
