@@ -25,6 +25,22 @@ class AudioManagerHelper(private val context: Context) {
 
     companion object {
         private const val TAG = "AudioManagerHelper"
+
+        /** Pure function for testable route cycling logic. */
+        fun nextAudioRoute(
+            current: AudioRoute,
+            hasWired: Boolean,
+            hasBluetooth: Boolean
+        ): AudioRoute = when (current) {
+            AudioRoute.SPEAKER -> when {
+                hasWired -> AudioRoute.WIRED_HEADSET
+                hasBluetooth -> AudioRoute.BLUETOOTH
+                else -> AudioRoute.EARPIECE
+            }
+            AudioRoute.WIRED_HEADSET -> if (hasBluetooth) AudioRoute.BLUETOOTH else AudioRoute.EARPIECE
+            AudioRoute.BLUETOOTH -> AudioRoute.EARPIECE
+            AudioRoute.EARPIECE -> AudioRoute.SPEAKER
+        }
     }
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -102,22 +118,14 @@ class AudioManagerHelper(private val context: Context) {
     }
 
     /**
-     * Cycles to the next audio output: SPEAKER → BLUETOOTH → EARPIECE → SPEAKER.
-     * Skips BLUETOOTH if no Bluetooth device is connected.
+     * Cycles to the next audio output:
+     * SPEAKER → WIRED_HEADSET → BLUETOOTH → EARPIECE → SPEAKER.
+     * Skips unavailable devices (wired not plugged, Bluetooth not connected).
      */
     fun toggleSpeaker() {
         val hasWired = findWiredHeadset() != null
         val hasBluetooth = findBluetoothDevice() != null
-        val next = when (_audioRoute.value) {
-            AudioRoute.SPEAKER -> when {
-                hasWired -> AudioRoute.WIRED_HEADSET
-                hasBluetooth -> AudioRoute.BLUETOOTH
-                else -> AudioRoute.EARPIECE
-            }
-            AudioRoute.WIRED_HEADSET -> if (hasBluetooth) AudioRoute.BLUETOOTH else AudioRoute.EARPIECE
-            AudioRoute.BLUETOOTH -> AudioRoute.EARPIECE
-            AudioRoute.EARPIECE -> AudioRoute.SPEAKER
-        }
+        val next = nextAudioRoute(_audioRoute.value, hasWired, hasBluetooth)
         routeTo(next)
     }
 
@@ -127,7 +135,7 @@ class AudioManagerHelper(private val context: Context) {
 
         // On API 31+ use setCommunicationDevice for all routes
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.clearCommunicationDevice()
+            clearCommunicationDevice()
             stopBluetoothSco()
             val targetType = when (route) {
                 AudioRoute.SPEAKER -> AudioDeviceInfo.TYPE_BUILTIN_SPEAKER

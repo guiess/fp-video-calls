@@ -131,6 +131,7 @@
     <string name="cd_speaker">Громкая связь</string>
     <string name="cd_bluetooth">Bluetooth</string>
     <string name="cd_headphones">Наушники</string>
+    <string name="samsung_battery_hint">Samsung: установите Батарея → Без ограничений для стабильного отслеживания</string>
     <string name="cd_end_call">Завершить звонок</string>
     <string name="cd_switch_camera">Переключить камеру</string>
     <string name="cd_camera_off">Камера выключена</string>

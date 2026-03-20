@@ -85,7 +85,6 @@ fun InCallScreen(
     val micMuted by (webRTCManager?.micMuted ?: MutableStateFlow(false)).collectAsState()
     val camEnabled by (webRTCManager?.camEnabled ?: MutableStateFlow(true)).collectAsState()
     val signalingState by (webRTCManager?.signalingState ?: MutableStateFlow("connecting")).collectAsState()
-    val isSpeakerOn by (inCallViewModel.audioHelper?.isSpeakerOn ?: MutableStateFlow(true)).collectAsState()
     val audioRoute by (inCallViewModel.audioHelper?.audioRoute ?: MutableStateFlow(com.fpvideocalls.webrtc.AudioRoute.SPEAKER)).collectAsState()
 
     // Overlay controls visibility state
@@ -227,7 +226,6 @@ fun InCallScreen(
                 CallControls(
                     micMuted = micMuted,
                     camEnabled = camEnabled,
-                    isSpeakerOn = isSpeakerOn,
                     audioRoute = audioRoute,
                     onToggleMic = {
                         webRTCManager?.toggleMic()

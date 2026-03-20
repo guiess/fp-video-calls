@@ -21,8 +21,7 @@ import com.fpvideocalls.webrtc.AudioRoute
 fun CallControls(
     micMuted: Boolean,
     camEnabled: Boolean,
-    isSpeakerOn: Boolean,
-    audioRoute: AudioRoute = if (isSpeakerOn) AudioRoute.SPEAKER else AudioRoute.EARPIECE,
+    audioRoute: AudioRoute,
     onToggleMic: () -> Unit,
     onToggleCam: () -> Unit,
     onToggleSpeaker: () -> Unit,

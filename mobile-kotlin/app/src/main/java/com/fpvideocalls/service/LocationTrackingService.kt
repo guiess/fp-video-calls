@@ -27,6 +27,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Foreground service that tracks GPS location using FusedLocationProviderClient
@@ -61,17 +64,17 @@ class LocationTrackingService : Service() {
     private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
 
     /** Counter for throttling cleanup — runs every N updates to reduce Firestore reads */
-    private var locationUpdateCounter = 0
+    private val locationUpdateCounter = AtomicInteger(0)
 
     /** Tracks last write time to enforce minimum interval between Firestore writes */
-    private var lastWriteTimestamp = 0L
+    private val lastWriteTimestamp = AtomicLong(0L)
 
     /** Resolved from Firestore AppConfig on start; fallback to Constants */
-    private var intervalMs = Constants.LOCATION_UPDATE_INTERVAL_MS
-    private var historyMaxAgeDays = Constants.LOCATION_HISTORY_MAX_AGE_DAYS
+    @Volatile private var intervalMs = Constants.LOCATION_UPDATE_INTERVAL_MS
+    @Volatile private var historyMaxAgeDays = Constants.LOCATION_HISTORY_MAX_AGE_DAYS
 
     /** True while location updates are actively registered */
-    private var isTrackingActive = false
+    private val isTrackingActive = AtomicBoolean(false)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -119,7 +122,7 @@ class LocationTrackingService : Service() {
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to load config, using defaults", e)
                 }
-                if (!isTrackingActive) {
+                if (!isTrackingActive.get()) {
                     startLocationUpdates(uid)
                 } else {
                     Log.d(TAG, "Location updates already active — skipping duplicate registration")
@@ -146,7 +149,7 @@ class LocationTrackingService : Service() {
             fusedLocationClient.removeLocationUpdates(it)
             locationCallback = null
         }
-        isTrackingActive = true
+        isTrackingActive.set(true)
 
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
@@ -175,8 +178,9 @@ class LocationTrackingService : Service() {
 
                 // Enforce minimum interval between writes
                 val now = System.currentTimeMillis()
-                if (lastWriteTimestamp > 0 && now - lastWriteTimestamp < intervalMs) {
-                    Log.d(TAG, "Skipping early update (${(now - lastWriteTimestamp) / 1000}s since last)")
+                val lastWrite = lastWriteTimestamp.get()
+                if (lastWrite > 0 && now - lastWrite < intervalMs) {
+                    Log.d(TAG, "Skipping early update (${(now - lastWrite) / 1000}s since last)")
                     return
                 }
 
@@ -229,12 +233,12 @@ class LocationTrackingService : Service() {
                     .add(historyData)
                     .await()
 
-                lastWriteTimestamp = System.currentTimeMillis()
+                lastWriteTimestamp.set(System.currentTimeMillis())
                 Log.d(TAG, "Location written to Firestore: ($lat, $lng)")
 
                 // Periodically clean up old location history entries
-                locationUpdateCounter++
-                if (locationUpdateCounter % Constants.LOCATION_CLEANUP_INTERVAL == 0) {
+                val count = locationUpdateCounter.incrementAndGet()
+                if (count % Constants.LOCATION_CLEANUP_INTERVAL == 0) {
                     cleanupOldLocationHistory(uid)
                 }
             } catch (e: Exception) {
@@ -266,9 +270,11 @@ class LocationTrackingService : Service() {
                 return
             }
 
+            val batch = firestore.batch()
             for (doc in oldEntries.documents) {
-                doc.reference.delete()
+                batch.delete(doc.reference)
             }
+            batch.commit().await()
 
             Log.d(TAG, "Location history cleanup: deleted ${oldEntries.size()} entries older than $historyMaxAgeDays days")
         } catch (e: Exception) {
@@ -285,7 +291,7 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
-        isTrackingActive = false
+        isTrackingActive.set(false)
         serviceScope.cancel()
         Log.d(TAG, "Service destroyed, location updates stopped")
     }

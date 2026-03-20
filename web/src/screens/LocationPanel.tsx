@@ -11,7 +11,7 @@
  * Design: matches existing app patterns — inline styles, #3390ec accent,
  * #707579 secondary, borderRadius 10, consistent padding.
  */
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useLanguage } from "../i18n/LanguageContext";
 import {
   LocationData,
@@ -33,10 +33,16 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 
-// Hide the "Leaflet |" prefix from attribution, keep OSM credit
-const leafletHideStyle = document.createElement("style");
-leafletHideStyle.textContent = `.leaflet-control-attribution a[href*="leafletjs.com"] { display: none !important; } .leaflet-control-attribution span { display: none !important; }`;
-document.head.appendChild(leafletHideStyle);
+// Leaflet attribution style — injected once via CSS string
+const LEAFLET_HIDE_CSS = `.leaflet-control-attribution a[href*="leafletjs.com"] { display: none !important; } .leaflet-control-attribution span { display: none !important; }`;
+let leafletStyleInjected = false;
+function injectLeafletStyle() {
+  if (leafletStyleInjected) return;
+  const style = document.createElement("style");
+  style.textContent = LEAFLET_HIDE_CSS;
+  document.head.appendChild(style);
+  leafletStyleInjected = true;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Leaflet marker icon fix (Vite/Webpack strips default icon URLs)    */
@@ -118,6 +124,8 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
   const [focusLocation, setFocusLocation] = useState<{ lat: number; lng: number } | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
+  useEffect(() => { injectLeafletStyle(); }, []);
+
   // Visible slice of history
   const history = useMemo(() => allHistory.slice(0, displayCount), [allHistory, displayCount]);
   const hasMore = displayCount < allHistory.length;
@@ -131,20 +139,16 @@ export default function LocationPanel({ contactUid, contactName, onClose }: Loca
     return unsub;
   }, [contactUid]);
 
-  // Fetch location history on mount
-  const fetchHistory = async () => {
+  // Fetch location history
+  const fetchHistory = useCallback(async () => {
     const entries = await fetchLocationHistory(contactUid, 200);
     setAllHistory(entries);
-  };
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const entries = await fetchLocationHistory(contactUid, 200);
-      if (!cancelled) setAllHistory(entries);
-    })();
-    cleanupOldHistory();
-    return () => { cancelled = true; };
   }, [contactUid]);
+
+  useEffect(() => {
+    fetchHistory();
+    cleanupOldHistory();
+  }, [fetchHistory]);
 
   // Infinite scroll — load more when near bottom
   const handleScroll = () => {

@@ -26,9 +26,8 @@ import com.fpvideocalls.ui.navigation.AppNavigation
 import com.fpvideocalls.ui.theme.FPVideoCallsTheme
 import com.fpvideocalls.util.CrashHandler
 import com.fpvideocalls.util.LocaleHelper
+import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 val LocalActivity = staticCompositionLocalOf<ComponentActivity> {
@@ -85,7 +84,7 @@ class MainActivity : ComponentActivity() {
         restartLocationTrackingIfNeeded()
 
         // Watch for call ending — if answered from lock screen, return to lock
-        CoroutineScope(Dispatchers.Main).launch {
+        lifecycleScope.launch {
             ActiveCallService.isCallActive.collect { active ->
                 if (!active && answeredFromLockScreen) {
                     answeredFromLockScreen = false

@@ -131,6 +131,7 @@
     <string name="cd_speaker">Speaker</string>
     <string name="cd_bluetooth">Bluetooth</string>
     <string name="cd_headphones">Headphones</string>
+    <string name="samsung_battery_hint">Samsung: Set Battery → Unrestricted for reliable location sharing</string>
     <string name="cd_end_call">End call</string>
     <string name="cd_switch_camera">Switch camera</string>
     <string name="cd_camera_off">Camera off</string>
