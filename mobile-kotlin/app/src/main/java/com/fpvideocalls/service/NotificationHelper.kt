@@ -313,6 +313,10 @@ object NotificationHelper {
     // ---- Location tracking notifications ----
 
     fun createLocationTrackingChannel(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        // Delete legacy channel — Android caches importance, so a new ID is needed
+        manager.deleteNotificationChannel("location_tracking")
+
         val channel = NotificationChannel(
             Constants.LOCATION_TRACKING_CHANNEL_ID,
             context.getString(R.string.location_channel_name),
@@ -323,8 +327,7 @@ object NotificationHelper {
             enableVibration(false)
             setShowBadge(false)
         }
-        context.getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(channel)
+        manager.createNotificationChannel(channel)
     }
 
     fun buildLocationTrackingNotification(context: Context): Notification {
