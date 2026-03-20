@@ -316,11 +316,12 @@ object NotificationHelper {
         val channel = NotificationChannel(
             Constants.LOCATION_TRACKING_CHANNEL_ID,
             context.getString(R.string.location_channel_name),
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN
         ).apply {
             description = context.getString(R.string.location_channel_desc)
             setSound(null, null)
             enableVibration(false)
+            setShowBadge(false)
         }
         context.getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)
@@ -330,8 +331,9 @@ object NotificationHelper {
         return NotificationCompat.Builder(context, Constants.LOCATION_TRACKING_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle(context.getString(R.string.location_sharing_active))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 

@@ -81,6 +81,9 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        // Restart location tracking if it was enabled but died in the background
+        restartLocationTrackingIfNeeded()
+
         // Watch for call ending — if answered from lock screen, return to lock
         CoroutineScope(Dispatchers.Main).launch {
             ActiveCallService.isCallActive.collect { active ->
@@ -148,5 +151,21 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         _isInPipMode = isInPictureInPictureMode
+    }
+
+    private fun restartLocationTrackingIfNeeded() {
+        val prefs = getSharedPreferences("location_prefs", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("enabled", false)) return
+
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
+
+        val hasPermission = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasPermission) return
+
+        android.util.Log.d("MainActivity", "Restarting location tracking service")
+        com.fpvideocalls.service.LocationTrackingService.start(this)
+        com.fpvideocalls.service.LocationKeepAliveWorker.schedule(this)
     }
 }

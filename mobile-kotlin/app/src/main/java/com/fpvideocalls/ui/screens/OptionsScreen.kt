@@ -547,4 +547,30 @@ private fun requestBatteryOptimizationExemption(context: android.content.Context
     } catch (e: Exception) {
         android.util.Log.w("OptionsScreen", "Failed to request battery optimization exemption", e)
     }
+
+    // Samsung: also open app-specific battery settings so user can set "Unrestricted"
+    if (android.os.Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+        openSamsungBatterySettings(context)
+    }
+}
+
+/**
+ * Opens Samsung's per-app battery settings page where the user can set the app
+ * to "Unrestricted" — required on Samsung to prevent background kill.
+ */
+private fun openSamsungBatterySettings(context: android.content.Context) {
+    try {
+        val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = android.net.Uri.parse("package:${context.packageName}")
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        android.widget.Toast.makeText(
+            context,
+            "Samsung: Set Battery → Unrestricted for reliable location sharing",
+            android.widget.Toast.LENGTH_LONG
+        ).show()
+    } catch (e: Exception) {
+        android.util.Log.w("OptionsScreen", "Failed to open Samsung battery settings", e)
+    }
 }

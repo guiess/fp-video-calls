@@ -1,8 +1,6 @@
 package com.fpvideocalls.service
 
 import android.Manifest
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -10,7 +8,6 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.fpvideocalls.util.Constants
@@ -195,20 +192,6 @@ class LocationTrackingService : Service() {
             Looper.getMainLooper()
         )
 
-        // Get immediate first location
-        try {
-            fusedLocationClient.getCurrentLocation(
-                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, null
-            ).addOnSuccessListener { location ->
-                if (location != null) {
-                    Log.d(TAG, "Initial location: lat=${location.latitude}, lng=${location.longitude}")
-                    writeLocationToFirestore(uid, location.latitude, location.longitude, location.accuracy, System.currentTimeMillis())
-                }
-            }
-        } catch (e: SecurityException) {
-            Log.w(TAG, "No permission for initial location", e)
-        }
-
         Log.d(TAG, "Location updates started with interval ${intervalMs}ms")
     }
 
@@ -308,20 +291,14 @@ class LocationTrackingService : Service() {
     }
 
     /**
-     * Schedules a restart via AlarmManager so the service recovers
-     * after being killed by the system or swiped from recents.
+     * Schedules an immediate restart via WorkManager. AlarmManager can't start
+     * foreground services from background on Android 12+, but WorkManager can.
      */
     private fun scheduleRestart() {
-        val restartIntent = Intent(this, LocationTrackingService::class.java)
-        val pendingIntent = PendingIntent.getService(
-            this, 1, restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + 5_000,
-            pendingIntent
-        )
+        val request = androidx.work.OneTimeWorkRequestBuilder<LocationKeepAliveWorker>()
+            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+        androidx.work.WorkManager.getInstance(this)
+            .enqueue(request)
     }
 }
