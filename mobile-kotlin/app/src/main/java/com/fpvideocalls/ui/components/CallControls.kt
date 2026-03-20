@@ -61,11 +61,13 @@ fun CallControls(
         ControlButton(
             icon = when (audioRoute) {
                 AudioRoute.SPEAKER -> Icons.Default.VolumeUp
+                AudioRoute.WIRED_HEADSET -> Icons.Default.Headset
                 AudioRoute.BLUETOOTH -> Icons.Default.BluetoothAudio
-                AudioRoute.EARPIECE -> Icons.Default.Headphones
+                AudioRoute.EARPIECE -> Icons.Default.PhoneInTalk
             },
             contentDescription = when (audioRoute) {
                 AudioRoute.SPEAKER -> stringResource(R.string.cd_speaker)
+                AudioRoute.WIRED_HEADSET -> stringResource(R.string.cd_headphones)
                 AudioRoute.BLUETOOTH -> stringResource(R.string.cd_bluetooth)
                 AudioRoute.EARPIECE -> stringResource(R.string.cd_earpiece)
             },

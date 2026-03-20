@@ -16,9 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Audio output route — cycles: SPEAKER → BLUETOOTH (if available) → EARPIECE → SPEAKER
+ * Audio output route — cycles through available devices:
+ * SPEAKER → WIRED_HEADSET (if plugged) → BLUETOOTH (if connected) → EARPIECE → SPEAKER
  */
-enum class AudioRoute { SPEAKER, BLUETOOTH, EARPIECE }
+enum class AudioRoute { SPEAKER, WIRED_HEADSET, BLUETOOTH, EARPIECE }
 
 class AudioManagerHelper(private val context: Context) {
 
@@ -88,9 +89,12 @@ class AudioManagerHelper(private val context: Context) {
         requestAudioFocus(AudioAttributes.USAGE_VOICE_COMMUNICATION)
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
 
-        // Auto-route to Bluetooth if connected, otherwise speaker
+        // Auto-route to the best connected device
+        val wiredDevice = findWiredHeadset()
         val btDevice = findBluetoothDevice()
-        if (btDevice != null) {
+        if (wiredDevice != null) {
+            routeTo(AudioRoute.WIRED_HEADSET)
+        } else if (btDevice != null) {
             routeTo(AudioRoute.BLUETOOTH)
         } else {
             routeTo(AudioRoute.SPEAKER)
@@ -102,9 +106,15 @@ class AudioManagerHelper(private val context: Context) {
      * Skips BLUETOOTH if no Bluetooth device is connected.
      */
     fun toggleSpeaker() {
+        val hasWired = findWiredHeadset() != null
         val hasBluetooth = findBluetoothDevice() != null
         val next = when (_audioRoute.value) {
-            AudioRoute.SPEAKER -> if (hasBluetooth) AudioRoute.BLUETOOTH else AudioRoute.EARPIECE
+            AudioRoute.SPEAKER -> when {
+                hasWired -> AudioRoute.WIRED_HEADSET
+                hasBluetooth -> AudioRoute.BLUETOOTH
+                else -> AudioRoute.EARPIECE
+            }
+            AudioRoute.WIRED_HEADSET -> if (hasBluetooth) AudioRoute.BLUETOOTH else AudioRoute.EARPIECE
             AudioRoute.BLUETOOTH -> AudioRoute.EARPIECE
             AudioRoute.EARPIECE -> AudioRoute.SPEAKER
         }
@@ -123,6 +133,7 @@ class AudioManagerHelper(private val context: Context) {
                 AudioRoute.SPEAKER -> AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                 AudioRoute.EARPIECE -> AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
                 AudioRoute.BLUETOOTH -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                AudioRoute.WIRED_HEADSET -> AudioDeviceInfo.TYPE_WIRED_HEADSET
             }
             val device = audioManager.availableCommunicationDevices.firstOrNull {
                 it.type == targetType
@@ -130,6 +141,12 @@ class AudioManagerHelper(private val context: Context) {
                 // Also try BLE headset
                 audioManager.availableCommunicationDevices.firstOrNull {
                     it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                }
+            } else if (route == AudioRoute.WIRED_HEADSET) {
+                // Also try wired headphones (no mic) and USB headset
+                audioManager.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
                 }
             } else null
 
@@ -155,6 +172,7 @@ class AudioManagerHelper(private val context: Context) {
                     audioManager.isSpeakerphoneOn = false
                     startBluetoothSco()
                 }
+                AudioRoute.WIRED_HEADSET,
                 AudioRoute.EARPIECE -> {
                     stopBluetoothSco()
                     audioManager.isSpeakerphoneOn = false
@@ -177,6 +195,19 @@ class AudioManagerHelper(private val context: Context) {
         return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
             it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                 it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        }
+    }
+
+    private fun findWiredHeadset(): AudioDeviceInfo? {
+        val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.availableCommunicationDevices
+        } else {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        }
+        return devices.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == AudioDeviceInfo.TYPE_USB_HEADSET
         }
     }
 
