@@ -476,12 +476,13 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
 
   return (
     <div style={{
-      minHeight: "100vh",
+      height: "100vh",
       background: "#0f172a",
       color: "white",
       fontFamily: "system-ui, -apple-system, sans-serif",
       display: "flex",
       flexDirection: "column",
+      overflow: "hidden",
     }}>
       {/* Top Bar */}
       <div style={{
@@ -752,7 +753,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         </div>
 
         {/* Remote Videos */}
-        <div style={{ flex: 1, minWidth: 0, width: windowDimensions.width < 768 ? "100%" : "auto" }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, width: windowDimensions.width < 768 ? "100%" : "auto", height: "100%" }}>
           <VideoGrid
             tiles={Object.entries(remoteStreams).map(([uid, stream]) => {
               const p = participants.find((x) => x.userId === uid);

@@ -80,17 +80,15 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
               position: fsActive ? "fixed" : "relative",
               inset: fsActive ? 0 : undefined,
               zIndex: fsActive ? 9999 : undefined,
-              background: fsActive ? "#000" : "#000",
+              background: "#000",
               width: fsActive ? "100vw" : "100%",
               height: fsActive ? "100vh" : (singleTile ? "100%" : undefined),
+              aspectRatio: (!fsActive && !singleTile) ? "16/9" : undefined,
               overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: fsActive ? "center" : undefined,
-              justifyContent: fsActive ? "center" : undefined,
             }}
           >
-            <div style={{ display: fsActive ? "none" : "flex", justifyContent: "space-between", alignItems: "center" }}>
+            {/* Header overlaid on top of video */}
+            <div style={{ display: fsActive ? "none" : "flex", justifyContent: "space-between", alignItems: "center", position: "relative", zIndex: 2 }}>
               <div style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 6 }}>
                 <span>peer: <strong>{displayName || userId}</strong></span>
                 <span aria-label={muted ? t.mute : t.unmute} title={muted ? t.mute : t.unmute}>{muted ? "🔇" : "🎤"}</span>
@@ -100,7 +98,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 onClick={(e) => {
                   // Resolve container at click time to avoid stale/null refs
                   const container = (e.currentTarget.closest("[data-tile='true']") as HTMLDivElement) || tileEl || null;
-                  const videoEl = (e.currentTarget.parentElement?.nextElementSibling as HTMLVideoElement) || null;
+                  const videoEl = container?.querySelector("video") as HTMLVideoElement || null;
                   onToggleFullscreen?.(userId, container, videoEl);
                 }}
               >
@@ -149,14 +147,10 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 }
               }}
               style={{
-                position: "relative",
+                position: "absolute",
+                inset: 0,
                 width: "100%",
-                flex: (fsActive || singleTile) ? 1 : undefined,
-                height: (fsActive || singleTile) ? undefined : "auto",
-                maxWidth: fsActive ? "100vw" : undefined,
-                maxHeight: fsActive ? "100vh" : undefined,
-                aspectRatio: (fsActive || singleTile) ? undefined : "16/9",
-                background: "#000",
+                height: "100%",
                 objectFit: "contain",
                 display: "block",
                 zIndex: fsActive ? 1 : undefined,
