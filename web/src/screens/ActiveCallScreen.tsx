@@ -264,6 +264,13 @@ export default function ActiveCallScreen() {
       svcRef.current = svc;
       svc.init(buildSignalingHandlers());
 
+      // Apply video bitrate cap unless ?hq=true
+      const hq = params.get("hq") === "true";
+      if (!hq) {
+        svc.setVideoBitrateCap(1_500_000);
+        console.log("[bitrate] cap set to 1.5 Mbps");
+      }
+
       if (isIncoming) {
         // Callee: directly join the room
         const userId = userIdRef.current;

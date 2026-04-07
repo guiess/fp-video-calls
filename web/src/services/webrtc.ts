@@ -44,6 +44,33 @@ export class WebRTCService {
   // TURN credential refresh timer
   private turnRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTtlSeconds: number = 0;
+  // Video bitrate cap (0 = uncapped)
+  private videoBitrateCap: number = 0;
+
+  /** Set max video bitrate in bps. 0 = uncapped. Applies to all current and future peer connections. */
+  setVideoBitrateCap(maxBitrate: number) {
+    this.videoBitrateCap = maxBitrate;
+    // Apply to all existing peer connections
+    for (const pc of this.pcs.values()) {
+      this.applyBitrateCap(pc);
+    }
+  }
+
+  private async applyBitrateCap(pc: RTCPeerConnection) {
+    if (!this.videoBitrateCap || pc.connectionState === "closed") return;
+    try {
+      const sender = pc.getSenders().find(s => s.track?.kind === "video");
+      if (!sender) return;
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+      params.encodings[0].maxBitrate = this.videoBitrateCap;
+      await sender.setParameters(params);
+    } catch (e) {
+      console.warn("[bitrate] failed to apply cap", e);
+    }
+  }
 
   private bindSocketEvents() {
     if (!this.socket) return;
@@ -381,6 +408,11 @@ export class WebRTCService {
       });
     }
     this.pcs.set(targetId, pc);
+    // Apply bitrate cap after tracks are added
+    if (this.videoBitrateCap) {
+      // Defer to allow transceiver setup to complete
+      setTimeout(() => this.applyBitrateCap(pc), 0);
+    }
     return pc;
   }
 
@@ -523,6 +555,8 @@ export class WebRTCService {
       } catch (e) {
         console.warn("[camera] renegotiation offer failed", e);
       }
+      // Re-apply bitrate cap after track replacement
+      if (this.videoBitrateCap) this.applyBitrateCap(pc);
     }
 
     // Update localStream reference so UI can bind it
@@ -572,6 +606,8 @@ export class WebRTCService {
           this.sendOffer(targetId, offer);
         }
       } catch (e) { console.warn("[share] renegotiation failed", e); }
+      // Re-apply bitrate cap after track replacement
+      if (this.videoBitrateCap) this.applyBitrateCap(pc);
     }
 
     this.localStream = merged;
@@ -605,6 +641,8 @@ export class WebRTCService {
         this.localStream?.getTracks().forEach(t => { try { newPc.addTrack(t, this.localStream!); } catch {} });
         // Replace map entry and close old
         this.pcs.set(targetId, newPc);
+        // Apply bitrate cap to new PC
+        if (this.videoBitrateCap) setTimeout(() => this.applyBitrateCap(newPc), 0);
         try { oldPc.close(); } catch {}
       } catch (e) {
         console.warn("[turn] apply settings failed", e);

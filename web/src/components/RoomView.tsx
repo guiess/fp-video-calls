@@ -256,6 +256,14 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
     svcRef.current = svc;
     svc.init(buildSignalingHandlers());
 
+    // Apply video bitrate cap unless ?hq=true
+    const urlParams = new URLSearchParams(window.location.search);
+    const hq = urlParams.get("hq") === "true";
+    if (!hq) {
+      svc.setVideoBitrateCap(1_500_000);
+      console.log("[bitrate] cap set to 1.5 Mbps");
+    }
+
     // Join the room after a short tick so init completes
     const timer = setTimeout(async () => {
       if (joinedRef.current) return;
