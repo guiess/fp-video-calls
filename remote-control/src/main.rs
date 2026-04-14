@@ -26,9 +26,15 @@ fn main() -> eframe::Result<()> {
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<AppCommand>();
     let (event_tx, event_rx) = mpsc::unbounded_channel::<SignalEvent>();
+    // Second channel: signaling events for the async loop (WebRTC handshake)
+    let (sig_event_tx, mut sig_event_rx) = mpsc::unbounded_channel::<SignalEvent>();
 
     // Channel for screen frames from capture thread → async loop → DataChannel
     let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<CapturedFrame>();
+
+    // Wrap event_tx so signaling events go to both UI and async loop
+    let ui_event_tx = event_tx.clone();
+    let async_event_tx = sig_event_tx;
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     std::thread::spawn(move || {
@@ -58,30 +64,28 @@ fn main() -> eframe::Result<()> {
                             AppCommand::StartSharing { server_url } => {
                                 info!("[async] starting sharing, connecting to {}", server_url);
                                 is_host = true;
-                                let mut client = SignalingClient::new(server_url, event_tx.clone());
+                                let mut client = SignalingClient::new(server_url, async_event_tx.clone());
                                 match client.connect().await {
                                     Ok(()) => {
                                         let user_id = uuid::Uuid::new_v4().to_string();
                                         if let Err(e) = client.register(&user_id).await {
-                                            let _ = event_tx.send(SignalEvent::Error {
+                                            let _ = ui_event_tx.send(SignalEvent::Error {
                                                 message: format!("Register failed: {}", e),
                                             });
                                         }
                                         signaling = Some(client);
                                     }
                                     Err(e) => {
-                                        let _ = event_tx.send(SignalEvent::Error {
+                                        let _ = ui_event_tx.send(SignalEvent::Error {
                                             message: format!("Connection failed: {}", e),
                                         });
                                     }
                                 }
                             }
                             AppCommand::StopSharing => {
-                                // Stop capture
                                 if let Some(tx) = capture_stop_tx.take() {
                                     let _ = tx.send(());
                                 }
-                                // Close peer
                                 if let Some(p) = peer.take() {
                                     p.close().await;
                                 }
@@ -94,19 +98,19 @@ fn main() -> eframe::Result<()> {
                                 info!("[async] connecting to session {}", code);
                                 is_host = false;
                                 session_code = Some(code.clone());
-                                let mut client = SignalingClient::new(server_url, event_tx.clone());
+                                let mut client = SignalingClient::new(server_url, async_event_tx.clone());
                                 match client.connect().await {
                                     Ok(()) => {
                                         let user_id = uuid::Uuid::new_v4().to_string();
                                         if let Err(e) = client.connect_to_session(&code, &user_id).await {
-                                            let _ = event_tx.send(SignalEvent::Error {
+                                            let _ = ui_event_tx.send(SignalEvent::Error {
                                                 message: format!("Join failed: {}", e),
                                             });
                                         }
                                         signaling = Some(client);
                                     }
                                     Err(e) => {
-                                        let _ = event_tx.send(SignalEvent::Error {
+                                        let _ = ui_event_tx.send(SignalEvent::Error {
                                             message: format!("Connection failed: {}", e),
                                         });
                                     }
@@ -124,9 +128,107 @@ fn main() -> eframe::Result<()> {
                         }
                     }
 
-                    // Signaling events that need WebRTC handling
-                    // (PeerJoined triggers WebRTC setup, Signal relays offer/answer/ICE)
-                    // Note: These are also forwarded to UI via event_tx in the signaling client
+                    // Signaling events — process WebRTC handshake, then forward to UI
+                    Some(sig_event) = sig_event_rx.recv() => {
+                        match &sig_event {
+                            SignalEvent::Registered { code } => {
+                                session_code = Some(code.clone());
+                                let _ = ui_event_tx.send(sig_event);
+                            }
+                            SignalEvent::PeerJoined { user_id } => {
+                                info!("[async] peer joined: {}, creating WebRTC peer", user_id);
+                                // Create WebRTC peer connection
+                                let (pe_tx, pe_rx) = mpsc::unbounded_channel::<PeerEvent>();
+                                match PeerManager::new(ice_servers.clone(), pe_tx, is_host).await {
+                                    Ok(mgr) => {
+                                        peer_event_rx = Some(pe_rx);
+                                        if is_host {
+                                            // Host creates offer
+                                            match mgr.create_offer().await {
+                                                Ok(offer) => {
+                                                    info!("[async] created offer, sending via signaling");
+                                                    if let Some(ref client) = signaling {
+                                                        if let Some(ref code) = session_code {
+                                                            let _ = client.send_signal(code, offer).await;
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => error!("[async] create offer failed: {}", e),
+                                            }
+                                        }
+                                        peer = Some(mgr);
+                                    }
+                                    Err(e) => {
+                                        error!("[async] PeerManager creation failed: {}", e);
+                                        let _ = ui_event_tx.send(SignalEvent::Error {
+                                            message: format!("WebRTC setup failed: {}", e),
+                                        });
+                                    }
+                                }
+                                let _ = ui_event_tx.send(sig_event);
+                            }
+                            SignalEvent::Signal { from, signal } => {
+                                // Route to WebRTC peer
+                                if let Some(ref p) = peer {
+                                    match p.handle_signal(signal.clone()).await {
+                                        Ok(Some(response)) => {
+                                            // Send answer or ICE back via signaling
+                                            if let Some(ref client) = signaling {
+                                                if let Some(ref code) = session_code {
+                                                    let _ = client.send_signal(code, response).await;
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {} // No response needed (e.g., ICE candidate)
+                                        Err(e) => warn!("[async] handle_signal error: {}", e),
+                                    }
+                                } else {
+                                    // No peer yet — might be an offer arriving before PeerJoined
+                                    // Create peer as viewer and handle the offer
+                                    let sig_type = signal.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                    if sig_type == "offer" && !is_host {
+                                        info!("[async] received offer before PeerJoined, creating viewer peer");
+                                        let (pe_tx, pe_rx) = mpsc::unbounded_channel::<PeerEvent>();
+                                        match PeerManager::new(ice_servers.clone(), pe_tx, false).await {
+                                            Ok(mgr) => {
+                                                peer_event_rx = Some(pe_rx);
+                                                match mgr.handle_signal(signal.clone()).await {
+                                                    Ok(Some(answer)) => {
+                                                        if let Some(ref client) = signaling {
+                                                            if let Some(ref code) = session_code {
+                                                                let _ = client.send_signal(code, answer).await;
+                                                            }
+                                                        }
+                                                    }
+                                                    Ok(None) => {}
+                                                    Err(e) => warn!("[async] handle offer error: {}", e),
+                                                }
+                                                peer = Some(mgr);
+                                            }
+                                            Err(e) => error!("[async] viewer peer creation failed: {}", e),
+                                        }
+                                    }
+                                }
+                            }
+                            SignalEvent::PeerLeft { .. } => {
+                                // Close peer connection
+                                if let Some(p) = peer.take() {
+                                    p.close().await;
+                                }
+                                peer_event_rx = None;
+                                if let Some(tx) = capture_stop_tx.take() {
+                                    let _ = tx.send(());
+                                }
+                                control_granted = false;
+                                input_injector = None;
+                                let _ = ui_event_tx.send(sig_event);
+                            }
+                            // Forward everything else to UI
+                            _ => {
+                                let _ = ui_event_tx.send(sig_event);
+                            }
+                        }
+                    }
 
                     // Screen frames from capture thread (host only)
                     Some(frame) = frame_rx.recv(), if peer.is_some() && is_host => {
@@ -186,7 +288,7 @@ fn main() -> eframe::Result<()> {
                                     capture::start_capture_loop(frame_tx.clone(), stop_rx, 15);
                                     info!("[async] screen capture started at 15fps");
                                 }
-                                let _ = event_tx.send(SignalEvent::PeerJoined {
+                                let _ = ui_event_tx.send(SignalEvent::PeerJoined {
                                     user_id: "connected".to_string(),
                                 });
                             }
@@ -221,7 +323,7 @@ fn main() -> eframe::Result<()> {
                             }
                             PeerEvent::ScreenData { data } => {
                                 // Viewer receives screen frames — forward to UI
-                                let _ = event_tx.send(SignalEvent::ScreenFrame { data });
+                                let _ = ui_event_tx.send(SignalEvent::ScreenFrame { data });
                             }
                             PeerEvent::FileMessage { data } => {
                                 info!("[async] file data: {} bytes", data.len());
