@@ -446,6 +446,14 @@ app.get("/room/:roomId/meta", (req, res) => {
   });
 });
 
+// Remote Control sessions: code -> { hostSocketId, hostUserId, viewers: Map(socketId -> userId) }
+const rcSessions = new Map();
+
+function generateRCCode() {
+  const n = () => Math.floor(100 + Math.random() * 900);
+  return `${n()}-${n()}-${n()}`;
+}
+
 io.on("connection", (socket) => {
   // Chat: user identifies themselves with Firebase ID token
   socket.on("chat_auth", async ({ uid, token }) => {
@@ -625,7 +633,61 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
   });
 
+  // --- Remote Control signaling ---
+  socket.on("rc_register", ({ userId }) => {
+    const code = generateRCCode();
+    rcSessions.set(code, { hostSocketId: socket.id, hostUserId: userId, viewers: new Map() });
+    socket.emit("rc_registered", { code });
+    console.log(`[rc:register] ${userId} registered with code ${code}`);
+  });
+
+  socket.on("rc_connect", ({ code, userId }) => {
+    const session = rcSessions.get(code);
+    if (!session) return socket.emit("rc_error", { message: "Invalid session code" });
+    session.viewers.set(socket.id, userId);
+    // Notify host that a viewer joined
+    io.to(session.hostSocketId).emit("rc_peer_joined", { userId, socketId: socket.id });
+    // Notify viewer of the host
+    socket.emit("rc_peer_joined", { userId: session.hostUserId, socketId: session.hostSocketId });
+    console.log(`[rc:connect] ${userId} connected to session ${code} (${session.viewers.size} viewers)`);
+  });
+
+  socket.on("rc_signal", ({ code, target, signal }) => {
+    // Relay WebRTC signaling to the target peer
+    const session = rcSessions.get(code);
+    if (!session) return;
+    if (target) {
+      io.to(target).emit("rc_signal", { from: socket.id, signal });
+    } else {
+      // Broadcast to all other peers in the session
+      if (socket.id === session.hostSocketId) {
+        for (const [viewerSocket] of session.viewers) {
+          io.to(viewerSocket).emit("rc_signal", { from: socket.id, signal });
+        }
+      } else {
+        io.to(session.hostSocketId).emit("rc_signal", { from: socket.id, signal });
+      }
+    }
+  });
+
   socket.on("disconnect", () => {
+    // Cleanup RC sessions
+    for (const [code, session] of rcSessions.entries()) {
+      if (socket.id === session.hostSocketId) {
+        // Host disconnected — notify all viewers and remove session
+        for (const [viewerSocket, viewerUserId] of session.viewers) {
+          io.to(viewerSocket).emit("rc_peer_left", { userId: session.hostUserId });
+        }
+        rcSessions.delete(code);
+        console.log(`[rc:disconnect] host ${session.hostUserId} left, session ${code} removed`);
+      } else if (session.viewers.has(socket.id)) {
+        const viewerUserId = session.viewers.get(socket.id);
+        session.viewers.delete(socket.id);
+        io.to(session.hostSocketId).emit("rc_peer_left", { userId: viewerUserId });
+        console.log(`[rc:disconnect] viewer ${viewerUserId} left session ${code}`);
+      }
+    }
+
     // Cleanup user from any rooms
     for (const [roomId, room] of rooms.entries()) {
       const userId = getUserIdBySocket(roomId, socket.id);
