@@ -66,6 +66,7 @@ fn main() -> eframe::Result<()> {
             let mut input_injector: Option<InputInjector> = None;
             let mut control_granted = false;
             let mut audio_player: Option<codec::AudioPlayer> = None;
+            let mut pending_register_user_id: Option<String> = None;
             // File receive state
             let mut pending_file: Option<(String, String, u64)> = None; // (id, name, size)
             let mut file_data_buf: Vec<u8> = Vec::new();
@@ -122,16 +123,12 @@ fn main() -> eframe::Result<()> {
                                 is_host = true;
                                 server_url_saved = server_url.clone();
                                 reconnect_attempts = 0;
+                                pending_register_user_id = Some(uuid::Uuid::new_v4().to_string());
                                 let mut client = SignalingClient::new(server_url, async_event_tx.clone());
                                 match client.connect().await {
                                     Ok(()) => {
-                                        let user_id = uuid::Uuid::new_v4().to_string();
-                                        if let Err(e) = client.register(&user_id).await {
-                                            let _ = ui_event_tx.send(SignalEvent::Error {
-                                                message: format!("Register failed: {}", e),
-                                            });
-                                        }
                                         signaling = Some(client);
+                                        // register() will be called when Connected event arrives
                                     }
                                     Err(e) => {
                                         let _ = ui_event_tx.send(SignalEvent::Error {
@@ -157,16 +154,12 @@ fn main() -> eframe::Result<()> {
                                 session_code = Some(code.clone());
                                 server_url_saved = server_url.clone();
                                 reconnect_attempts = 0;
+                                pending_register_user_id = Some(uuid::Uuid::new_v4().to_string());
                                 let mut client = SignalingClient::new(server_url, async_event_tx.clone());
                                 match client.connect().await {
                                     Ok(()) => {
-                                        let user_id = uuid::Uuid::new_v4().to_string();
-                                        if let Err(e) = client.connect_to_session(&code, &user_id).await {
-                                            let _ = ui_event_tx.send(SignalEvent::Error {
-                                                message: format!("Join failed: {}", e),
-                                            });
-                                        }
                                         signaling = Some(client);
+                                        // connect_to_session() will be called when Connected event arrives
                                     }
                                     Err(e) => {
                                         let _ = ui_event_tx.send(SignalEvent::Error {
@@ -247,6 +240,26 @@ fn main() -> eframe::Result<()> {
                     // Signaling events — process WebRTC handshake, then forward to UI
                     Some(sig_event) = sig_event_rx.recv() => {
                         match &sig_event {
+                            SignalEvent::Connected => {
+                                info!("[async] socket connected, performing deferred register/connect");
+                                if let (Some(ref client), Some(ref uid)) = (&signaling, &pending_register_user_id) {
+                                    if is_host {
+                                        if let Err(e) = client.register(uid).await {
+                                            let _ = ui_event_tx.send(SignalEvent::Error {
+                                                message: format!("Register failed: {}", e),
+                                            });
+                                        }
+                                    } else if let Some(ref code) = session_code {
+                                        if let Err(e) = client.connect_to_session(code, uid).await {
+                                            let _ = ui_event_tx.send(SignalEvent::Error {
+                                                message: format!("Join failed: {}", e),
+                                            });
+                                        }
+                                    }
+                                }
+                                pending_register_user_id = None;
+                                let _ = ui_event_tx.send(sig_event);
+                            }
                             SignalEvent::Registered { code } => {
                                 session_code = Some(code.clone());
                                 let _ = ui_event_tx.send(sig_event);

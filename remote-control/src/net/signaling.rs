@@ -136,6 +136,11 @@ impl SignalingClient {
                     }
                 })
             })
+            .on_any(move |event, payload, _| {
+                Box::pin(async move {
+                    info!("[signaling] event received: {} payload: {:?}", event, payload);
+                })
+            })
             .connect()
             .await?;
 
@@ -146,6 +151,7 @@ impl SignalingClient {
     /// Register as a sharer — server will assign a session code.
     pub async fn register(&self, user_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(client) = &self.client {
+            info!("[signaling] emitting rc_register for user_id={}", user_id);
             client
                 .emit("rc_register", json!({ "userId": user_id }))
                 .await?;
