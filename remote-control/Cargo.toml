@@ -1,0 +1,45 @@
+[package]
+name = "fp-remote-control"
+version = "0.1.0"
+edition = "2021"
+description = "Remote desktop control tool for fp-video-calls"
+
+[dependencies]
+# GUI
+eframe = "0.31"
+egui = "0.31"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Signaling (Socket.IO)
+rust_socketio = { version = "0.6", features = ["async"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+
+# HTTP client (for TURN credential fetch)
+reqwest = { version = "0.12", features = ["json"] }
+
+# --- Phase 2+ dependencies (commented out until needed) ---
+# webrtc = "0.12"           # WebRTC peer connection + DataChannel
+# scrap = "0.5"             # Screen capture (DXGI)
+# openh264 = "0.6"          # H.264 encode/decode
+# enigo = "0.3"             # Mouse/keyboard injection
+# arboard = "3"             # Clipboard sync
+# cpal = "0.15"             # Audio capture (WASAPI)
+# opus = "0.3"              # Audio encoding
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
