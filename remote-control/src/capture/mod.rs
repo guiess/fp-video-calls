@@ -11,19 +11,47 @@ pub struct CapturedFrame {
     pub height: u32,
 }
 
+/// Info about an available display.
+#[derive(Debug, Clone)]
+pub struct DisplayInfo {
+    pub index: usize,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// List available displays/monitors.
+pub fn list_displays() -> Vec<DisplayInfo> {
+    Display::all()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(i, d)| DisplayInfo {
+            index: i,
+            width: d.width() as u32,
+            height: d.height() as u32,
+        })
+        .collect()
+}
+
 /// Runs the screen capture loop in a blocking thread.
-/// Sends JPEG-encoded frames to the channel at the target FPS.
+/// `display_index`: which monitor to capture (0 = primary).
 pub fn start_capture_loop(
     frame_tx: mpsc::UnboundedSender<CapturedFrame>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     target_fps: u32,
+    display_index: usize,
 ) {
     std::thread::spawn(move || {
-        let display = match Display::primary() {
-            Ok(d) => d,
-            Err(e) => {
-                warn!("[capture] failed to get primary display: {}", e);
-                return;
+        let displays = Display::all().unwrap_or_default();
+        let display = if display_index < displays.len() {
+            displays.into_iter().nth(display_index).unwrap()
+        } else {
+            match Display::primary() {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!("[capture] failed to get display: {}", e);
+                    return;
+                }
             }
         };
 

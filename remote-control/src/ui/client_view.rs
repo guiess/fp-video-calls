@@ -23,6 +23,7 @@ pub enum ClientAction {
     RequestControl,
     ReleaseControl,
     ToggleAudio,
+    SendFile,
 }
 
 /// Renders the "Connect to Remote" panel. Returns an action if a button was clicked.
@@ -103,6 +104,11 @@ pub fn render(
                 let audio_label = if *audio_muted { "🔇 Unmute Audio" } else { "🔊 Mute Audio" };
                 if ui.button(audio_label).clicked() {
                     action = ClientAction::ToggleAudio;
+                }
+
+                ui.add_space(8.0);
+                if ui.button("📁 Send File").clicked() {
+                    action = ClientAction::SendFile;
                 }
 
                 ui.add_space(16.0);

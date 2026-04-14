@@ -47,13 +47,47 @@ fn main() -> eframe::Result<()> {
             let mut capture_stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
             let mut input_injector: Option<InputInjector> = None;
             let mut control_granted = false;
+            let mut server_url_saved = String::new();
+            let mut reconnect_attempts: u32 = 0;
+            const MAX_RECONNECT: u32 = 5;
 
-            let ice_servers = vec![
-                RTCIceServer {
-                    urls: vec!["stun:stun.l.google.com:19302".to_string()],
-                    ..Default::default()
-                },
-            ];
+            // Fetch TURN credentials from the signaling server
+            async fn fetch_ice_servers(server_url: &str) -> Vec<RTCIceServer> {
+                let mut servers = vec![
+                    RTCIceServer {
+                        urls: vec!["stun:stun.l.google.com:19302".to_string()],
+                        ..Default::default()
+                    },
+                ];
+                let turn_url = format!("{}/api/turn?userId=rc-{}", server_url, uuid::Uuid::new_v4());
+                match reqwest::get(&turn_url).await {
+                    Ok(resp) => {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(arr) = json.get("iceServers").and_then(|v| v.as_array()) {
+                                for entry in arr {
+                                    let urls: Vec<String> = entry.get("urls")
+                                        .and_then(|u| u.as_array())
+                                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                        .or_else(|| entry.get("urls").and_then(|u| u.as_str()).map(|s| vec![s.to_string()]))
+                                        .unwrap_or_default();
+                                    if urls.is_empty() { continue; }
+                                    let username = entry.get("username").and_then(|u| u.as_str()).unwrap_or("").to_string();
+                                    let credential = entry.get("credential").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                                    servers.push(RTCIceServer {
+                                        urls,
+                                        username,
+                                        credential,
+                                        ..Default::default()
+                                    });
+                                }
+                                info!("[turn] fetched {} ICE servers", servers.len());
+                            }
+                        }
+                    }
+                    Err(e) => warn!("[turn] fetch failed (using STUN only): {}", e),
+                }
+                servers
+            }
 
             loop {
                 tokio::select! {
@@ -64,6 +98,8 @@ fn main() -> eframe::Result<()> {
                             AppCommand::StartSharing { server_url } => {
                                 info!("[async] starting sharing, connecting to {}", server_url);
                                 is_host = true;
+                                server_url_saved = server_url.clone();
+                                reconnect_attempts = 0;
                                 let mut client = SignalingClient::new(server_url, async_event_tx.clone());
                                 match client.connect().await {
                                     Ok(()) => {
@@ -98,6 +134,8 @@ fn main() -> eframe::Result<()> {
                                 info!("[async] connecting to session {}", code);
                                 is_host = false;
                                 session_code = Some(code.clone());
+                                server_url_saved = server_url.clone();
+                                reconnect_attempts = 0;
                                 let mut client = SignalingClient::new(server_url, async_event_tx.clone());
                                 match client.connect().await {
                                     Ok(()) => {
@@ -148,6 +186,40 @@ fn main() -> eframe::Result<()> {
                                     }
                                 }
                             }
+                            AppCommand::SendFile { path } => {
+                                if let Some(ref p) = peer {
+                                    match std::fs::read(&path) {
+                                        Ok(data) => {
+                                            let file_name = std::path::Path::new(&path)
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| "file".to_string());
+                                            let file_id = uuid::Uuid::new_v4().to_string();
+                                            // Send file metadata via control channel
+                                            let meta = serde_json::json!({
+                                                "type": "file_offer",
+                                                "id": file_id,
+                                                "name": file_name,
+                                                "size": data.len()
+                                            });
+                                            let _ = p.send_control(&meta.to_string()).await;
+                                            // Send file data in chunks via file channel
+                                            let chunk_size = 16384;
+                                            for chunk in data.chunks(chunk_size) {
+                                                let mut msg = Vec::with_capacity(36 + chunk.len());
+                                                msg.extend_from_slice(file_id.as_bytes());
+                                                msg.extend_from_slice(chunk);
+                                                if let Err(e) = p.send_file_data(&msg).await {
+                                                    warn!("[file] send chunk failed: {}", e);
+                                                    break;
+                                                }
+                                            }
+                                            info!("[file] sent {} ({} bytes)", file_name, data.len());
+                                        }
+                                        Err(e) => warn!("[file] read failed: {}", e),
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -160,7 +232,7 @@ fn main() -> eframe::Result<()> {
                             }
                             SignalEvent::PeerJoined { user_id } => {
                                 info!("[async] peer joined: {}, creating WebRTC peer", user_id);
-                                // Create WebRTC peer connection
+                                let ice_servers = fetch_ice_servers(&server_url_saved).await;
                                 let (pe_tx, pe_rx) = mpsc::unbounded_channel::<PeerEvent>();
                                 match PeerManager::new(ice_servers.clone(), pe_tx, is_host).await {
                                     Ok(mgr) => {
@@ -211,8 +283,9 @@ fn main() -> eframe::Result<()> {
                                     let sig_type = signal.get("type").and_then(|t| t.as_str()).unwrap_or("");
                                     if sig_type == "offer" && !is_host {
                                         info!("[async] received offer before PeerJoined, creating viewer peer");
+                                        let ice_svrs = fetch_ice_servers(&server_url_saved).await;
                                         let (pe_tx, pe_rx) = mpsc::unbounded_channel::<PeerEvent>();
-                                        match PeerManager::new(ice_servers.clone(), pe_tx, false).await {
+                                        match PeerManager::new(ice_svrs, pe_tx, false).await {
                                             Ok(mgr) => {
                                                 peer_event_rx = Some(pe_rx);
                                                 match mgr.handle_signal(signal.clone()).await {
@@ -308,7 +381,7 @@ fn main() -> eframe::Result<()> {
                                     // Start screen capture
                                     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
                                     capture_stop_tx = Some(stop_tx);
-                                    capture::start_capture_loop(frame_tx.clone(), stop_rx, 15);
+                                    capture::start_capture_loop(frame_tx.clone(), stop_rx, 15, 0);
                                     info!("[async] screen capture started at 15fps");
                                 }
                                 let _ = ui_event_tx.send(SignalEvent::PeerJoined {
@@ -354,6 +427,43 @@ fn main() -> eframe::Result<()> {
                             }
                             PeerEvent::ConnectionState { state } => {
                                 info!("[async] connection state: {}", state);
+                                if state.contains("Failed") || state.contains("Disconnected") {
+                                    // Auto-reconnect
+                                    if reconnect_attempts < MAX_RECONNECT {
+                                        reconnect_attempts += 1;
+                                        let delay = std::time::Duration::from_secs(2u64.pow(reconnect_attempts));
+                                        warn!("[async] connection lost, reconnecting in {:?} (attempt {}/{})", delay, reconnect_attempts, MAX_RECONNECT);
+                                        tokio::time::sleep(delay).await;
+
+                                        // Close old peer
+                                        if let Some(p) = peer.take() { p.close().await; }
+                                        peer_event_rx = None;
+                                        if let Some(tx) = capture_stop_tx.take() { let _ = tx.send(()); }
+
+                                        // Re-create peer
+                                        let ice_svrs = fetch_ice_servers(&server_url_saved).await;
+                                        let (pe_tx, pe_rx) = mpsc::unbounded_channel::<PeerEvent>();
+                                        if let Ok(mgr) = PeerManager::new(ice_svrs, pe_tx, is_host).await {
+                                            peer_event_rx = Some(pe_rx);
+                                            if is_host {
+                                                if let Ok(offer) = mgr.create_offer().await {
+                                                    if let Some(ref client) = signaling {
+                                                        if let Some(ref code) = session_code {
+                                                            let _ = client.send_signal(code, offer).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            peer = Some(mgr);
+                                        }
+                                    } else {
+                                        let _ = ui_event_tx.send(SignalEvent::Error {
+                                            message: "Connection lost after max retries".to_string(),
+                                        });
+                                    }
+                                } else if state.contains("Connected") {
+                                    reconnect_attempts = 0;
+                                }
                             }
                         }
                     }

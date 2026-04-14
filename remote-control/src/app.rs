@@ -29,6 +29,8 @@ pub enum AppCommand {
     SendControl { message: String },
     /// Grant or deny control to a requesting viewer
     GrantControl { granted: bool },
+    /// Send a file to the remote peer
+    SendFile { path: String },
 }
 
 struct FrameAssembly {
@@ -509,6 +511,13 @@ impl eframe::App for App {
                                     control_requested: *control_requested,
                                     audio_muted: !audio_muted,
                                 };
+                            }
+                        }
+                        client_view::ClientAction::SendFile => {
+                            if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                let _ = self.cmd_tx.send(AppCommand::SendFile {
+                                    path: path.to_string_lossy().to_string(),
+                                });
                             }
                         }
                         client_view::ClientAction::None => {}

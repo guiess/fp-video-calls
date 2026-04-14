@@ -34,6 +34,7 @@ pub struct PeerManager {
     event_tx: mpsc::UnboundedSender<PeerEvent>,
     control_dc: Option<Arc<RTCDataChannel>>,
     screen_dc: Option<Arc<RTCDataChannel>>,
+    file_dc: Option<Arc<RTCDataChannel>>,
     is_host: bool,
 }
 
@@ -105,6 +106,7 @@ impl PeerManager {
             event_tx,
             control_dc: None,
             screen_dc: None,
+            file_dc: None,
             is_host,
         };
 
@@ -134,6 +136,7 @@ impl PeerManager {
 
         self.control_dc = Some(control_dc);
         self.screen_dc = Some(screen_dc);
+        self.file_dc = Some(file_dc);
         Ok(())
     }
 
@@ -252,6 +255,14 @@ impl PeerManager {
     /// Send binary data on the screen DataChannel.
     pub async fn send_screen(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(dc) = &self.screen_dc {
+            dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
+        }
+        Ok(())
+    }
+
+    /// Send binary data on the file DataChannel.
+    pub async fn send_file_data(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(dc) = &self.file_dc {
             dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
         }
         Ok(())
