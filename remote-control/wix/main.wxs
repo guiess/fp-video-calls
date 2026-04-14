@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product
+        Id="*"
+        Name="FP Remote Control"
+        UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+        Manufacturer="FP Video Calls"
+        Language="1033"
+        Codepage="1252"
+        Version="0.1.0">
+
+        <Package
+            InstallerVersion="200"
+            Compressed="yes"
+            InstallScope="perUser"
+            Description="FP Remote Control — remote desktop for fp-video-calls"
+            Comments="Lightweight remote desktop control tool" />
+
+        <MajorUpgrade
+            DowngradeErrorMessage="A newer version is already installed." />
+
+        <MediaTemplate EmbedCab="yes" />
+
+        <Feature Id="MainFeature" Title="FP Remote Control" Level="1">
+            <ComponentGroupRef Id="ProductComponents" />
+            <ComponentRef Id="StartMenuShortcut" />
+        </Feature>
+
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="LocalAppDataFolder">
+                <Directory Id="INSTALLFOLDER" Name="FPRemoteControl">
+                    <Component Id="MainExecutable" Guid="*">
+                        <File Id="exe" Source="$(var.CargoTargetDir)\release\fp-remote-control.exe" KeyPath="yes" />
+                    </Component>
+                </Directory>
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="FP Remote Control">
+                    <Component Id="StartMenuShortcut" Guid="*">
+                        <Shortcut Id="AppShortcut"
+                            Name="FP Remote Control"
+                            Description="Remote desktop control"
+                            Target="[INSTALLFOLDER]fp-remote-control.exe"
+                            WorkingDirectory="INSTALLFOLDER" />
+                        <RemoveFolder Id="RemoveShortcutFolder" On="uninstall" />
+                        <RegistryValue Root="HKCU" Key="Software\FPRemoteControl" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+            <ComponentRef Id="MainExecutable" />
+        </ComponentGroup>
+    </Product>
+</Wix>

@@ -28,3 +28,11 @@ $x86Size = [math]::Round((Get-Item "$dist\fp-remote-control-x86.exe").Length / 1
 Write-Host "`n=== Build Complete ===" -ForegroundColor Green
 Write-Host "  x64: dist\fp-remote-control-x64.exe ($x64Size MB)"
 Write-Host "  x86: dist\fp-remote-control-x86.exe ($x86Size MB)"
+
+Write-Host "`n=== MSI Installer ===" -ForegroundColor Cyan
+Write-Host "To build the MSI installer, install WiX Toolset v3 and run:"
+Write-Host "  candle.exe -dCargoTargetDir=target\x86_64-pc-windows-msvc wix\main.wxs -out dist\main.wixobj"
+Write-Host "  light.exe dist\main.wixobj -out dist\fp-remote-control-x64.msi"
+Write-Host ""
+Write-Host "Or install cargo-wix: cargo install cargo-wix"
+Write-Host "  cargo wix --nocapture"

@@ -85,3 +85,73 @@ pub fn start_audio_capture(
         }
     });
 }
+
+/// μ-law byte → f32 PCM sample.
+fn ulaw_to_f32(byte: u8) -> f32 {
+    let val = !byte;
+    let sign = if val & 0x80 != 0 { -1.0f32 } else { 1.0 };
+    let exponent = ((val >> 4) & 0x07) as i32;
+    let mantissa = (val & 0x0F) as i32;
+    let magnitude = ((mantissa << (exponent + 3)) + (1 << (exponent + 3)) - 0x84) as f32;
+    sign * magnitude / 32768.0
+}
+
+/// Audio player — receives μ-law chunks and plays them via the default output device.
+pub struct AudioPlayer {
+    sample_tx: std::sync::mpsc::Sender<f32>,
+    _stream: cpal::Stream,
+    muted: bool,
+}
+
+impl AudioPlayer {
+    pub fn new() -> Option<Self> {
+        let host = cpal::default_host();
+        let device = host.default_output_device()?;
+        let config = device.default_output_config().ok()?;
+        let channels = config.channels() as usize;
+
+        info!("[audio-play] output: {} ({}Hz, {} ch)",
+            device.name().unwrap_or_else(|_| "?".into()),
+            config.sample_rate().0, channels);
+
+        let (tx, rx) = std::sync::mpsc::channel::<f32>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+
+        let rx_clone = rx.clone();
+        let stream = device.build_output_stream(
+            &config.into(),
+            move |output: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let rx = rx_clone.lock().unwrap();
+                for frame in output.chunks_mut(channels) {
+                    let sample = rx.try_recv().unwrap_or(0.0);
+                    for s in frame.iter_mut() {
+                        *s = sample;
+                    }
+                }
+            },
+            |err| warn!("[audio-play] error: {}", err),
+            None,
+        ).ok()?;
+
+        stream.play().ok()?;
+        info!("[audio-play] started");
+
+        Some(Self {
+            sample_tx: tx,
+            _stream: stream,
+            muted: false,
+        })
+    }
+
+    /// Feed μ-law encoded audio data for playback.
+    pub fn play(&self, ulaw_data: &[u8]) {
+        if self.muted { return; }
+        for &byte in ulaw_data {
+            let _ = self.sample_tx.send(ulaw_to_f32(byte));
+        }
+    }
+
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
+    }
+}

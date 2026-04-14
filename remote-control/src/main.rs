@@ -16,6 +16,19 @@ use tokio::sync::mpsc;
 use tracing::{info, warn, error};
 use webrtc::ice_transport::ice_server::RTCIceServer;
 
+/// Get the user's Downloads directory, or fall back to Desktop or home.
+fn dirs_next() -> Option<std::path::PathBuf> {
+    // Try Windows known folder
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let downloads = std::path::PathBuf::from(&profile).join("Downloads");
+        if downloads.is_dir() { return Some(downloads); }
+        let desktop = std::path::PathBuf::from(&profile).join("Desktop");
+        if desktop.is_dir() { return Some(desktop); }
+        return Some(std::path::PathBuf::from(profile));
+    }
+    std::env::current_dir().ok()
+}
+
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -52,6 +65,10 @@ fn main() -> eframe::Result<()> {
             let mut audio_stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
             let mut input_injector: Option<InputInjector> = None;
             let mut control_granted = false;
+            let mut audio_player: Option<codec::AudioPlayer> = None;
+            // File receive state
+            let mut pending_file: Option<(String, String, u64)> = None; // (id, name, size)
+            let mut file_data_buf: Vec<u8> = Vec::new();
             let mut server_url_saved = String::new();
             let mut reconnect_attempts: u32 = 0;
             const MAX_RECONNECT: u32 = 5;
@@ -396,12 +413,19 @@ fn main() -> eframe::Result<()> {
                                     audio_stop_tx = Some(astop_tx);
                                     codec::start_audio_capture(audio_tx.clone(), astop_rx);
                                     info!("[async] screen + audio capture started");
+                                } else {
+                                    // Viewer: start audio player
+                                    audio_player = codec::AudioPlayer::new();
+                                    if audio_player.is_some() {
+                                        info!("[async] audio player started");
+                                    }
                                 }
                                 let _ = ui_event_tx.send(SignalEvent::PeerJoined {
                                     user_id: "connected".to_string(),
                                 });
                             }
                             PeerEvent::ControlMessage { data } => {
+                                // Try parsing as ControlMessage first
                                 if let Ok(msg) = serde_json::from_str::<protocol::ControlMessage>(&data) {
                                     match &msg {
                                         protocol::ControlMessage::ControlRequest if is_host => {
@@ -429,6 +453,16 @@ fn main() -> eframe::Result<()> {
                                         }
                                         _ => {}
                                     }
+                                } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                                    // Handle file_offer messages
+                                    if json.get("type").and_then(|t| t.as_str()) == Some("file_offer") {
+                                        let file_id = json.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let file_name = json.get("name").and_then(|v| v.as_str()).unwrap_or("file").to_string();
+                                        let file_size = json.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                        info!("[file] incoming: {} ({} bytes)", file_name, file_size);
+                                        pending_file = Some((file_id, file_name, file_size));
+                                        file_data_buf.clear();
+                                    }
                                 }
                             }
                             PeerEvent::ScreenData { data } => {
@@ -436,12 +470,28 @@ fn main() -> eframe::Result<()> {
                                 let _ = ui_event_tx.send(SignalEvent::ScreenFrame { data });
                             }
                             PeerEvent::FileMessage { data } => {
-                                info!("[async] file data: {} bytes", data.len());
-                                // TODO: reassemble file and save to downloads
+                                if let Some((ref file_id, ref file_name, file_size)) = pending_file {
+                                    // Strip the 36-byte file_id prefix from chunk
+                                    let payload = if data.len() > 36 { &data[36..] } else { &data };
+                                    file_data_buf.extend_from_slice(payload);
+
+                                    if file_data_buf.len() as u64 >= file_size {
+                                        // Save to Downloads folder
+                                        let downloads = dirs_next().unwrap_or_else(|| std::path::PathBuf::from("."));
+                                        let save_path = downloads.join(file_name);
+                                        match std::fs::write(&save_path, &file_data_buf[..file_size as usize]) {
+                                            Ok(()) => info!("[file] saved: {}", save_path.display()),
+                                            Err(e) => warn!("[file] save failed: {}", e),
+                                        }
+                                        pending_file = None;
+                                        file_data_buf.clear();
+                                    }
+                                }
                             }
                             PeerEvent::AudioData { data } => {
-                                // TODO: decode Opus and play via cpal output stream
-                                // For now, audio data is received but not played
+                                if let Some(ref player) = audio_player {
+                                    player.play(&data);
+                                }
                             }
                             PeerEvent::ConnectionState { state } => {
                                 info!("[async] connection state: {}", state);
