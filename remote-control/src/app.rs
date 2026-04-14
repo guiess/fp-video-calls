@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -26,6 +27,14 @@ pub enum AppCommand {
     Disconnect,
 }
 
+struct FrameAssembly {
+    chunks: Vec<Option<Vec<u8>>>,
+    total: usize,
+    received: usize,
+    width: u32,
+    height: u32,
+}
+
 pub struct App {
     mode: Mode,
     host_state: HostState,
@@ -34,10 +43,13 @@ pub struct App {
     server_url: String,
     user_id: String,
 
-    // Channel to send commands to the async runtime
     cmd_tx: mpsc::UnboundedSender<AppCommand>,
-    // Channel to receive events from the signaling client
     event_rx: mpsc::UnboundedReceiver<SignalEvent>,
+
+    // Screen rendering (viewer side)
+    screen_texture: Option<egui::TextureHandle>,
+    // Frame reassembly buffer: frame_id -> (chunks received, total chunks, accumulated data, width, height)
+    frame_buffer: HashMap<u32, FrameAssembly>,
 }
 
 impl App {
@@ -55,11 +67,13 @@ impl App {
             user_id: uuid::Uuid::new_v4().to_string(),
             cmd_tx,
             event_rx,
+            screen_texture: None,
+            frame_buffer: HashMap::new(),
         }
     }
 
     /// Process any pending events from the signaling client.
-    fn poll_events(&mut self) {
+    fn poll_events(&mut self, ctx: &egui::Context) {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
                 SignalEvent::Connected => {
@@ -114,6 +128,10 @@ impl App {
                 SignalEvent::Disconnected => {
                     info!("[app] signaling disconnected");
                 }
+                SignalEvent::ScreenFrame { data } => {
+                    // Reassemble chunked frame data and decode JPEG
+                    self.handle_screen_chunk(ctx, &data);
+                }
             }
         }
     }
@@ -125,12 +143,78 @@ impl App {
             _ => None,
         }
     }
+
+    /// Handle an incoming screen data chunk, reassemble into full JPEG frames.
+    fn handle_screen_chunk(&mut self, ctx: &egui::Context, data: &[u8]) {
+        if data.len() < 12 { return; }
+
+        let frame_id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let chunk_idx = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+        let num_chunks = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
+
+        let (header_size, width, height) = if chunk_idx == 0 && data.len() >= 20 {
+            let w = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+            let h = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
+            (20, w, h)
+        } else {
+            (12, 0, 0)
+        };
+
+        let chunk_data = data[header_size..].to_vec();
+
+        let assembly = self.frame_buffer.entry(frame_id).or_insert_with(|| {
+            FrameAssembly {
+                chunks: vec![None; num_chunks],
+                total: num_chunks,
+                received: 0,
+                width,
+                height,
+            }
+        });
+
+        if chunk_idx == 0 && width > 0 {
+            assembly.width = width;
+            assembly.height = height;
+        }
+
+        if chunk_idx < assembly.total && assembly.chunks[chunk_idx].is_none() {
+            assembly.chunks[chunk_idx] = Some(chunk_data);
+            assembly.received += 1;
+        }
+
+        // Check if frame is complete
+        if assembly.received == assembly.total {
+            let mut jpeg_data = Vec::new();
+            for chunk in &assembly.chunks {
+                if let Some(c) = chunk {
+                    jpeg_data.extend_from_slice(c);
+                }
+            }
+
+            // Decode JPEG and update texture
+            if let Ok(img) = image::load_from_memory_with_format(&jpeg_data, image::ImageFormat::Jpeg) {
+                let rgba = img.to_rgba8();
+                let size = [rgba.width() as usize, rgba.height() as usize];
+                let pixels = rgba.as_flat_samples();
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
+                self.screen_texture = Some(ctx.load_texture(
+                    "remote_screen",
+                    color_image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+
+            // Clean up old frame buffers
+            self.frame_buffer.retain(|id, _| *id == frame_id);
+        }
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Poll signaling events
-        self.poll_events();
+        self.poll_events(ctx);
 
         // Request repaint to keep polling
         ctx.request_repaint();
@@ -231,6 +315,19 @@ impl eframe::App for App {
                     }
 
                     let action = client_view::render(ui, &self.client_state, &mut self.code_input);
+
+                    // Display remote screen if connected and we have a texture
+                    if matches!(self.client_state, ClientState::Connected { .. }) {
+                        if let Some(tex) = &self.screen_texture {
+                            ui.add_space(8.0);
+                            let available = ui.available_size();
+                            let tex_size = tex.size_vec2();
+                            let scale = (available.x / tex_size.x).min(available.y / tex_size.y).min(1.0);
+                            let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
+                            ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
+                        }
+                    }
+
                     match action {
                         client_view::ClientAction::Connect => {
                             self.client_state = ClientState::Connecting;

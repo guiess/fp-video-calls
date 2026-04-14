@@ -26,14 +26,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utilities
 rand = "0.8"
 uuid = { version = "1", features = ["v4"] }
+bytes = "1"
 
 # HTTP client (for TURN credential fetch)
 reqwest = { version = "0.12", features = ["json"] }
 
 # --- Phase 2+ dependencies (commented out until needed) ---
 webrtc = "0.12"              # WebRTC peer connection + DataChannel
-# scrap = "0.5"             # Screen capture (DXGI)
-# openh264 = "0.6"          # H.264 encode/decode
+scrap = "0.5"               # Screen capture (DXGI)
+image = "0.25"              # Image encoding (JPEG for screen frames)
+# openh264 = "0.6"          # H.264 encode/decode (future optimization)
 # enigo = "0.3"             # Mouse/keyboard injection
 # arboard = "3"             # Clipboard sync
 # cpal = "0.15"             # Audio capture (WASAPI)

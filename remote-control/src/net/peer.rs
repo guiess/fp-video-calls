@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -33,6 +33,7 @@ pub struct PeerManager {
     pc: Arc<RTCPeerConnection>,
     event_tx: mpsc::UnboundedSender<PeerEvent>,
     control_dc: Option<Arc<RTCDataChannel>>,
+    screen_dc: Option<Arc<RTCDataChannel>>,
     is_host: bool,
 }
 
@@ -103,6 +104,7 @@ impl PeerManager {
             pc,
             event_tx,
             control_dc: None,
+            screen_dc: None,
             is_host,
         };
 
@@ -131,6 +133,7 @@ impl PeerManager {
         Self::bind_data_channel(&file_dc, "file", self.event_tx.clone()).await;
 
         self.control_dc = Some(control_dc);
+        self.screen_dc = Some(screen_dc);
         Ok(())
     }
 
@@ -242,6 +245,14 @@ impl PeerManager {
     pub async fn send_control(&self, msg: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(dc) = &self.control_dc {
             dc.send_text(msg.to_string()).await?;
+        }
+        Ok(())
+    }
+
+    /// Send binary data on the screen DataChannel.
+    pub async fn send_screen(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(dc) = &self.screen_dc {
+            dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
         }
         Ok(())
     }

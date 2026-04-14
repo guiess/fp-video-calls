@@ -16,6 +16,8 @@ pub enum SignalEvent {
     PeerLeft { user_id: String },
     Signal { from: String, signal: serde_json::Value },
     Error { message: String },
+    /// Screen frame data from remote peer (viewer side)
+    ScreenFrame { data: Vec<u8> },
 }
 
 /// Async Socket.IO signaling client.
