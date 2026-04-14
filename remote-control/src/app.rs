@@ -71,7 +71,7 @@ impl App {
             host_state: HostState::Idle,
             client_state: ClientState::Idle,
             code_input: String::new(),
-            server_url: "https://fp-video-calls.azurewebsites.net".to_string(),
+            server_url: "https://app-voice-video-server.azurewebsites.net".to_string(),
             user_id: uuid::Uuid::new_v4().to_string(),
             cmd_tx,
             event_rx,
