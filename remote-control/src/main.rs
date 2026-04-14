@@ -1,11 +1,13 @@
 mod app;
 mod capture;
+mod input;
 mod net;
 mod protocol;
 mod ui;
 
 use app::{App, AppCommand};
 use capture::CapturedFrame;
+use input::InputInjector;
 use net::peer::{PeerEvent, PeerManager};
 use net::signaling::{SignalEvent, SignalingClient};
 use tokio::sync::mpsc;
@@ -37,6 +39,8 @@ fn main() -> eframe::Result<()> {
             let mut session_code: Option<String> = None;
             let mut is_host = false;
             let mut capture_stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
+            let mut input_injector: Option<InputInjector> = None;
+            let mut control_granted = false;
 
             let ice_servers = vec![
                 RTCIceServer {
@@ -188,7 +192,32 @@ fn main() -> eframe::Result<()> {
                             }
                             PeerEvent::ControlMessage { data } => {
                                 info!("[async] control message: {}", data);
-                                // Forward to UI via event_tx (Phase 4)
+                                if is_host {
+                                    if let Ok(msg) = serde_json::from_str::<protocol::ControlMessage>(&data) {
+                                        match &msg {
+                                            protocol::ControlMessage::ControlRequest => {
+                                                info!("[async] viewer requested control");
+                                                // Auto-grant for now (Phase 5: show prompt in UI)
+                                                control_granted = true;
+                                                input_injector = Some(InputInjector::new());
+                                                if let Some(p) = &peer {
+                                                    let grant = serde_json::to_string(&protocol::ControlMessage::ControlGrant).unwrap_or_default();
+                                                    let _ = p.send_control(&grant).await;
+                                                }
+                                            }
+                                            protocol::ControlMessage::ControlRevoke => {
+                                                control_granted = false;
+                                                input_injector = None;
+                                            }
+                                            _ if control_granted => {
+                                                if let Some(injector) = &mut input_injector {
+                                                    injector.handle(&msg);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
                             }
                             PeerEvent::ScreenData { data } => {
                                 // Viewer receives screen frames — forward to UI
