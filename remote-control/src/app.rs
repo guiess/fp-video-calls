@@ -25,6 +25,10 @@ pub enum AppCommand {
     StopSharing,
     ConnectToSession { server_url: String, code: String },
     Disconnect,
+    /// Send a control message via DataChannel
+    SendControl { message: String },
+    /// Grant or deny control to a requesting viewer
+    GrantControl { granted: bool },
 }
 
 struct FrameAssembly {
@@ -48,8 +52,10 @@ pub struct App {
 
     // Screen rendering (viewer side)
     screen_texture: Option<egui::TextureHandle>,
-    // Frame reassembly buffer: frame_id -> (chunks received, total chunks, accumulated data, width, height)
     frame_buffer: HashMap<u32, FrameAssembly>,
+
+    // Control state
+    control_pending_request: bool, // host: viewer requested control, waiting for approval
 }
 
 impl App {
@@ -69,6 +75,7 @@ impl App {
             event_rx,
             screen_texture: None,
             frame_buffer: HashMap::new(),
+            control_pending_request: false,
         }
     }
 
@@ -129,8 +136,31 @@ impl App {
                     info!("[app] signaling disconnected");
                 }
                 SignalEvent::ScreenFrame { data } => {
-                    // Reassemble chunked frame data and decode JPEG
                     self.handle_screen_chunk(ctx, &data);
+                }
+                SignalEvent::ControlRequested { user_id } => {
+                    info!("[app] control requested by {}", user_id);
+                    self.control_pending_request = true;
+                }
+                SignalEvent::ControlGranted => {
+                    if let ClientState::Connected { host_id, control_requested, audio_muted, .. } = &self.client_state {
+                        self.client_state = ClientState::Connected {
+                            host_id: host_id.clone(),
+                            control_active: true,
+                            control_requested: false,
+                            audio_muted: *audio_muted,
+                        };
+                    }
+                }
+                SignalEvent::ControlDenied => {
+                    if let ClientState::Connected { host_id, audio_muted, .. } = &self.client_state {
+                        self.client_state = ClientState::Connected {
+                            host_id: host_id.clone(),
+                            control_active: false,
+                            control_requested: false,
+                            audio_muted: *audio_muted,
+                        };
+                    }
                 }
             }
         }
@@ -271,12 +301,33 @@ impl eframe::App for App {
                 }
 
                 Mode::Host => {
-                    // Back button
                     if matches!(self.host_state, HostState::Idle | HostState::Error(_)) {
                         if ui.button("← Back").clicked() {
                             self.mode = Mode::Home;
                             self.host_state = HostState::Idle;
                         }
+                    }
+
+                    // Control approval prompt
+                    if self.control_pending_request {
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("🔔 Viewer requests control!").color(egui::Color32::from_rgb(234, 179, 8)).strong());
+                            if ui.button("✅ Allow").clicked() {
+                                self.control_pending_request = false;
+                                let _ = self.cmd_tx.send(AppCommand::GrantControl { granted: true });
+                                if let HostState::Connected { viewer_id, .. } = &self.host_state {
+                                    self.host_state = HostState::Connected {
+                                        viewer_id: viewer_id.clone(),
+                                        control_granted: true,
+                                    };
+                                }
+                            }
+                            if ui.button("❌ Deny").clicked() {
+                                self.control_pending_request = false;
+                                let _ = self.cmd_tx.send(AppCommand::GrantControl { granted: false });
+                            }
+                        });
                     }
 
                     let action = host_view::render(ui, &self.host_state);
@@ -294,10 +345,12 @@ impl eframe::App for App {
                         }
                         host_view::HostAction::ToggleControl => {
                             if let HostState::Connected { viewer_id, control_granted } = &self.host_state {
+                                let new_granted = !control_granted;
                                 self.host_state = HostState::Connected {
                                     viewer_id: viewer_id.clone(),
-                                    control_granted: !control_granted,
+                                    control_granted: new_granted,
                                 };
+                                let _ = self.cmd_tx.send(AppCommand::GrantControl { granted: new_granted });
                             }
                         }
                         host_view::HostAction::None => {}
@@ -305,7 +358,6 @@ impl eframe::App for App {
                 }
 
                 Mode::Client => {
-                    // Back button
                     if matches!(self.client_state, ClientState::Idle | ClientState::Error(_)) {
                         if ui.button("← Back").clicked() {
                             self.mode = Mode::Home;
@@ -316,7 +368,12 @@ impl eframe::App for App {
 
                     let action = client_view::render(ui, &self.client_state, &mut self.code_input);
 
-                    // Display remote screen if connected and we have a texture
+                    // Display remote screen + capture input when control is active
+                    let is_control_active = matches!(
+                        self.client_state,
+                        ClientState::Connected { control_active: true, .. }
+                    );
+
                     if matches!(self.client_state, ClientState::Connected { .. }) {
                         if let Some(tex) = &self.screen_texture {
                             ui.add_space(8.0);
@@ -324,7 +381,85 @@ impl eframe::App for App {
                             let tex_size = tex.size_vec2();
                             let scale = (available.x / tex_size.x).min(available.y / tex_size.y).min(1.0);
                             let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                            ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
+
+                            let (rect, response) = ui.allocate_exact_size(display_size, egui::Sense::click_and_drag());
+                            ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+
+                            // Capture input on the screen area when control is active
+                            if is_control_active {
+                                if let Some(pos) = response.hover_pos() {
+                                    let nx = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0) as f64;
+                                    let ny = ((pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0) as f64;
+
+                                    // Mouse move
+                                    let msg = serde_json::json!({"type": "mouse_move", "x": nx, "y": ny});
+                                    let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+
+                                    // Mouse clicks
+                                    if response.clicked() {
+                                        let msg = serde_json::json!({"type": "mouse_down", "x": nx, "y": ny, "button": "left"});
+                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                        let msg = serde_json::json!({"type": "mouse_up", "x": nx, "y": ny, "button": "left"});
+                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                    }
+                                    if response.secondary_clicked() {
+                                        let msg = serde_json::json!({"type": "mouse_down", "x": nx, "y": ny, "button": "right"});
+                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                        let msg = serde_json::json!({"type": "mouse_up", "x": nx, "y": ny, "button": "right"});
+                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                    }
+                                }
+
+                                // Scroll
+                                let scroll = ui.input(|i| i.smooth_scroll_delta);
+                                if scroll.y.abs() > 0.1 || scroll.x.abs() > 0.1 {
+                                    if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                                        if rect.contains(pos) {
+                                            let nx = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0) as f64;
+                                            let ny = ((pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0) as f64;
+                                            let msg = serde_json::json!({"type": "scroll", "x": nx, "y": ny, "dx": scroll.x as f64, "dy": scroll.y as f64});
+                                            let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                        }
+                                    }
+                                }
+
+                                // Keyboard
+                                ui.input(|i| {
+                                    for event in &i.events {
+                                        match event {
+                                            egui::Event::Key { key, pressed, modifiers, .. } => {
+                                                let key_str = format!("{:?}", key);
+                                                if *pressed {
+                                                    let msg = serde_json::json!({
+                                                        "type": "key_down",
+                                                        "key": key_str,
+                                                        "modifiers": {
+                                                            "ctrl": modifiers.ctrl,
+                                                            "shift": modifiers.shift,
+                                                            "alt": modifiers.alt,
+                                                            "meta": modifiers.mac_cmd || modifiers.command
+                                                        }
+                                                    });
+                                                    let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                                } else {
+                                                    let msg = serde_json::json!({"type": "key_up", "key": key_str});
+                                                    let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                                }
+                                            }
+                                            egui::Event::Text(text) => {
+                                                for ch in text.chars() {
+                                                    let s = ch.to_string();
+                                                    let msg = serde_json::json!({"type": "key_down", "key": s, "modifiers": {"ctrl": false, "shift": false, "alt": false, "meta": false}});
+                                                    let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                                    let msg = serde_json::json!({"type": "key_up", "key": s});
+                                                    let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                });
+                            }
                         }
                     }
 
@@ -340,12 +475,31 @@ impl eframe::App for App {
                             let _ = self.cmd_tx.send(AppCommand::Disconnect);
                             self.client_state = ClientState::Idle;
                             self.code_input.clear();
+                            self.screen_texture = None;
                         }
                         client_view::ClientAction::RequestControl => {
-                            info!("[app] requesting control");
+                            let msg = serde_json::json!({"type": "control_request"});
+                            let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                            if let ClientState::Connected { host_id, audio_muted, .. } = &self.client_state {
+                                self.client_state = ClientState::Connected {
+                                    host_id: host_id.clone(),
+                                    control_active: false,
+                                    control_requested: true,
+                                    audio_muted: *audio_muted,
+                                };
+                            }
                         }
                         client_view::ClientAction::ReleaseControl => {
-                            info!("[app] releasing control");
+                            let msg = serde_json::json!({"type": "control_revoke"});
+                            let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                            if let ClientState::Connected { host_id, audio_muted, .. } = &self.client_state {
+                                self.client_state = ClientState::Connected {
+                                    host_id: host_id.clone(),
+                                    control_active: false,
+                                    control_requested: false,
+                                    audio_muted: *audio_muted,
+                                };
+                            }
                         }
                         client_view::ClientAction::ToggleAudio => {
                             if let ClientState::Connected { host_id, control_active, control_requested, audio_muted } = &self.client_state {

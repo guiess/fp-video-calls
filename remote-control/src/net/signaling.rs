@@ -18,6 +18,12 @@ pub enum SignalEvent {
     Error { message: String },
     /// Screen frame data from remote peer (viewer side)
     ScreenFrame { data: Vec<u8> },
+    /// Control request received from viewer (host should prompt)
+    ControlRequested { user_id: String },
+    /// Control was granted by host
+    ControlGranted,
+    /// Control was denied by host
+    ControlDenied,
 }
 
 /// Async Socket.IO signaling client.

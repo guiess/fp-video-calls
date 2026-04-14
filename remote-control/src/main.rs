@@ -125,6 +125,29 @@ fn main() -> eframe::Result<()> {
                                     client.disconnect().await;
                                 }
                             }
+                            AppCommand::SendControl { message } => {
+                                if let Some(ref p) = peer {
+                                    if let Err(e) = p.send_control(&message).await {
+                                        warn!("[async] send control failed: {}", e);
+                                    }
+                                }
+                            }
+                            AppCommand::GrantControl { granted } => {
+                                control_granted = granted;
+                                if granted {
+                                    input_injector = Some(InputInjector::new());
+                                    if let Some(ref p) = peer {
+                                        let msg = serde_json::json!({"type": "control_grant"}).to_string();
+                                        let _ = p.send_control(&msg).await;
+                                    }
+                                } else {
+                                    input_injector = None;
+                                    if let Some(ref p) = peer {
+                                        let msg = serde_json::json!({"type": "control_deny"}).to_string();
+                                        let _ = p.send_control(&msg).await;
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -293,31 +316,32 @@ fn main() -> eframe::Result<()> {
                                 });
                             }
                             PeerEvent::ControlMessage { data } => {
-                                info!("[async] control message: {}", data);
-                                if is_host {
-                                    if let Ok(msg) = serde_json::from_str::<protocol::ControlMessage>(&data) {
-                                        match &msg {
-                                            protocol::ControlMessage::ControlRequest => {
-                                                info!("[async] viewer requested control");
-                                                // Auto-grant for now (Phase 5: show prompt in UI)
-                                                control_granted = true;
-                                                input_injector = Some(InputInjector::new());
-                                                if let Some(p) = &peer {
-                                                    let grant = serde_json::to_string(&protocol::ControlMessage::ControlGrant).unwrap_or_default();
-                                                    let _ = p.send_control(&grant).await;
-                                                }
-                                            }
-                                            protocol::ControlMessage::ControlRevoke => {
-                                                control_granted = false;
-                                                input_injector = None;
-                                            }
-                                            _ if control_granted => {
-                                                if let Some(injector) = &mut input_injector {
-                                                    injector.handle(&msg);
-                                                }
-                                            }
-                                            _ => {}
+                                if let Ok(msg) = serde_json::from_str::<protocol::ControlMessage>(&data) {
+                                    match &msg {
+                                        protocol::ControlMessage::ControlRequest if is_host => {
+                                            info!("[async] viewer requested control — prompting host");
+                                            let _ = ui_event_tx.send(SignalEvent::ControlRequested {
+                                                user_id: "viewer".to_string(),
+                                            });
                                         }
+                                        protocol::ControlMessage::ControlGrant if !is_host => {
+                                            info!("[async] control granted by host");
+                                            let _ = ui_event_tx.send(SignalEvent::ControlGranted);
+                                        }
+                                        protocol::ControlMessage::ControlDeny if !is_host => {
+                                            info!("[async] control denied by host");
+                                            let _ = ui_event_tx.send(SignalEvent::ControlDenied);
+                                        }
+                                        protocol::ControlMessage::ControlRevoke if is_host => {
+                                            control_granted = false;
+                                            input_injector = None;
+                                        }
+                                        _ if is_host && control_granted => {
+                                            if let Some(injector) = &mut input_injector {
+                                                injector.handle(&msg);
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                             }

@@ -37,6 +37,7 @@ scrap = "0.5"               # Screen capture (DXGI)
 image = "0.25"              # Image encoding (JPEG for screen frames)
 enigo = "0.6"               # Mouse/keyboard injection
 winapi = { version = "0.3", features = ["winuser"] }  # Screen metrics
+arboard = "3"               # Clipboard sync
 # openh264 = "0.6"          # H.264 encode/decode (future optimization)
 # arboard = "3"             # Clipboard sync
 # cpal = "0.15"             # Audio capture (WASAPI)
