@@ -39,6 +39,7 @@ enigo = "0.6"               # Mouse/keyboard injection
 winapi = { version = "0.3", features = ["winuser"] }  # Screen metrics
 arboard = "3"               # Clipboard sync
 rfd = "0.15"                # Native file dialogs
+cpal = "0.15"               # Audio capture (WASAPI)
 # openh264 = "0.6"          # H.264 encode/decode (future optimization)
 # arboard = "3"             # Clipboard sync
 # cpal = "0.15"             # Audio capture (WASAPI)

@@ -1,5 +1,6 @@
 mod app;
 mod capture;
+mod codec;
 mod input;
 mod net;
 mod protocol;
@@ -7,6 +8,7 @@ mod ui;
 
 use app::{App, AppCommand};
 use capture::CapturedFrame;
+use codec::AudioChunk;
 use input::InputInjector;
 use net::peer::{PeerEvent, PeerManager};
 use net::signaling::{SignalEvent, SignalingClient};
@@ -31,6 +33,8 @@ fn main() -> eframe::Result<()> {
 
     // Channel for screen frames from capture thread → async loop → DataChannel
     let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<CapturedFrame>();
+    // Channel for audio chunks from capture thread → async loop → DataChannel
+    let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<AudioChunk>();
 
     // Wrap event_tx so signaling events go to both UI and async loop
     let ui_event_tx = event_tx.clone();
@@ -45,6 +49,7 @@ fn main() -> eframe::Result<()> {
             let mut session_code: Option<String> = None;
             let mut is_host = false;
             let mut capture_stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
+            let mut audio_stop_tx: Option<tokio::sync::oneshot::Sender<()>> = None;
             let mut input_injector: Option<InputInjector> = None;
             let mut control_granted = false;
             let mut server_url_saved = String::new();
@@ -119,9 +124,8 @@ fn main() -> eframe::Result<()> {
                                 }
                             }
                             AppCommand::StopSharing => {
-                                if let Some(tx) = capture_stop_tx.take() {
-                                    let _ = tx.send(());
-                                }
+                                if let Some(tx) = capture_stop_tx.take() { let _ = tx.send(()); }
+                                if let Some(tx) = audio_stop_tx.take() { let _ = tx.send(()); }
                                 if let Some(p) = peer.take() {
                                     p.close().await;
                                 }
@@ -307,14 +311,10 @@ fn main() -> eframe::Result<()> {
                                 }
                             }
                             SignalEvent::PeerLeft { .. } => {
-                                // Close peer connection
-                                if let Some(p) = peer.take() {
-                                    p.close().await;
-                                }
+                                if let Some(p) = peer.take() { p.close().await; }
                                 peer_event_rx = None;
-                                if let Some(tx) = capture_stop_tx.take() {
-                                    let _ = tx.send(());
-                                }
+                                if let Some(tx) = capture_stop_tx.take() { let _ = tx.send(()); }
+                                if let Some(tx) = audio_stop_tx.take() { let _ = tx.send(()); }
                                 control_granted = false;
                                 input_injector = None;
                                 let _ = ui_event_tx.send(sig_event);
@@ -355,6 +355,15 @@ fn main() -> eframe::Result<()> {
                         }
                     }
 
+                    // Audio chunks from capture thread (host only)
+                    Some(chunk) = audio_rx.recv(), if peer.is_some() && is_host => {
+                        if let Some(p) = &peer {
+                            if let Err(e) = p.send_audio(&chunk.data).await {
+                                warn!("[audio] send failed: {}", e);
+                            }
+                        }
+                    }
+
                     // WebRTC peer events
                     Some(peer_event) = async {
                         if let Some(rx) = peer_event_rx.as_mut() {
@@ -382,7 +391,11 @@ fn main() -> eframe::Result<()> {
                                     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
                                     capture_stop_tx = Some(stop_tx);
                                     capture::start_capture_loop(frame_tx.clone(), stop_rx, 15, 0);
-                                    info!("[async] screen capture started at 15fps");
+                                    // Start audio capture
+                                    let (astop_tx, astop_rx) = tokio::sync::oneshot::channel();
+                                    audio_stop_tx = Some(astop_tx);
+                                    codec::start_audio_capture(audio_tx.clone(), astop_rx);
+                                    info!("[async] screen + audio capture started");
                                 }
                                 let _ = ui_event_tx.send(SignalEvent::PeerJoined {
                                     user_id: "connected".to_string(),
@@ -424,6 +437,11 @@ fn main() -> eframe::Result<()> {
                             }
                             PeerEvent::FileMessage { data } => {
                                 info!("[async] file data: {} bytes", data.len());
+                                // TODO: reassemble file and save to downloads
+                            }
+                            PeerEvent::AudioData { data } => {
+                                // TODO: decode Opus and play via cpal output stream
+                                // For now, audio data is received but not played
                             }
                             PeerEvent::ConnectionState { state } => {
                                 info!("[async] connection state: {}", state);

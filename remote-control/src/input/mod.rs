@@ -3,6 +3,7 @@ use enigo::{
     Coordinate, Direction, Button, Key,
     Mouse, Keyboard,
 };
+use arboard::Clipboard;
 use tracing::{info, warn};
 
 use crate::protocol::{ControlMessage, MouseButton};
@@ -108,7 +109,10 @@ impl InputInjector {
                 let _ = self.enigo.key(Key::Meta, Direction::Release);
             }
             ControlMessage::Clipboard { text } => {
-                info!("[input] clipboard: {} chars", text.len());
+                if let Ok(mut clip) = Clipboard::new() {
+                    let _ = clip.set_text(text.clone());
+                    info!("[input] clipboard set: {} chars", text.len());
+                }
             }
             _ => {}
         }

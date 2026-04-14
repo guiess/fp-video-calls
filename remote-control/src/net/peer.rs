@@ -14,17 +14,12 @@ use webrtc::peer_connection::RTCPeerConnection;
 /// Events emitted by the peer connection layer.
 #[derive(Debug, Clone)]
 pub enum PeerEvent {
-    /// WebRTC signaling data to send via Socket.IO
     LocalSignal { signal: serde_json::Value },
-    /// Control DataChannel message received
     ControlMessage { data: String },
-    /// File DataChannel message received
     FileMessage { data: Vec<u8> },
-    /// Screen DataChannel message received
     ScreenData { data: Vec<u8> },
-    /// Connection state changed
+    AudioData { data: Vec<u8> },
     ConnectionState { state: String },
-    /// DataChannels are ready for use
     DataChannelsReady,
 }
 
@@ -35,6 +30,7 @@ pub struct PeerManager {
     control_dc: Option<Arc<RTCDataChannel>>,
     screen_dc: Option<Arc<RTCDataChannel>>,
     file_dc: Option<Arc<RTCDataChannel>>,
+    audio_dc: Option<Arc<RTCDataChannel>>,
     is_host: bool,
 }
 
@@ -107,6 +103,7 @@ impl PeerManager {
             control_dc: None,
             screen_dc: None,
             file_dc: None,
+            audio_dc: None,
             is_host,
         };
 
@@ -121,22 +118,20 @@ impl PeerManager {
     /// Create the DataChannels (host side).
     async fn create_data_channels(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let control_dc = self.pc.create_data_channel("control", None).await?;
-        info!("[webrtc] created 'control' data channel");
-
         let screen_dc = self.pc.create_data_channel("screen", None).await?;
-        info!("[webrtc] created 'screen' data channel");
-
         let file_dc = self.pc.create_data_channel("file", None).await?;
-        info!("[webrtc] created 'file' data channel");
+        let audio_dc = self.pc.create_data_channel("audio", None).await?;
+        info!("[webrtc] created 4 data channels");
 
-        // Bind handlers
         Self::bind_data_channel(&control_dc, "control", self.event_tx.clone()).await;
         Self::bind_data_channel(&screen_dc, "screen", self.event_tx.clone()).await;
         Self::bind_data_channel(&file_dc, "file", self.event_tx.clone()).await;
+        Self::bind_data_channel(&audio_dc, "audio", self.event_tx.clone()).await;
 
         self.control_dc = Some(control_dc);
         self.screen_dc = Some(screen_dc);
         self.file_dc = Some(file_dc);
+        self.audio_dc = Some(audio_dc);
         Ok(())
     }
 
@@ -176,6 +171,9 @@ impl PeerManager {
                     }
                     "file" => {
                         let _ = tx.send(PeerEvent::FileMessage { data: msg.data.to_vec() });
+                    }
+                    "audio" => {
+                        let _ = tx.send(PeerEvent::AudioData { data: msg.data.to_vec() });
                     }
                     _ => {}
                 }
@@ -263,6 +261,14 @@ impl PeerManager {
     /// Send binary data on the file DataChannel.
     pub async fn send_file_data(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(dc) = &self.file_dc {
+            dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
+        }
+        Ok(())
+    }
+
+    /// Send audio data on the audio DataChannel.
+    pub async fn send_audio(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(dc) = &self.audio_dc {
             dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
         }
         Ok(())
