@@ -2,6 +2,7 @@ use eframe::egui;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use crate::i18n::{Lang, T};
 use crate::net::signaling::SignalEvent;
 use crate::ui::host_view::{self, HostState};
 use crate::ui::client_view::{self, ClientState};
@@ -36,6 +37,7 @@ pub enum AppCommand {
 
 pub struct App {
     mode: Mode,
+    lang: Lang,
     host_state: HostState,
     client_state: ClientState,
     code_input: String,
@@ -66,6 +68,7 @@ impl App {
     ) -> Self {
         Self {
             mode: Mode::Home,
+            lang: Lang::default(),
             host_state: HostState::Idle,
             client_state: ClientState::Idle,
             code_input: String::new(),
@@ -262,20 +265,32 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.mode {
                 Mode::Home => {
+                    let l = self.lang;
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
                         ui.label(
-                            egui::RichText::new("M2 Remote Control")
+                            egui::RichText::new(T::app_title(l))
                                 .size(32.0)
                                 .strong(),
                         );
                         ui.add_space(8.0);
-                        ui.label("Remote desktop control for fp-video-calls");
+                        ui.label(T::app_subtitle(l));
                         ui.add_space(32.0);
+
+                        // Language selector
+                        ui.horizontal(|ui| {
+                            ui.label(T::language(l));
+                            for &lang in Lang::ALL {
+                                if ui.selectable_label(self.lang == lang, lang.label()).clicked() {
+                                    self.lang = lang;
+                                }
+                            }
+                        });
+                        ui.add_space(16.0);
 
                         // Server URL input
                         ui.horizontal(|ui| {
-                            ui.label("Server:");
+                            ui.label(T::server(l));
                             ui.text_edit_singleline(&mut self.server_url);
                         });
                         ui.add_space(24.0);
@@ -283,7 +298,7 @@ impl eframe::App for App {
                         ui.columns(2, |cols| {
                             cols[0].vertical_centered(|ui| {
                                 if ui
-                                    .button(egui::RichText::new("🖥️  Share My Screen").size(18.0))
+                                    .button(egui::RichText::new(T::share_my_screen(l)).size(18.0))
                                     .clicked()
                                 {
                                     self.mode = Mode::Host;
@@ -293,26 +308,27 @@ impl eframe::App for App {
                                     });
                                 }
                                 ui.add_space(8.0);
-                                ui.label("Let others view and control your screen");
+                                ui.label(T::share_description(l));
                             });
                             cols[1].vertical_centered(|ui| {
                                 if ui
-                                    .button(egui::RichText::new("🔗  Connect to Remote").size(18.0))
+                                    .button(egui::RichText::new(T::connect_to_remote(l)).size(18.0))
                                     .clicked()
                                 {
                                     self.mode = Mode::Client;
                                     self.client_state = ClientState::Idle;
                                 }
                                 ui.add_space(8.0);
-                                ui.label("View and control a remote screen");
+                                ui.label(T::connect_description(l));
                             });
                         });
                     });
                 }
 
                 Mode::Host => {
+                    let l = self.lang;
                     if matches!(self.host_state, HostState::Idle | HostState::Error(_)) {
-                        if ui.button("← Back").clicked() {
+                        if ui.button(T::back(l)).clicked() {
                             self.mode = Mode::Home;
                             self.host_state = HostState::Idle;
                         }
@@ -322,8 +338,8 @@ impl eframe::App for App {
                     if self.control_pending_request {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("🔔 Viewer requests control!").color(egui::Color32::from_rgb(234, 179, 8)).strong());
-                            if ui.button("✅ Allow").clicked() {
+                            ui.label(egui::RichText::new(T::viewer_requests_control(l)).color(egui::Color32::from_rgb(234, 179, 8)).strong());
+                            if ui.button(T::allow(l)).clicked() {
                                 self.control_pending_request = false;
                                 let _ = self.cmd_tx.send(AppCommand::GrantControl { granted: true });
                                 if let HostState::Connected { viewer_id, .. } = &self.host_state {
@@ -333,14 +349,14 @@ impl eframe::App for App {
                                     };
                                 }
                             }
-                            if ui.button("❌ Deny").clicked() {
+                            if ui.button(T::deny(l)).clicked() {
                                 self.control_pending_request = false;
                                 let _ = self.cmd_tx.send(AppCommand::GrantControl { granted: false });
                             }
                         });
                     }
 
-                    let action = host_view::render(ui, &self.host_state);
+                    let action = host_view::render(ui, &self.host_state, l);
                     match action {
                         host_view::HostAction::Start => {
                             self.host_state = HostState::Connecting;
@@ -368,15 +384,16 @@ impl eframe::App for App {
                 }
 
                 Mode::Client => {
+                    let l = self.lang;
                     if matches!(self.client_state, ClientState::Idle | ClientState::Error(_)) {
-                        if ui.button("← Back").clicked() {
+                        if ui.button(T::back(l)).clicked() {
                             self.mode = Mode::Home;
                             self.client_state = ClientState::Idle;
                             self.code_input.clear();
                         }
                     }
 
-                    let action = client_view::render(ui, &self.client_state, &mut self.code_input);
+                    let action = client_view::render(ui, &self.client_state, &mut self.code_input, l);
 
                     // Display remote screen + capture input when control is active
                     let is_control_active = matches!(

@@ -1,6 +1,7 @@
 mod app;
 mod capture;
 mod codec;
+pub mod i18n;
 mod input;
 mod net;
 mod protocol;
