@@ -1,8 +1,12 @@
 [package]
-name = "fp-remote-control"
-version = "0.1.0"
+name = "m2-remote-control"
+version = "1.0.0"
 edition = "2021"
-description = "Remote desktop control tool for fp-video-calls"
+description = "M2 Remote Control — remote desktop tool"
+
+[[bin]]
+name = "m2-remote-control"
+path = "src/main.rs"
 
 [dependencies]
 # GUI

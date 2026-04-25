@@ -1923,33 +1923,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fp-remote-control"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "bytes",
- "cpal",
- "eframe",
- "egui",
- "enigo",
- "image",
- "openh264",
- "rand 0.8.5",
- "reqwest",
- "rfd",
- "rust_socketio",
- "scrap",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "webrtc",
- "winapi 0.3.9",
-]
-
-[[package]]
 name = "futures"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2950,6 +2923,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fae87c125b03c1d2c0150c90365d7d6bcc53fb73a9acaef207d2d065860f062"
 dependencies = [
  "imgref",
+]
+
+[[package]]
+name = "m2-remote-control"
+version = "1.0.0"
+dependencies = [
+ "arboard",
+ "bytes",
+ "cpal",
+ "eframe",
+ "egui",
+ "enigo",
+ "image",
+ "openh264",
+ "rand 0.8.5",
+ "reqwest",
+ "rfd",
+ "rust_socketio",
+ "scrap",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "webrtc",
+ "winapi 0.3.9",
 ]
 
 [[package]]

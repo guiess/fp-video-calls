@@ -33,11 +33,11 @@ fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "fp_remote_control=info".into()),
+                .unwrap_or_else(|_| "m2_remote_control=info".into()),
         )
         .init();
 
-    info!("FP Remote Control v{}", env!("CARGO_PKG_VERSION"));
+    info!("M2 Remote Control v{}", env!("CARGO_PKG_VERSION"));
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<AppCommand>();
     let (event_tx, event_rx) = mpsc::unbounded_channel::<SignalEvent>();
@@ -566,12 +566,12 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([600.0, 450.0])
             .with_min_inner_size([400.0, 300.0])
-            .with_title("FP Remote Control"),
+            .with_title("M2 Remote Control"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "FP Remote Control",
+        "M2 Remote Control",
         native_options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, cmd_tx, event_rx)))),
     )

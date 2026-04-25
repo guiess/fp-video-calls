@@ -265,7 +265,7 @@ impl eframe::App for App {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
                         ui.label(
-                            egui::RichText::new("FP Remote Control")
+                            egui::RichText::new("M2 Remote Control")
                                 .size(32.0)
                                 .strong(),
                         );
