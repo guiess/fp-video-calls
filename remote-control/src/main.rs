@@ -200,6 +200,12 @@ fn main() -> eframe::Result<()> {
                                     }
                                 }
                             }
+                            AppCommand::SetAudioMuted { muted } => {
+                                if let Some(ref mut player) = audio_player {
+                                    player.set_muted(muted);
+                                    info!("[audio] muted={}", muted);
+                                }
+                            }
                             AppCommand::SendFile { path } => {
                                 if let Some(ref p) = peer {
                                     match std::fs::read(&path) {

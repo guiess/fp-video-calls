@@ -30,6 +30,8 @@ pub enum AppCommand {
     GrantControl { granted: bool },
     /// Send a file to the remote peer
     SendFile { path: String },
+    /// Mute/unmute audio playback
+    SetAudioMuted { muted: bool },
 }
 
 pub struct App {
@@ -522,12 +524,14 @@ impl eframe::App for App {
                         }
                         client_view::ClientAction::ToggleAudio => {
                             if let ClientState::Connected { host_id, control_active, control_requested, audio_muted } = &self.client_state {
+                                let new_muted = !audio_muted;
                                 self.client_state = ClientState::Connected {
                                     host_id: host_id.clone(),
                                     control_active: *control_active,
                                     control_requested: *control_requested,
-                                    audio_muted: !audio_muted,
+                                    audio_muted: new_muted,
                                 };
+                                let _ = self.cmd_tx.send(AppCommand::SetAudioMuted { muted: new_muted });
                             }
                         }
                         client_view::ClientAction::SendFile => {
