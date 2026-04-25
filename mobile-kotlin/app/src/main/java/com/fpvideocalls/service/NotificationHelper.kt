@@ -314,8 +314,9 @@ object NotificationHelper {
 
     fun createLocationTrackingChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        // Delete legacy channel — Android caches importance, so a new ID is needed
+        // Delete legacy channels
         manager.deleteNotificationChannel("location_tracking")
+        manager.deleteNotificationChannel("location_tracking_v2")
 
         val channel = NotificationChannel(
             Constants.LOCATION_TRACKING_CHANNEL_ID,
@@ -326,6 +327,7 @@ object NotificationHelper {
             setSound(null, null)
             enableVibration(false)
             setShowBadge(false)
+            lockscreenVisibility = Notification.VISIBILITY_SECRET
         }
         manager.createNotificationChannel(channel)
     }
@@ -335,8 +337,9 @@ object NotificationHelper {
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle(context.getString(R.string.location_sharing_active))
             .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOngoing(true)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
             .build()
     }
 

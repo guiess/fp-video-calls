@@ -86,6 +86,7 @@ fun InCallScreen(
     val camEnabled by (webRTCManager?.camEnabled ?: MutableStateFlow(true)).collectAsState()
     val signalingState by (webRTCManager?.signalingState ?: MutableStateFlow("connecting")).collectAsState()
     val audioRoute by (inCallViewModel.audioHelper?.audioRoute ?: MutableStateFlow(com.fpvideocalls.webrtc.AudioRoute.SPEAKER)).collectAsState()
+    val remoteHangUp by (webRTCManager?.remoteHangUp ?: MutableStateFlow(false)).collectAsState()
 
     // Overlay controls visibility state
     var controlsVisible by remember { mutableStateOf(true) }
@@ -150,6 +151,13 @@ fun InCallScreen(
     LaunchedEffect(isCallActive, callWasActive) {
         if (callWasActive && !isCallActive) {
             onEndCall()
+        }
+    }
+
+    // Auto-end call when remote participant hangs up
+    LaunchedEffect(remoteHangUp) {
+        if (remoteHangUp) {
+            inCallViewModel.endCall()
         }
     }
 

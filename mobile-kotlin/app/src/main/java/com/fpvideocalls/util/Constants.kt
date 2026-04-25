@@ -18,7 +18,7 @@ object Constants {
     const val MAX_GROUP_CALL_MEMBERS = 8
 
     // Location tracking
-    const val LOCATION_TRACKING_CHANNEL_ID = "location_tracking_v2"
+    const val LOCATION_TRACKING_CHANNEL_ID = "location_tracking_v3"
     const val LOCATION_TRACKING_NOTIFICATION_ID = 9996
     const val LOCATION_UPDATE_INTERVAL_MS = 10 * 60 * 1000L
     const val LOCATION_HISTORY_MAX_AGE_DAYS = 7
