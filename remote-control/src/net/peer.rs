@@ -27,10 +27,10 @@ pub enum PeerEvent {
 pub struct PeerManager {
     pc: Arc<RTCPeerConnection>,
     event_tx: mpsc::UnboundedSender<PeerEvent>,
-    control_dc: Option<Arc<RTCDataChannel>>,
-    screen_dc: Option<Arc<RTCDataChannel>>,
-    file_dc: Option<Arc<RTCDataChannel>>,
-    audio_dc: Option<Arc<RTCDataChannel>>,
+    control_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>>,
+    screen_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>>,
+    file_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>>,
+    audio_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>>,
     is_host: bool,
 }
 
@@ -85,25 +85,47 @@ impl PeerManager {
             })
         }));
 
+        // Shared DataChannel storage — viewer stores incoming channels here
+        let control_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>> = Arc::new(std::sync::Mutex::new(None));
+        let screen_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>> = Arc::new(std::sync::Mutex::new(None));
+        let file_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>> = Arc::new(std::sync::Mutex::new(None));
+        let audio_dc: Arc<std::sync::Mutex<Option<Arc<RTCDataChannel>>>> = Arc::new(std::sync::Mutex::new(None));
+
         // Handle incoming DataChannels (viewer side receives channels created by host)
         let tx_dc = event_tx.clone();
+        let ctrl_dc_cb = control_dc.clone();
+        let scrn_dc_cb = screen_dc.clone();
+        let file_dc_cb = file_dc.clone();
+        let aud_dc_cb = audio_dc.clone();
         pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
             let tx = tx_dc.clone();
             let label = dc.label().to_string();
             info!("[webrtc] incoming data channel: {}", label);
-
+            let ctrl = ctrl_dc_cb.clone();
+            let scrn = scrn_dc_cb.clone();
+            let file = file_dc_cb.clone();
+            let aud = aud_dc_cb.clone();
+            let dc_ref = dc.clone();
             Box::pin(async move {
                 Self::bind_data_channel(&dc, &label, tx).await;
+                // Store the channel so the viewer can also send on it
+                match label.as_str() {
+                    "control" => { *ctrl.lock().unwrap() = Some(dc_ref); }
+                    "screen" => { *scrn.lock().unwrap() = Some(dc_ref); }
+                    "file" => { *file.lock().unwrap() = Some(dc_ref); }
+                    "audio" => { *aud.lock().unwrap() = Some(dc_ref); }
+                    _ => {}
+                }
             })
         }));
 
         let mut mgr = Self {
             pc,
             event_tx,
-            control_dc: None,
-            screen_dc: None,
-            file_dc: None,
-            audio_dc: None,
+            control_dc,
+            screen_dc,
+            file_dc,
+            audio_dc,
             is_host,
         };
 
@@ -117,21 +139,21 @@ impl PeerManager {
 
     /// Create the DataChannels (host side).
     async fn create_data_channels(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let control_dc = self.pc.create_data_channel("control", None).await?;
-        let screen_dc = self.pc.create_data_channel("screen", None).await?;
-        let file_dc = self.pc.create_data_channel("file", None).await?;
-        let audio_dc = self.pc.create_data_channel("audio", None).await?;
+        let control = self.pc.create_data_channel("control", None).await?;
+        let screen = self.pc.create_data_channel("screen", None).await?;
+        let file = self.pc.create_data_channel("file", None).await?;
+        let audio = self.pc.create_data_channel("audio", None).await?;
         info!("[webrtc] created 4 data channels");
 
-        Self::bind_data_channel(&control_dc, "control", self.event_tx.clone()).await;
-        Self::bind_data_channel(&screen_dc, "screen", self.event_tx.clone()).await;
-        Self::bind_data_channel(&file_dc, "file", self.event_tx.clone()).await;
-        Self::bind_data_channel(&audio_dc, "audio", self.event_tx.clone()).await;
+        Self::bind_data_channel(&control, "control", self.event_tx.clone()).await;
+        Self::bind_data_channel(&screen, "screen", self.event_tx.clone()).await;
+        Self::bind_data_channel(&file, "file", self.event_tx.clone()).await;
+        Self::bind_data_channel(&audio, "audio", self.event_tx.clone()).await;
 
-        self.control_dc = Some(control_dc);
-        self.screen_dc = Some(screen_dc);
-        self.file_dc = Some(file_dc);
-        self.audio_dc = Some(audio_dc);
+        *self.control_dc.lock().unwrap() = Some(control);
+        *self.screen_dc.lock().unwrap() = Some(screen);
+        *self.file_dc.lock().unwrap() = Some(file);
+        *self.audio_dc.lock().unwrap() = Some(audio);
         Ok(())
     }
 
@@ -244,7 +266,8 @@ impl PeerManager {
 
     /// Send a text message on the control DataChannel.
     pub async fn send_control(&self, msg: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(dc) = &self.control_dc {
+        let dc = self.control_dc.lock().unwrap().clone();
+        if let Some(dc) = dc {
             dc.send_text(msg.to_string()).await?;
         }
         Ok(())
@@ -252,7 +275,8 @@ impl PeerManager {
 
     /// Send binary data on the screen DataChannel.
     pub async fn send_screen(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(dc) = &self.screen_dc {
+        let dc = self.screen_dc.lock().unwrap().clone();
+        if let Some(dc) = dc {
             dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
         }
         Ok(())
@@ -260,7 +284,8 @@ impl PeerManager {
 
     /// Send binary data on the file DataChannel.
     pub async fn send_file_data(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(dc) = &self.file_dc {
+        let dc = self.file_dc.lock().unwrap().clone();
+        if let Some(dc) = dc {
             dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
         }
         Ok(())
@@ -268,7 +293,8 @@ impl PeerManager {
 
     /// Send audio data on the audio DataChannel.
     pub async fn send_audio(&self, data: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(dc) = &self.audio_dc {
+        let dc = self.audio_dc.lock().unwrap().clone();
+        if let Some(dc) = dc {
             dc.send(&bytes::Bytes::copy_from_slice(data)).await?;
         }
         Ok(())

@@ -1,7 +1,6 @@
 use eframe::egui;
-use std::collections::HashMap;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::net::signaling::SignalEvent;
 use crate::ui::host_view::{self, HostState};
@@ -33,14 +32,6 @@ pub enum AppCommand {
     SendFile { path: String },
 }
 
-struct FrameAssembly {
-    chunks: Vec<Option<Vec<u8>>>,
-    total: usize,
-    received: usize,
-    width: u32,
-    height: u32,
-}
-
 pub struct App {
     mode: Mode,
     host_state: HostState,
@@ -54,7 +45,12 @@ pub struct App {
 
     // Screen rendering (viewer side)
     screen_texture: Option<egui::TextureHandle>,
-    frame_buffer: HashMap<u32, FrameAssembly>,
+    h264_decoder: Option<openh264::decoder::Decoder>,
+    // Chunk reassembly for incoming screen frames
+    pending_frame_id: u32,
+    pending_chunks: Vec<Option<Vec<u8>>>,
+    pending_total: usize,
+    pending_received: usize,
 
     // Control state
     control_pending_request: bool, // host: viewer requested control, waiting for approval
@@ -76,7 +72,11 @@ impl App {
             cmd_tx,
             event_rx,
             screen_texture: None,
-            frame_buffer: HashMap::new(),
+            h264_decoder: None,
+            pending_frame_id: 0,
+            pending_chunks: Vec::new(),
+            pending_total: 0,
+            pending_received: 0,
             control_pending_request: false,
         }
     }
@@ -138,7 +138,7 @@ impl App {
                     info!("[app] signaling disconnected");
                 }
                 SignalEvent::ScreenFrame { data } => {
-                    self.handle_screen_chunk(ctx, &data);
+                    self.handle_encoded_frame(ctx, &data);
                 }
                 SignalEvent::ControlRequested { user_id } => {
                     info!("[app] control requested by {}", user_id);
@@ -176,69 +176,75 @@ impl App {
         }
     }
 
-    /// Handle an incoming screen data chunk, reassemble into full JPEG frames.
-    fn handle_screen_chunk(&mut self, ctx: &egui::Context, data: &[u8]) {
+    /// Handle an incoming screen data chunk — reassemble, then H.264 decode.
+    fn handle_encoded_frame(&mut self, ctx: &egui::Context, data: &[u8]) {
         if data.len() < 12 { return; }
 
         let frame_id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         let chunk_idx = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
         let num_chunks = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
+        let chunk_data = &data[12..];
 
-        let (header_size, width, height) = if chunk_idx == 0 && data.len() >= 20 {
-            let w = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-            let h = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-            (20, w, h)
-        } else {
-            (12, 0, 0)
-        };
-
-        let chunk_data = data[header_size..].to_vec();
-
-        let assembly = self.frame_buffer.entry(frame_id).or_insert_with(|| {
-            FrameAssembly {
-                chunks: vec![None; num_chunks],
-                total: num_chunks,
-                received: 0,
-                width,
-                height,
-            }
-        });
-
-        if chunk_idx == 0 && width > 0 {
-            assembly.width = width;
-            assembly.height = height;
+        // New frame — reset assembly
+        if frame_id != self.pending_frame_id {
+            self.pending_frame_id = frame_id;
+            self.pending_chunks = vec![None; num_chunks];
+            self.pending_total = num_chunks;
+            self.pending_received = 0;
         }
 
-        if chunk_idx < assembly.total && assembly.chunks[chunk_idx].is_none() {
-            assembly.chunks[chunk_idx] = Some(chunk_data);
-            assembly.received += 1;
+        if chunk_idx < self.pending_total && self.pending_chunks[chunk_idx].is_none() {
+            self.pending_chunks[chunk_idx] = Some(chunk_data.to_vec());
+            self.pending_received += 1;
         }
 
-        // Check if frame is complete
-        if assembly.received == assembly.total {
-            let mut jpeg_data = Vec::new();
-            for chunk in &assembly.chunks {
-                if let Some(c) = chunk {
-                    jpeg_data.extend_from_slice(c);
+        if self.pending_received < self.pending_total { return; }
+
+        // All chunks received — reassemble
+        let mut payload = Vec::new();
+        for chunk in &self.pending_chunks {
+            if let Some(c) = chunk { payload.extend_from_slice(c); }
+        }
+        self.pending_chunks.clear();
+        self.pending_received = 0;
+
+        if payload.len() < 8 { return; }
+        let _width = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+        let _height = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+        let h264_data = &payload[8..];
+
+        // Lazy-init decoder
+        if self.h264_decoder.is_none() {
+            match openh264::decoder::Decoder::new() {
+                Ok(d) => self.h264_decoder = Some(d),
+                Err(e) => {
+                    warn!("[app] failed to create H.264 decoder: {}", e);
+                    return;
                 }
             }
+        }
 
-            // Decode JPEG and update texture
-            if let Ok(img) = image::load_from_memory_with_format(&jpeg_data, image::ImageFormat::Jpeg) {
-                let rgba = img.to_rgba8();
-                let size = [rgba.width() as usize, rgba.height() as usize];
-                let pixels = rgba.as_flat_samples();
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+        let decoder = self.h264_decoder.as_mut().unwrap();
 
+        // Decode — feed entire bitstream (may contain SPS+PPS+IDR or just P-slice)
+        match decoder.decode(h264_data) {
+            Ok(Some(yuv_frame)) => {
+                use openh264::formats::YUVSource;
+                let (w, h) = yuv_frame.dimensions();
+                let mut rgba = vec![0u8; w * h * 4];
+                yuv_frame.write_rgba8(&mut rgba);
+
+                let color_image = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
                 self.screen_texture = Some(ctx.load_texture(
                     "remote_screen",
                     color_image,
                     egui::TextureOptions::LINEAR,
                 ));
             }
-
-            // Clean up old frame buffers
-            self.frame_buffer.retain(|id, _| *id == frame_id);
+            Ok(None) => {}
+            Err(e) => {
+                warn!("[app] H.264 decode error: {}", e);
+            }
         }
     }
 }
@@ -381,7 +387,7 @@ impl eframe::App for App {
                             ui.add_space(8.0);
                             let available = ui.available_size();
                             let tex_size = tex.size_vec2();
-                            let scale = (available.x / tex_size.x).min(available.y / tex_size.y).min(1.0);
+                            let scale = (available.x / tex_size.x).min(available.y / tex_size.y);
                             let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
 
                             let (rect, response) = ui.allocate_exact_size(display_size, egui::Sense::click_and_drag());
@@ -389,28 +395,39 @@ impl eframe::App for App {
 
                             // Capture input on the screen area when control is active
                             if is_control_active {
-                                if let Some(pos) = response.hover_pos() {
+                                // Mouse position — works during both hover and drag
+                                let pointer_pos = response.interact_pointer_pos().or(response.hover_pos());
+                                if let Some(pos) = pointer_pos {
                                     let nx = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0) as f64;
                                     let ny = ((pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0) as f64;
 
                                     // Mouse move
                                     let msg = serde_json::json!({"type": "mouse_move", "x": nx, "y": ny});
                                     let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
-
-                                    // Mouse clicks
-                                    if response.clicked() {
-                                        let msg = serde_json::json!({"type": "mouse_down", "x": nx, "y": ny, "button": "left"});
-                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
-                                        let msg = serde_json::json!({"type": "mouse_up", "x": nx, "y": ny, "button": "left"});
-                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
-                                    }
-                                    if response.secondary_clicked() {
-                                        let msg = serde_json::json!({"type": "mouse_down", "x": nx, "y": ny, "button": "right"});
-                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
-                                        let msg = serde_json::json!({"type": "mouse_up", "x": nx, "y": ny, "button": "right"});
-                                        let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
-                                    }
                                 }
+
+                                // Mouse button press/release — use raw pointer events
+                                // so press and release are sent independently (enables drag)
+                                ui.input(|i| {
+                                    for event in &i.events {
+                                        if let egui::Event::PointerButton { pos, button, pressed, .. } = event {
+                                            let btn_str = match button {
+                                                egui::PointerButton::Primary => "left",
+                                                egui::PointerButton::Secondary => "right",
+                                                egui::PointerButton::Middle => "middle",
+                                                _ => "",
+                                            };
+                                            // Press must be inside rect; release is always sent
+                                            if !btn_str.is_empty() && (rect.contains(*pos) || !*pressed) {
+                                                let nx = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0) as f64;
+                                                let ny = ((pos.y - rect.min.y) / rect.height()).clamp(0.0, 1.0) as f64;
+                                                let event_type = if *pressed { "mouse_down" } else { "mouse_up" };
+                                                let msg = serde_json::json!({"type": event_type, "x": nx, "y": ny, "button": btn_str});
+                                                let _ = self.cmd_tx.send(AppCommand::SendControl { message: msg.to_string() });
+                                            }
+                                        }
+                                    }
+                                });
 
                                 // Scroll
                                 let scroll = ui.input(|i| i.smooth_scroll_delta);

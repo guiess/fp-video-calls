@@ -358,26 +358,29 @@ fn main() -> eframe::Result<()> {
 
                     // Screen frames from capture thread (host only)
                     Some(frame) = frame_rx.recv(), if peer.is_some() && is_host => {
+                        // Drain to latest frame — skip stale ones to avoid lag
+                        let mut latest = frame;
+                        while let Ok(newer) = frame_rx.try_recv() {
+                            latest = newer;
+                        }
                         if let Some(p) = &peer {
-                            // Chunk and send JPEG frame over screen DataChannel
-                            let chunk_size = 16384; // 16KB per DataChannel message
-                            let total = frame.data.len();
-                            let num_chunks = (total + chunk_size - 1) / chunk_size;
+                            // Prepend width/height header to H.264 data
+                            let mut payload = Vec::with_capacity(8 + latest.data.len());
+                            payload.extend_from_slice(&latest.width.to_le_bytes());
+                            payload.extend_from_slice(&latest.height.to_le_bytes());
+                            payload.extend_from_slice(&latest.data);
 
-                            // Header: [4B frame_id][4B total_len][4B num_chunks][4B width][4B height]
+                            // Chunk for DataChannel (SCTP max ~16KB)
+                            let chunk_size = 15000;
+                            let num_chunks = (payload.len() + chunk_size - 1) / chunk_size;
                             let frame_id: u32 = rand::random();
-                            for (i, chunk) in frame.data.chunks(chunk_size).enumerate() {
-                                let mut msg = Vec::with_capacity(12 + chunk.len());
-                                msg.extend_from_slice(&frame_id.to_le_bytes());
-                                msg.extend_from_slice(&(i as u32).to_le_bytes());
-                                msg.extend_from_slice(&(num_chunks as u32).to_le_bytes());
-                                if i == 0 {
-                                    // First chunk includes dimensions
-                                    msg.extend_from_slice(&frame.width.to_le_bytes());
-                                    msg.extend_from_slice(&frame.height.to_le_bytes());
-                                }
-                                msg.extend_from_slice(chunk);
-                                if let Err(e) = p.send_screen(&msg).await {
+                            for (i, chunk) in payload.chunks(chunk_size).enumerate() {
+                                let mut pkt = Vec::with_capacity(12 + chunk.len());
+                                pkt.extend_from_slice(&frame_id.to_le_bytes());
+                                pkt.extend_from_slice(&(i as u32).to_le_bytes());
+                                pkt.extend_from_slice(&(num_chunks as u32).to_le_bytes());
+                                pkt.extend_from_slice(chunk);
+                                if let Err(e) = p.send_screen(&pkt).await {
                                     warn!("[capture] send screen chunk failed: {}", e);
                                     break;
                                 }

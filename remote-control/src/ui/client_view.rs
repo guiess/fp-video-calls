@@ -34,6 +34,55 @@ pub fn render(
 ) -> ClientAction {
     let mut action = ClientAction::None;
 
+    // When connected, show only a compact toolbar — no big heading
+    if matches!(state, ClientState::Connected { .. }) {
+        match state {
+            ClientState::Connected {
+                host_id: _,
+                control_active,
+                control_requested,
+                audio_muted,
+            } => {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("✅ Connected")
+                            .color(egui::Color32::from_rgb(34, 197, 94)),
+                    );
+                    ui.separator();
+
+                    if *control_active {
+                        ui.label(
+                            RichText::new("🎮 Controlling")
+                                .color(egui::Color32::from_rgb(34, 197, 94)),
+                        );
+                        if ui.button("Release").clicked() {
+                            action = ClientAction::ReleaseControl;
+                        }
+                    } else if *control_requested {
+                        ui.spinner();
+                        ui.label("Requesting…");
+                    } else if ui.button("🖱️ Request Control").clicked() {
+                        action = ClientAction::RequestControl;
+                    }
+
+                    ui.separator();
+                    let audio_label = if *audio_muted { "🔇" } else { "🔊" };
+                    if ui.button(audio_label).clicked() {
+                        action = ClientAction::ToggleAudio;
+                    }
+                    if ui.button("📁").clicked() {
+                        action = ClientAction::SendFile;
+                    }
+                    if ui.button("⏹ Disconnect").clicked() {
+                        action = ClientAction::Disconnect;
+                    }
+                });
+            }
+            _ => unreachable!(),
+        }
+        return action;
+    }
+
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
         ui.label(RichText::new("🔗 Connect to Remote").size(24.0).strong());
@@ -69,52 +118,8 @@ pub fn render(
                 ui.label("Connecting...");
                 ui.spinner();
             }
-            ClientState::Connected {
-                host_id,
-                control_active,
-                control_requested,
-                audio_muted,
-            } => {
-                ui.label(
-                    RichText::new("✅ Connected to host")
-                        .size(16.0)
-                        .color(egui::Color32::from_rgb(34, 197, 94)),
-                );
-                ui.add_space(4.0);
-                ui.label(format!("Host: {}", host_id));
-                ui.add_space(12.0);
-
-                if *control_active {
-                    ui.label(
-                        RichText::new("🎮 You have control")
-                            .color(egui::Color32::from_rgb(34, 197, 94)),
-                    );
-                    ui.add_space(8.0);
-                    if ui.button("Release Control").clicked() {
-                        action = ClientAction::ReleaseControl;
-                    }
-                } else if *control_requested {
-                    ui.label("Control requested — waiting for host approval...");
-                    ui.spinner();
-                } else if ui.button("🖱️ Request Control").clicked() {
-                    action = ClientAction::RequestControl;
-                }
-
-                ui.add_space(8.0);
-                let audio_label = if *audio_muted { "🔇 Unmute Audio" } else { "🔊 Mute Audio" };
-                if ui.button(audio_label).clicked() {
-                    action = ClientAction::ToggleAudio;
-                }
-
-                ui.add_space(8.0);
-                if ui.button("📁 Send File").clicked() {
-                    action = ClientAction::SendFile;
-                }
-
-                ui.add_space(16.0);
-                if ui.button(RichText::new("⏹  Disconnect").size(14.0)).clicked() {
-                    action = ClientAction::Disconnect;
-                }
+            ClientState::Connected { .. } => {
+                // Handled above — early return
             }
             ClientState::Error(msg) => {
                 ui.label(

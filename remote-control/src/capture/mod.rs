@@ -1,10 +1,11 @@
+use openh264::encoder::Encoder;
 use scrap::{Capturer, Display};
 use std::io::ErrorKind;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-/// A captured frame as JPEG bytes.
+/// A captured frame encoded as H.264 bitstream.
 pub struct CapturedFrame {
     pub data: Vec<u8>,
     pub width: u32,
@@ -34,7 +35,7 @@ pub fn list_displays() -> Vec<DisplayInfo> {
 }
 
 /// Runs the screen capture loop in a blocking thread.
-/// `display_index`: which monitor to capture (0 = primary).
+/// Captures screen, encodes to H.264, and sends encoded frames.
 pub fn start_capture_loop(
     frame_tx: mpsc::UnboundedSender<CapturedFrame>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
@@ -57,7 +58,10 @@ pub fn start_capture_loop(
 
         let width = display.width() as u32;
         let height = display.height() as u32;
-        info!("[capture] display {}x{}", width, height);
+        // H.264 requires even dimensions
+        let enc_w = (width & !1) as usize;
+        let enc_h = (height & !1) as usize;
+        info!("[capture] display {}x{}, encoding {}x{}", width, height, enc_w, enc_h);
 
         let mut capturer = match Capturer::new(display) {
             Ok(c) => c,
@@ -67,10 +71,19 @@ pub fn start_capture_loop(
             }
         };
 
+        // Create H.264 encoder (auto-downloads OpenH264 on first use)
+        let mut encoder = match Encoder::new() {
+            Ok(e) => e,
+            Err(e) => {
+                warn!("[capture] failed to create H.264 encoder: {}", e);
+                return;
+            }
+        };
+
         let frame_interval = Duration::from_millis(1000 / target_fps as u64);
+        let mut error_count: u32 = 0;
 
         loop {
-            // Check stop signal
             if stop_rx.try_recv().is_ok() {
                 info!("[capture] stopped");
                 return;
@@ -80,19 +93,54 @@ pub fn start_capture_loop(
 
             match capturer.frame() {
                 Ok(frame) => {
-                    // frame is BGRA, convert to JPEG
-                    if let Some(jpeg) = encode_bgra_to_jpeg(&frame, width, height, 40) {
-                        if frame_tx.send(CapturedFrame { data: jpeg, width, height }).is_err() {
-                            return; // receiver dropped
+                    error_count = 0;
+                    let yuv = bgra_to_yuv_buffer(&frame, width as usize, height as usize, enc_w, enc_h);
+
+                    match encoder.encode(&yuv) {
+                        Ok(bitstream) => {
+                            let encoded = bitstream.to_vec();
+                            if !encoded.is_empty() {
+                                if frame_tx.send(CapturedFrame {
+                                    data: encoded,
+                                    width: enc_w as u32,
+                                    height: enc_h as u32,
+                                }).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("[capture] H.264 encode error: {}", e);
                         }
                     }
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                    // No new frame yet, skip
-                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
                 Err(e) => {
-                    warn!("[capture] frame error: {}", e);
-                    std::thread::sleep(Duration::from_millis(100));
+                    error_count += 1;
+                    if error_count > 5 {
+                        // DXGI duplication lost — recreate capturer
+                        warn!("[capture] recreating capturer after {} errors: {}", error_count, e);
+                        std::thread::sleep(Duration::from_millis(500));
+                        let displays = Display::all().unwrap_or_default();
+                        let disp = if display_index < displays.len() {
+                            displays.into_iter().nth(display_index)
+                        } else {
+                            Display::primary().ok()
+                        };
+                        match disp {
+                            Some(d) => match Capturer::new(d) {
+                                Ok(c) => {
+                                    capturer = c;
+                                    error_count = 0;
+                                    info!("[capture] capturer recreated successfully");
+                                }
+                                Err(e2) => warn!("[capture] recreate failed: {}", e2),
+                            },
+                            None => warn!("[capture] no display available"),
+                        }
+                    } else {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
             }
 
@@ -104,32 +152,32 @@ pub fn start_capture_loop(
     });
 }
 
-/// Encode BGRA pixel data to JPEG bytes.
-fn encode_bgra_to_jpeg(bgra: &[u8], width: u32, height: u32, quality: u8) -> Option<Vec<u8>> {
-    use image::{ImageBuffer, RgbImage};
-    use std::io::Cursor;
+/// Convert BGRA pixel data (with possible stride padding) to a packed I420 YUVBuffer.
+fn bgra_to_yuv_buffer(bgra: &[u8], src_w: usize, src_h: usize, dst_w: usize, dst_h: usize) -> openh264::formats::YUVBuffer {
+    let stride = bgra.len() / src_h;
+    let y_size = dst_w * dst_h;
+    let uv_size = (dst_w / 2) * (dst_h / 2);
+    let mut yuv = vec![0u8; y_size + uv_size * 2];
 
-    // BGRA → RGB
-    let expected_len = (width * height * 4) as usize;
-    if bgra.len() < expected_len {
-        return None;
-    }
+    let (y_plane, uv_planes) = yuv.split_at_mut(y_size);
+    let (u_plane, v_plane) = uv_planes.split_at_mut(uv_size);
 
-    let mut rgb_buf: Vec<u8> = Vec::with_capacity((width * height * 3) as usize);
-    // scrap may have stride padding, handle row by row
-    let stride = bgra.len() / height as usize;
-    for y in 0..height as usize {
-        let row_start = y * stride;
-        for x in 0..width as usize {
-            let px = row_start + x * 4;
-            rgb_buf.push(bgra[px + 2]); // R
-            rgb_buf.push(bgra[px + 1]); // G
-            rgb_buf.push(bgra[px]);     // B
+    for row in 0..dst_h {
+        for col in 0..dst_w {
+            let px = row * stride + col * 4;
+            let b = bgra[px] as f32;
+            let g = bgra[px + 1] as f32;
+            let r = bgra[px + 2] as f32;
+
+            y_plane[row * dst_w + col] = (0.299 * r + 0.587 * g + 0.114 * b).clamp(0.0, 255.0) as u8;
+
+            if row % 2 == 0 && col % 2 == 0 {
+                let uv_idx = (row / 2) * (dst_w / 2) + (col / 2);
+                u_plane[uv_idx] = (-0.169 * r - 0.331 * g + 0.500 * b + 128.0).clamp(0.0, 255.0) as u8;
+                v_plane[uv_idx] = (0.500 * r - 0.419 * g - 0.081 * b + 128.0).clamp(0.0, 255.0) as u8;
+            }
         }
     }
 
-    let img: RgbImage = ImageBuffer::from_raw(width, height, rgb_buf)?;
-    let mut jpeg_bytes = Cursor::new(Vec::new());
-    img.write_to(&mut jpeg_bytes, image::ImageFormat::Jpeg).ok()?;
-    Some(jpeg_bytes.into_inner())
+    openh264::formats::YUVBuffer::from_vec(yuv, dst_w, dst_h)
 }
