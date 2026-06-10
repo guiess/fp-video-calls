@@ -68,6 +68,10 @@ class WebRTCManager(
     private val _signalingState = MutableStateFlow("connecting")
     val signalingState: StateFlow<String> = _signalingState.asStateFlow()
 
+    /** Emits true when all remote participants have left (remote hang-up). */
+    private val _remoteHangUp = MutableStateFlow(false)
+    val remoteHangUp: StateFlow<Boolean> = _remoteHangUp.asStateFlow()
+
     fun getEglBase(): EglBase? = eglBase
 
     /** Set initial camera state before setup() is called. */
@@ -149,6 +153,10 @@ class WebRTCManager(
                             try { pc.close() } catch (_: Exception) {}
                         }
                         peerConnections.remove(leftId)
+                        if (_participants.value.isEmpty() && peerConnections.isEmpty()) {
+                            Log.d(TAG, "All remote participants left — signaling remote hang-up")
+                            _remoteHangUp.value = true
+                        }
                     },
                     onOffer = { fromId, offer ->
                         scope.launch(Dispatchers.Main) {
