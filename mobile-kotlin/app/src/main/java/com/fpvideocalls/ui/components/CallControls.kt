@@ -22,10 +22,12 @@ fun CallControls(
     micMuted: Boolean,
     camEnabled: Boolean,
     audioRoute: AudioRoute,
+    isPrimary: Boolean,
     onToggleMic: () -> Unit,
     onToggleCam: () -> Unit,
     onToggleSpeaker: () -> Unit,
     onSwitchCamera: () -> Unit,
+    onTogglePrimary: () -> Unit,
     onEndCall: () -> Unit,
     modifier: Modifier = Modifier
 ){
@@ -54,6 +56,14 @@ fun CallControls(
             contentDescription = if (camEnabled) stringResource(R.string.cd_disable_camera) else stringResource(R.string.cd_enable_camera),
             isActive = camEnabled,
             onClick = onToggleCam
+        )
+
+        // Pin self as primary speaker
+        ControlButton(
+            icon = Icons.Default.PushPin,
+            contentDescription = if (isPrimary) "Unpin yourself" else "Pin yourself as primary",
+            isActive = isPrimary,
+            onClick = onTogglePrimary
         )
 
         // Audio output route

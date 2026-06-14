@@ -500,6 +500,7 @@ io.on("connection", (socket) => {
         if (row) {
           rooms.set(roomId, {
             participants: new Map(),
+            primaryUserId: null,
             settings: {
               videoQuality: row.video_quality,
               passwordEnabled: !!row.password_enabled,
@@ -517,6 +518,7 @@ io.on("connection", (socket) => {
         const pwHash = pwEnabled ? hashPassword(password) : undefined;
         rooms.set(roomId, {
           participants: new Map(),
+          primaryUserId: null,
           settings: { videoQuality: q, passwordEnabled: pwEnabled, passwordHash: pwHash }
         });
         // Persist to DB
@@ -552,7 +554,11 @@ io.on("connection", (socket) => {
       micMuted: !!p.micMuted
     }));
     console.log(`[room:join] ${userId} ${isReconnect ? "re" : ""}joined ${roomId} (${room.participants.size} participants)`);
-    socket.emit("room_joined", { participants, roomInfo: { roomId, settings: sanitizeSettings(room.settings) } });
+    socket.emit("room_joined", {
+      participants,
+      roomInfo: { roomId, settings: sanitizeSettings(room.settings) },
+      primaryUserId: room.primaryUserId ?? null,
+    });
 
     // Only notify others on first join (skip for reconnects to avoid duplicate user_joined)
     if (!isReconnect) {
@@ -560,10 +566,28 @@ io.on("connection", (socket) => {
     }
   });
 
+  // Self-pin / primary participant. userId === null clears the primary.
+  // Any client sending a new primary replaces the previous one.
+  socket.on("set_primary", ({ roomId, userId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const next = (typeof userId === "string" && userId.length > 0) ? userId : null;
+    // Reject self-pin from a user not in the room
+    if (next && !room.participants.has(next)) return;
+    if (room.primaryUserId === next) return;
+    room.primaryUserId = next;
+    console.log(`[room:primary] ${roomId} primary=${next ?? "(none)"}`);
+    io.to(roomId).emit("primary_changed", { userId: next });
+  });
+
   socket.on("leave_room", ({ roomId, userId }) => {
     const room = rooms.get(roomId);
     if (room) {
       room.participants.delete(userId);
+      if (room.primaryUserId === userId) {
+        room.primaryUserId = null;
+        socket.to(roomId).emit("primary_changed", { userId: null });
+      }
       socket.leave(roomId);
       socket.to(roomId).emit("user_left", { userId });
       console.log(`[room:leave] ${userId} left ${roomId} (${room.participants.size} remaining)`);
@@ -631,6 +655,10 @@ io.on("connection", (socket) => {
       const userId = getUserIdBySocket(roomId, socket.id);
       if (userId) {
         room.participants.delete(userId);
+        if (room.primaryUserId === userId) {
+          room.primaryUserId = null;
+          socket.to(roomId).emit("primary_changed", { userId: null });
+        }
         socket.to(roomId).emit("user_left", { userId });
         console.log(`[room:disconnect] ${userId} disconnected from ${roomId} (${room.participants.size} remaining)`);
         if (room.participants.size === 0) {

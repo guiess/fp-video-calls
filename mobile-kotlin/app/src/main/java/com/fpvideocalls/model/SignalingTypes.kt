@@ -18,5 +18,6 @@ data class SignalingHandlers(
     val onPeerMicState: ((userId: String, muted: Boolean) -> Unit)? = null,
     val onChatMessage: ((roomId: String, fromId: String, displayName: String, text: String, ts: Long) -> Unit)? = null,
     val onError: ((code: String, message: String?) -> Unit)? = null,
-    val onSignalingStateChange: ((state: String) -> Unit)? = null
+    val onSignalingStateChange: ((state: String) -> Unit)? = null,
+    val onPrimaryChanged: ((primaryUserId: String?) -> Unit)? = null
 )

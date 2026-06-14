@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.fpvideocalls.R
 import com.fpvideocalls.model.Participant
 import com.fpvideocalls.ui.theme.SurfaceVariant
+import com.fpvideocalls.webrtc.WebRTCManager.QualityLevel
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 
@@ -34,6 +35,10 @@ fun VideoGrid(
     localUserId: String,
     camEnabled: Boolean,
     eglBase: EglBase?,
+    remoteQuality: Map<String, QualityLevel> = emptyMap(),
+    hiddenRemotes: Set<String> = emptySet(),
+    primaryUserId: String? = null,
+    onToggleHide: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     onPinnedChanged: (Boolean) -> Unit = {}
 ) {
@@ -47,11 +52,98 @@ fun VideoGrid(
     val isMobile = config.screenWidthDp < 600
     val isPortrait = config.orientation == Configuration.ORIENTATION_PORTRAIT
 
+    // --- Tile builders ------------------------------------------------------
+
+    val remoteTile: @Composable (Participant, Modifier) -> Unit = { p, mod ->
+        val track = remoteVideoTracks[p.userId]
+        val hidden = p.userId in hiddenRemotes
+        val isPrimary = primaryUserId == p.userId
+        Box(mod.clickable { if (!hidden) pinnedId = p.userId }) {
+            if (track != null && !hidden) {
+                WebRTCVideoView(track, eglBase, Modifier.fillMaxSize())
+            } else {
+                Box(Modifier.fillMaxSize().background(SurfaceVariant))
+            }
+
+            // Top-left: hide/show toggle
+            HideRemoteButton(
+                hidden = hidden,
+                onToggle = { onToggleHide(p.userId) },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+            )
+
+            // Top-right: quality bars
+            QualityBars(
+                level = remoteQuality[p.userId],
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+            )
+
+            // Bottom-left: name + (optional) pin badge
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isPrimary) {
+                    PinBadge()
+                    Spacer(Modifier.width(4.dp))
+                }
+                Box(
+                    Modifier
+                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(p.displayName, color = Color.White, fontSize = 11.sp, maxLines = 1)
+                }
+            }
+        }
+    }
+
+    val localTile: @Composable (Modifier) -> Unit = { mod ->
+        val isPrimary = primaryUserId == localUserId
+        Box(mod) {
+            if (localVideoTrack != null) {
+                WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
+            }
+            if (!camEnabled) {
+                Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isPrimary) {
+                    PinBadge()
+                    Spacer(Modifier.width(4.dp))
+                }
+                Box(
+                    Modifier
+                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(stringResource(R.string.you_label), color = Color.White, fontSize = 11.sp, maxLines = 1)
+                }
+            }
+        }
+    }
+
+    // --- Layouts ------------------------------------------------------------
+
     if (pinnedId != null) {
         // Pinned/fullscreen mode
         val stream = remoteVideoTracks[pinnedId]
+        val pinnedHidden = pinnedId in hiddenRemotes
         Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-            if (stream != null) {
+            if (stream != null && !pinnedHidden) {
                 WebRTCVideoView(
                     videoTrack = stream,
                     eglBase = eglBase,
@@ -103,121 +195,30 @@ fun VideoGrid(
         Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
             if (totalTiles == 1) {
                 // Only local stream
-                Box(Modifier.fillMaxSize()) {
-                    if (localVideoTrack != null) {
-                        WebRTCVideoView(
-                            videoTrack = localVideoTrack,
-                            eglBase = eglBase,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    if (!camEnabled) {
-                        Box(
-                            Modifier.fillMaxSize().background(SurfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
-                        }
-                    }
-                }
+                localTile(Modifier.fillMaxSize())
             } else if (totalTiles == 2) {
                 // 2 tiles: vertical in portrait, side-by-side in landscape
-                val remoteTile = @Composable { mod: Modifier ->
-                    participants.firstOrNull()?.let { p ->
-                        val track = remoteVideoTracks[p.userId]
-                        Box(mod.clickable { pinnedId = p.userId }) {
-                            if (track != null) {
-                                WebRTCVideoView(track, eglBase, Modifier.fillMaxSize())
-                            } else {
-                                Box(Modifier.fillMaxSize().background(SurfaceVariant))
-                            }
-                        }
-                    }
-                }
-                val localTile = @Composable { mod: Modifier ->
-                    Box(mod) {
-                        if (localVideoTrack != null) {
-                            WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize())
-                        }
-                        if (!camEnabled) {
-                            Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
-                            }
-                        }
-                    }
-                }
+                val p = participants.firstOrNull()
                 if (isPortrait) {
                     Column(Modifier.fillMaxSize()) {
-                        remoteTile(Modifier.weight(1f).fillMaxWidth())
+                        if (p != null) remoteTile(p, Modifier.weight(1f).fillMaxWidth())
                         localTile(Modifier.weight(1f).fillMaxWidth())
                     }
                 } else {
                     Row(Modifier.fillMaxSize()) {
-                        remoteTile(Modifier.weight(1f).fillMaxHeight())
+                        if (p != null) remoteTile(p, Modifier.weight(1f).fillMaxHeight())
                         localTile(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
             } else {
                 // Dynamic grid for 3+ tiles
-                // Calculate optimal columns: 2 cols for 3-4, 3 cols for 7+
                 val cols = if (totalTiles <= 4) 2 else if (totalTiles <= 6) 2 else 3
                 Column(Modifier.fillMaxSize()) {
                     val allTiles = mutableListOf<@Composable () -> Unit>()
-
-                    // Local tile
-                    allTiles.add {
-                        Box(Modifier.fillMaxSize()) {
-                            if (localVideoTrack != null) {
-                                WebRTCVideoView(localVideoTrack, eglBase, Modifier.fillMaxSize(), )
-                            }
-                            if (!camEnabled) {
-                                Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
-                                }
-                            }
-                            // Name label
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(6.dp)
-                                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(stringResource(R.string.you_label), color = Color.White, fontSize = 11.sp, maxLines = 1)
-                            }
-                        }
-                    }
-
-                    // Remote tiles
+                    allTiles.add { localTile(Modifier.fillMaxSize()) }
                     for (p in participants) {
-                        val track = remoteVideoTracks[p.userId]
-                        allTiles.add {
-                            Box(Modifier.fillMaxSize().clickable { pinnedId = p.userId }) {
-                                if (track != null) {
-                                    WebRTCVideoView(track, eglBase, Modifier.fillMaxSize())
-                                } else {
-                                    Box(Modifier.fillMaxSize().background(SurfaceVariant))
-                                }
-                                // Name label
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomStart)
-                                        .padding(6.dp)
-                                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        p.displayName,
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
+                        allTiles.add { remoteTile(p, Modifier.fillMaxSize()) }
                     }
-
-                    // Layout in rows
                     val rows = allTiles.chunked(cols)
                     for (row in rows) {
                         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -226,7 +227,6 @@ fun VideoGrid(
                                     tile()
                                 }
                             }
-                            // Fill remaining cells in last row
                             repeat(cols - row.size) {
                                 Box(Modifier.weight(1f).fillMaxHeight().background(Color.Black))
                             }
