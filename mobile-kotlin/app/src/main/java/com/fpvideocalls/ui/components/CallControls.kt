@@ -58,11 +58,9 @@ fun CallControls(
             onClick = onToggleCam
         )
 
-        // Pin self as primary speaker
-        ControlButton(
-            icon = Icons.Default.PushPin,
-            contentDescription = if (isPrimary) "Unpin yourself" else "Pin yourself as primary",
-            isActive = isPrimary,
+        // Pin self as primary speaker — blue highlight when active, neutral otherwise.
+        PinControlButton(
+            isPrimary = isPrimary,
             onClick = onTogglePrimary
         )
 
@@ -100,6 +98,28 @@ fun CallControls(
             contentDescription = stringResource(R.string.cd_switch_camera),
             isActive = true,
             onClick = onSwitchCamera
+        )
+    }
+}
+
+@Composable
+private fun PinControlButton(
+    isPrimary: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(52.dp)
+            .background(
+                if (isPrimary) Color(0xFF2563EB) else Color.White.copy(alpha = 0.1f),
+                RoundedCornerShape(12.dp)
+            )
+    ) {
+        Icon(
+            Icons.Default.PushPin,
+            contentDescription = if (isPrimary) "Unpin yourself" else "Pin yourself as primary",
+            tint = Color.White
         )
     }
 }

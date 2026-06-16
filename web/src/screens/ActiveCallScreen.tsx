@@ -35,6 +35,8 @@ export default function ActiveCallScreen() {
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(!startWithCamOff);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [primaryUserId, setPrimaryUserId] = useState<string | null>(null);
+  const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -149,6 +151,10 @@ export default function ActiveCallScreen() {
 
       onPeerMicState: (uid, muted) => {
         setParticipants(prev => prev.map(p => p.userId === uid ? { ...p, micMuted: !!muted } : p));
+      },
+
+      onPrimaryChanged: (primary) => {
+        setPrimaryUserId(primary);
       },
 
       onUserLeft: (uid) => {
@@ -465,8 +471,18 @@ export default function ActiveCallScreen() {
         stream: remoteStreams[p.userId] || null,
         muted: p.micMuted,
         fullscreen: isTileFs,
+        primary: primaryUserId === p.userId,
+        hidden: hiddenRemotes.has(p.userId),
       };
     });
+
+  const toggleHide = (uid: string) => {
+    setHiddenRemotes(prev => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid); else next.add(uid);
+      return next;
+    });
+  };
 
   return (
     <div style={{
@@ -591,7 +607,16 @@ export default function ActiveCallScreen() {
               />
             ) : (
               <>
-                {/* Remote video — fills entire area */}
+                {/* Remote video — fills entire area (hidden → placeholder) */}
+                {tiles[0]?.hidden ? (
+                  <div style={{
+                    position: "absolute", inset: 0, display: "flex",
+                    alignItems: "center", justifyContent: "center",
+                    background: "#1e293b", color: "#94a3b8", fontSize: 14,
+                  }}>
+                    Video hidden
+                  </div>
+                ) : (
                 <video
                   autoPlay
                   playsInline
@@ -608,6 +633,21 @@ export default function ActiveCallScreen() {
                     objectFit: "contain", background: "#000",
                   }}
                 />
+                )}
+                {/* Hide / show remote video */}
+                <button
+                  onClick={() => toggleHide(tiles[0]!.userId)}
+                  title={tiles[0]?.hidden ? "Show video" : "Hide video"}
+                  style={{
+                    position: "absolute", top: 12, right: 110, zIndex: 10,
+                    padding: "8px 14px", borderRadius: 8,
+                    background: "rgba(0,0,0,0.5)", border: "none",
+                    color: "#fff", fontSize: 13, cursor: "pointer",
+                    backdropFilter: "blur(4px)",
+                  }}
+                >
+                  {tiles[0]?.hidden ? "👁" : "🚫"}
+                </button>
                 {/* Fullscreen toggle */}
                 <button
                   onClick={() => {
@@ -625,13 +665,15 @@ export default function ActiveCallScreen() {
                 >
                   {isFullscreen ? t.exitFullscreen : t.fullscreen}
                 </button>
-                {/* Callee name overlay */}
+                {/* Callee name overlay + primary badge */}
                 <div style={{
                   position: "absolute", top: 12, left: 12, zIndex: 10,
                   padding: "6px 12px", borderRadius: 8,
                   background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
                   fontSize: 14, fontWeight: 500,
+                  display: "flex", alignItems: "center", gap: 6,
                 }}>
+                  {tiles[0]?.primary && <span title="Primary speaker">📌</span>}
                   {tiles[0]?.displayName}
                 </div>
                 {/* Local video PiP */}

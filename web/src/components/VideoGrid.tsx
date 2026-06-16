@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMinimize, FiRefreshCcw } from "react-icons/fi";
+import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMinimize, FiRefreshCcw, FiEye } from "react-icons/fi";
 import { useLanguage } from "../i18n/LanguageContext";
 
 export type RemoteTile = {
@@ -8,6 +8,8 @@ export type RemoteTile = {
   stream: MediaStream | null;
   muted?: boolean;
   fullscreen?: boolean;
+  primary?: boolean;
+  hidden?: boolean;
 };
 
 type Props = {
@@ -20,12 +22,13 @@ type Props = {
   onLocalVideoToggle?: () => void;
   onSwitchCamera?: () => void;
   onExitFullscreen?: () => void;
+  onToggleHide?: (uid: string) => void;
   micEnabled?: boolean;
   camEnabled?: boolean;
   localStream?: MediaStream | null;
 };
 
-export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onSwitchCamera, onExitFullscreen, micEnabled, camEnabled, localStream }: Props) {
+export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, onToggleFullscreen, onLocalMuteToggle, onLocalVideoToggle, onSwitchCamera, onExitFullscreen, onToggleHide, micEnabled, camEnabled, localStream }: Props) {
   const { t } = useLanguage();
   const [dimensions, setDimensions] = useState({
     width: typeof window !== 'undefined' ? window.innerWidth : 1024,
@@ -66,7 +69,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
       height: "100%",
       alignContent: singleTile ? undefined : "start",
     }}>
-      {tiles.map(({ userId, displayName, stream, muted, fullscreen }) => {
+      {tiles.map(({ userId, displayName, stream, muted, fullscreen, primary, hidden }) => {
         const tileEl = getTileEl?.(userId) || null;
         const fsActive = !!fullscreen;
         return (
@@ -90,21 +93,52 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
             {/* Header overlaid on top of video */}
             <div style={{ display: fsActive ? "none" : "flex", justifyContent: "space-between", alignItems: "center", position: "relative", zIndex: 2 }}>
               <div style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 6 }}>
+                {primary && (
+                  <span
+                    aria-label="Primary speaker"
+                    title="Primary speaker"
+                    style={{ background: "#2563eb", color: "#fff", borderRadius: 4, padding: "1px 5px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 3 }}
+                  >📌</span>
+                )}
                 <span>peer: <strong>{displayName || userId}</strong></span>
                 <span aria-label={muted ? t.mute : t.unmute} title={muted ? t.mute : t.unmute}>{muted ? "🔇" : "🎤"}</span>
               </div>
-              <button
-                style={{ padding: "4px 8px", fontSize: 12 }}
-                onClick={(e) => {
-                  // Resolve container at click time to avoid stale/null refs
-                  const container = (e.currentTarget.closest("[data-tile='true']") as HTMLDivElement) || tileEl || null;
-                  const videoEl = container?.querySelector("video") as HTMLVideoElement || null;
-                  onToggleFullscreen?.(userId, container, videoEl);
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  style={{ padding: "4px 8px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}
+                  aria-label={hidden ? "Show video" : "Hide video"}
+                  title={hidden ? "Show video" : "Hide video"}
+                  onClick={() => onToggleHide?.(userId)}
+                >
+                  {hidden ? <FiEye size={14} /> : <FiVideoOff size={14} />}
+                </button>
+                <button
+                  style={{ padding: "4px 8px", fontSize: 12 }}
+                  onClick={(e) => {
+                    // Resolve container at click time to avoid stale/null refs
+                    const container = (e.currentTarget.closest("[data-tile='true']") as HTMLDivElement) || tileEl || null;
+                    const videoEl = container?.querySelector("video") as HTMLVideoElement || null;
+                    onToggleFullscreen?.(userId, container, videoEl);
+                  }}
+                >
+                  {fsActive ? t.exitFullscreen.split(' ')[0] : t.fullscreen}
+                </button>
+              </div>
+            </div>
+            {hidden && (
+              <div
+                style={{
+                  position: "absolute", inset: 0, zIndex: 1,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "#1e293b", color: "#94a3b8", fontSize: 13,
                 }}
               >
-                {fsActive ? t.exitFullscreen.split(' ')[0] : t.fullscreen}
-              </button>
-            </div>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <FiVideoOff size={16} /> Video hidden
+                </span>
+              </div>
+            )}
+            {!hidden && (
             <video
               autoPlay
               playsInline
@@ -159,6 +193,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 touchAction: "none"
               }}
             />
+            )}
             {fsActive && (
               <>
                 {/* Control bar at top right */}
