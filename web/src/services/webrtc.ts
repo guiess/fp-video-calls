@@ -19,6 +19,7 @@ export type SignalingHandlers = {
   onChatMessage?: (roomId: string, fromId: string, displayName: string, text: string, ts: number) => void;
   onError?: (code: string, message?: string) => void;
   onSignalingStateChange?: (state: "connected" | "disconnected" | "reconnecting") => void;
+  onPrimaryChanged?: (primaryUserId: string | null) => void;
 };
 
 export class WebRTCService {
@@ -44,20 +45,46 @@ export class WebRTCService {
   // TURN credential refresh timer
   private turnRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTtlSeconds: number = 0;
-  // Video bitrate cap (0 = uncapped)
+  // Video bitrate cap (0 = uncapped). The "default" cap used when no primary
+  // is set OR for the primary sender themselves.
   private videoBitrateCap: number = 0;
+  // Tiered caps applied when a primary participant is designated.
+  // primary -> anyone           = videoBitrateCap
+  // non-primary -> primary      = capToPrimary
+  // non-primary -> non-primary  = capNonPrimary
+  private capToPrimary: number = 1_200_000;
+  private capNonPrimary: number = 400_000;
+  // Current primary speaker (null = none)
+  private primaryUserId: string | null = null;
 
   /** Set max video bitrate in bps. 0 = uncapped. Applies to all current and future peer connections. */
   setVideoBitrateCap(maxBitrate: number) {
     this.videoBitrateCap = maxBitrate;
     // Apply to all existing peer connections
-    for (const pc of this.pcs.values()) {
-      this.applyBitrateCap(pc);
+    for (const [peerId, pc] of this.pcs.entries()) {
+      this.applyBitrateCap(pc, peerId);
     }
   }
 
-  private async applyBitrateCap(pc: RTCPeerConnection) {
-    if (!this.videoBitrateCap || pc.connectionState === "closed") return;
+  /** Request the server pin a participant as primary. Pass null to clear. */
+  setPrimary(targetUserId: string | null) {
+    if (!this.socket) return;
+    this.socket.emit("set_primary", { roomId: this.roomId, userId: targetUserId });
+  }
+
+  getPrimary(): string | null { return this.primaryUserId; }
+
+  private bitrateCapFor(targetUserId: string): number {
+    if (!this.videoBitrateCap) return 0;
+    if (!this.primaryUserId) return this.videoBitrateCap;
+    if (this.primaryUserId === this.userId) return this.videoBitrateCap;
+    if (this.primaryUserId === targetUserId) return this.capToPrimary;
+    return this.capNonPrimary;
+  }
+
+  private async applyBitrateCap(pc: RTCPeerConnection, targetUserId: string) {
+    const cap = this.bitrateCapFor(targetUserId);
+    if (!cap || pc.connectionState === "closed") return;
     try {
       const sender = pc.getSenders().find(s => s.track?.kind === "video");
       if (!sender) return;
@@ -65,17 +92,37 @@ export class WebRTCService {
       if (!params.encodings || params.encodings.length === 0) {
         params.encodings = [{}];
       }
-      params.encodings[0].maxBitrate = this.videoBitrateCap;
+      params.encodings[0].maxBitrate = cap;
+      params.encodings[0].maxFramerate = 24;
+      // Drop resolution rather than queue frames under congestion — keeps
+      // latency low on the weak peer instead of building a multi-second queue.
+      params.degradationPreference = "maintain-framerate";
       await sender.setParameters(params);
     } catch (e) {
       console.warn("[bitrate] failed to apply cap", e);
     }
   }
 
+  private reapplyAllCaps() {
+    for (const [peerId, pc] of this.pcs.entries()) {
+      this.applyBitrateCap(pc, peerId);
+    }
+  }
+
   private bindSocketEvents() {
     if (!this.socket) return;
     this.socket.on("error", (e: any) => this.handlers.onError?.(e?.code ?? "ERROR", e?.message));
-    this.socket.on("room_joined", ({ participants, roomInfo }) => this.handlers.onRoomJoined?.(participants, roomInfo));
+    this.socket.on("room_joined", ({ participants, roomInfo, primaryUserId }) => {
+      this.primaryUserId = (typeof primaryUserId === "string" && primaryUserId) ? primaryUserId : null;
+      this.handlers.onRoomJoined?.(participants, roomInfo);
+      this.handlers.onPrimaryChanged?.(this.primaryUserId);
+      this.reapplyAllCaps();
+    });
+    this.socket.on("primary_changed", ({ userId }) => {
+      this.primaryUserId = (typeof userId === "string" && userId) ? userId : null;
+      this.handlers.onPrimaryChanged?.(this.primaryUserId);
+      this.reapplyAllCaps();
+    });
     this.socket.on("user_joined", ({ userId, displayName, micMuted }) => this.handlers.onUserJoined?.(userId, displayName, micMuted));
     this.socket.on("user_left", ({ userId }) => this.handlers.onUserLeft?.(userId));
     this.socket.on("offer_received", async ({ fromId, offer }) => this.handlers.onOffer?.(fromId, offer));
@@ -411,7 +458,7 @@ export class WebRTCService {
     // Apply bitrate cap after tracks are added
     if (this.videoBitrateCap) {
       // Defer to allow transceiver setup to complete
-      setTimeout(() => this.applyBitrateCap(pc), 0);
+      setTimeout(() => this.applyBitrateCap(pc, targetId), 0);
     }
     return pc;
   }
@@ -556,7 +603,7 @@ export class WebRTCService {
         console.warn("[camera] renegotiation offer failed", e);
       }
       // Re-apply bitrate cap after track replacement
-      if (this.videoBitrateCap) this.applyBitrateCap(pc);
+      if (this.videoBitrateCap) this.applyBitrateCap(pc, targetId);
     }
 
     // Update localStream reference so UI can bind it
@@ -607,7 +654,7 @@ export class WebRTCService {
         }
       } catch (e) { console.warn("[share] renegotiation failed", e); }
       // Re-apply bitrate cap after track replacement
-      if (this.videoBitrateCap) this.applyBitrateCap(pc);
+      if (this.videoBitrateCap) this.applyBitrateCap(pc, targetId);
     }
 
     this.localStream = merged;
@@ -642,7 +689,7 @@ export class WebRTCService {
         // Replace map entry and close old
         this.pcs.set(targetId, newPc);
         // Apply bitrate cap to new PC
-        if (this.videoBitrateCap) setTimeout(() => this.applyBitrateCap(newPc), 0);
+        if (this.videoBitrateCap) setTimeout(() => this.applyBitrateCap(newPc, targetId), 0);
         try { oldPc.close(); } catch {}
       } catch (e) {
         console.warn("[turn] apply settings failed", e);

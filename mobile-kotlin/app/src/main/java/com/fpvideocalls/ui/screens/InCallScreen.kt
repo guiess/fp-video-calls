@@ -86,6 +86,11 @@ fun InCallScreen(
     val camEnabled by (webRTCManager?.camEnabled ?: MutableStateFlow(true)).collectAsState()
     val signalingState by (webRTCManager?.signalingState ?: MutableStateFlow("connecting")).collectAsState()
     val audioRoute by (inCallViewModel.audioHelper?.audioRoute ?: MutableStateFlow(com.fpvideocalls.webrtc.AudioRoute.SPEAKER)).collectAsState()
+    val remoteHangUp by (webRTCManager?.remoteHangUp ?: MutableStateFlow(false)).collectAsState()
+    val remoteQuality by (webRTCManager?.remoteQuality ?: MutableStateFlow(emptyMap())).collectAsState()
+    val hiddenRemotes by (webRTCManager?.hiddenRemotes ?: MutableStateFlow(emptySet())).collectAsState()
+    val primaryUserId by (webRTCManager?.primaryUserId ?: MutableStateFlow<String?>(null)).collectAsState()
+    val isPrimary = primaryUserId == userId
 
     // Overlay controls visibility state
     var controlsVisible by remember { mutableStateOf(true) }
@@ -153,6 +158,13 @@ fun InCallScreen(
         }
     }
 
+    // Auto-end call when remote participant hangs up
+    LaunchedEffect(remoteHangUp) {
+        if (remoteHangUp) {
+            inCallViewModel.endCall()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -172,6 +184,10 @@ fun InCallScreen(
             localUserId = userId,
             camEnabled = camEnabled,
             eglBase = webRTCManager?.getEglBase(),
+            remoteQuality = remoteQuality,
+            hiddenRemotes = hiddenRemotes,
+            primaryUserId = primaryUserId,
+            onToggleHide = { peerId -> webRTCManager?.toggleHideRemote(peerId) },
             modifier = Modifier.fillMaxSize(),
             onPinnedChanged = { pinned -> isPinned = pinned }
         )
@@ -227,6 +243,7 @@ fun InCallScreen(
                     micMuted = micMuted,
                     camEnabled = camEnabled,
                     audioRoute = audioRoute,
+                    isPrimary = isPrimary,
                     onToggleMic = {
                         webRTCManager?.toggleMic()
                         interactionCounter++
@@ -241,6 +258,10 @@ fun InCallScreen(
                     },
                     onSwitchCamera = {
                         webRTCManager?.switchCamera()
+                        interactionCounter++
+                    },
+                    onTogglePrimary = {
+                        webRTCManager?.setPrimary(if (isPrimary) null else userId)
                         interactionCounter++
                     },
                     onEndCall = {

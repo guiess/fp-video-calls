@@ -22,10 +22,12 @@ fun CallControls(
     micMuted: Boolean,
     camEnabled: Boolean,
     audioRoute: AudioRoute,
+    isPrimary: Boolean,
     onToggleMic: () -> Unit,
     onToggleCam: () -> Unit,
     onToggleSpeaker: () -> Unit,
     onSwitchCamera: () -> Unit,
+    onTogglePrimary: () -> Unit,
     onEndCall: () -> Unit,
     modifier: Modifier = Modifier
 ){
@@ -54,6 +56,12 @@ fun CallControls(
             contentDescription = if (camEnabled) stringResource(R.string.cd_disable_camera) else stringResource(R.string.cd_enable_camera),
             isActive = camEnabled,
             onClick = onToggleCam
+        )
+
+        // Pin self as primary speaker — blue highlight when active, neutral otherwise.
+        PinControlButton(
+            isPrimary = isPrimary,
+            onClick = onTogglePrimary
         )
 
         // Audio output route
@@ -90,6 +98,28 @@ fun CallControls(
             contentDescription = stringResource(R.string.cd_switch_camera),
             isActive = true,
             onClick = onSwitchCamera
+        )
+    }
+}
+
+@Composable
+private fun PinControlButton(
+    isPrimary: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(52.dp)
+            .background(
+                if (isPrimary) Color(0xFF2563EB) else Color.White.copy(alpha = 0.1f),
+                RoundedCornerShape(12.dp)
+            )
+    ) {
+        Icon(
+            Icons.Default.PushPin,
+            contentDescription = if (isPrimary) "Unpin yourself" else "Pin yourself as primary",
+            tint = Color.White
         )
     }
 }

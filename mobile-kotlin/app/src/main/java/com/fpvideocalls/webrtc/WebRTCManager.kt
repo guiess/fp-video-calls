@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.webrtc.*
@@ -31,6 +33,22 @@ class WebRTCManager(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:global.stun.twilio.com:3478").createIceServer()
         )
+
+        // Outgoing video constraints (per peer connection).
+        // Tiered caps depending on whether sender / receiver is the call "primary".
+        private const val CAP_PRIMARY_SENDER_BPS = 1_500_000       // primary -> anyone
+        private const val CAP_TO_PRIMARY_BPS = 1_200_000           // non-primary -> primary
+        private const val CAP_NON_PRIMARY_BPS = 400_000            // non-primary -> non-primary
+        private const val CAP_DEFAULT_BPS = 1_500_000              // no primary set
+        private const val MAX_VIDEO_FRAMERATE = 24
+
+        // Capture resolutions: solo (1 remote) vs multi (>=2 remotes).
+        private const val SOLO_CAPTURE_W = 1280
+        private const val SOLO_CAPTURE_H = 720
+        private const val SOLO_CAPTURE_FPS = 30
+        private const val MULTI_CAPTURE_W = 960
+        private const val MULTI_CAPTURE_H = 540
+        private const val MULTI_CAPTURE_FPS = 24
     }
 
     private var factory: PeerConnectionFactory? = null
@@ -41,10 +59,31 @@ class WebRTCManager(
     private var eglBase: EglBase? = null
     private val mirrorProcessor = MirrorVideoProcessor()
     private var orientationListener: OrientationEventListener? = null
-    private val peerConnections = mutableMapOf<String, PeerConnection>()
+    private val peerConnections = java.util.concurrent.ConcurrentHashMap<String, PeerConnection>()
     private var signalingService: SignalingService? = null
     private var iceServers = STUN_SERVERS.toMutableList()
     private var localUserId: String = ""
+    private var statsPollerJob: kotlinx.coroutines.Job? = null
+    private val prevBytesSent = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val prevStatsAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val prevNackPliFir = java.util.concurrent.ConcurrentHashMap<String, Triple<Long, Long, Long>>()
+    private var currentCaptureMode: CaptureMode = CaptureMode.SOLO
+
+    private enum class CaptureMode { SOLO, MULTI }
+
+    /** Lightweight 3-level quality classification per remote peer. */
+    enum class QualityLevel { GOOD, OK, POOR }
+
+    private val _remoteQuality = MutableStateFlow<Map<String, QualityLevel>>(emptyMap())
+    val remoteQuality: StateFlow<Map<String, QualityLevel>> = _remoteQuality.asStateFlow()
+
+    /** Per-peer "hidden" flag — when true, remote video is not rendered locally. */
+    private val _hiddenRemotes = MutableStateFlow<Set<String>>(emptySet())
+    val hiddenRemotes: StateFlow<Set<String>> = _hiddenRemotes.asStateFlow()
+
+    /** The user currently designated as the call's primary speaker (or null). */
+    private val _primaryUserId = MutableStateFlow<String?>(null)
+    val primaryUserId: StateFlow<String?> = _primaryUserId.asStateFlow()
 
     // Exposed state
     private val _localVideoTrackFlow = MutableStateFlow<VideoTrack?>(null)
@@ -67,6 +106,10 @@ class WebRTCManager(
 
     private val _signalingState = MutableStateFlow("connecting")
     val signalingState: StateFlow<String> = _signalingState.asStateFlow()
+
+    /** Emits true when all remote participants have left (remote hang-up). */
+    private val _remoteHangUp = MutableStateFlow(false)
+    val remoteHangUp: StateFlow<Boolean> = _remoteHangUp.asStateFlow()
 
     fun getEglBase(): EglBase? = eglBase
 
@@ -110,6 +153,7 @@ class WebRTCManager(
                         Log.d(TAG, "room_joined: ${existingParticipants.size} participants: ${existingParticipants.map { it.userId }}")
                         _participants.value = existingParticipants.filter { it.userId != userId }
                         _signalingState.value = "connected"
+                        updateCaptureMode()
                         // Create peer connections and send offers following the convention:
                         // lower userId is the canonical offerer (matches web client).
                         for (p in existingParticipants) {
@@ -130,6 +174,7 @@ class WebRTCManager(
                         _participants.value = _participants.value
                             .filter { it.userId != joinedId } +
                             Participant(joinedId, joinedName, micMutedState)
+                        updateCaptureMode()
                         // Always create peer connection; only send offer if we are
                         // the canonical offerer (lower userId), matching web client.
                         createPeerConnection(joinedId)
@@ -144,11 +189,21 @@ class WebRTCManager(
                     onUserLeft = { leftId ->
                         Log.d(TAG, "user_left: $leftId")
                         _participants.value = _participants.value.filter { it.userId != leftId }
-                        _remoteVideoTracks.value = _remoteVideoTracks.value - leftId
+                        _remoteVideoTracks.update { it - leftId }
+                        _hiddenRemotes.update { it - leftId }
+                        _remoteQuality.update { it - leftId }
+                        prevBytesSent.remove(leftId)
+                        prevStatsAt.remove(leftId)
+                        prevNackPliFir.remove(leftId)
                         peerConnections[leftId]?.let { pc ->
                             try { pc.close() } catch (_: Exception) {}
                         }
                         peerConnections.remove(leftId)
+                        updateCaptureMode()
+                        if (_participants.value.isEmpty() && peerConnections.isEmpty()) {
+                            Log.d(TAG, "All remote participants left — signaling remote hang-up")
+                            _remoteHangUp.value = true
+                        }
                     },
                     onOffer = { fromId, offer ->
                         scope.launch(Dispatchers.Main) {
@@ -172,6 +227,14 @@ class WebRTCManager(
                     },
                     onError = { code, message ->
                         Log.w(TAG, "[signaling] error: $code $message")
+                    },
+                    onPrimaryChanged = { newPrimary ->
+                        Log.d(TAG, "primary_changed: $newPrimary")
+                        _primaryUserId.value = newPrimary
+                        // Re-apply tiered caps to every active peer
+                        for ((peerId, pc) in peerConnections) {
+                            applyVideoSendParams(pc, peerId)
+                        }
                     }
                 ))
 
@@ -182,6 +245,8 @@ class WebRTCManager(
                     password = password,
                     quality = "720p"
                 ))
+
+                startStatsPoller()
             } catch (e: Exception) {
                 Log.e(TAG, "Setup failed", e)
             }
@@ -292,14 +357,19 @@ class WebRTCManager(
 
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {
-                Log.d(TAG, "Peer $targetId signaling: $state")
+                Log.i(TAG, "[ice $targetId] signaling=$state")
             }
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                Log.d(TAG, "Peer $targetId ICE connection: $state")
+                Log.i(TAG, "[ice $targetId] iceConnection=$state")
             }
-            override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+            override fun onIceConnectionReceivingChange(receiving: Boolean) {
+                Log.i(TAG, "[ice $targetId] iceReceiving=$receiving")
+            }
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
-                Log.d(TAG, "Peer $targetId ICE gathering: $state")
+                Log.i(TAG, "[ice $targetId] iceGathering=$state")
+            }
+            override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+                Log.i(TAG, "[ice $targetId] connection=$newState")
             }
 
             override fun onIceCandidate(candidate: IceCandidate?) {
@@ -321,7 +391,12 @@ class WebRTCManager(
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                 val track = receiver?.track()
                 if (track is VideoTrack) {
-                    _remoteVideoTracks.value = _remoteVideoTracks.value + (targetId to track)
+                    // Honor an existing "hidden" choice if this peer's video is
+                    // re-added via renegotiation (new track defaults to enabled).
+                    if (targetId in _hiddenRemotes.value) {
+                        try { track.setEnabled(false) } catch (_: Exception) {}
+                    }
+                    _remoteVideoTracks.update { it + (targetId to track) }
                 }
             }
         }
@@ -350,6 +425,7 @@ class WebRTCManager(
         val setObserver = SdpObserverAdapter()
         pc.setLocalDescription(setObserver, offer)
         setObserver.await()
+        applyVideoSendParams(pc, targetId)
 
         val offerJson = JSONObject().apply {
             put("type", offer.type.canonicalForm())
@@ -397,6 +473,7 @@ class WebRTCManager(
         val setLocal = SdpObserverAdapter()
         pc.setLocalDescription(setLocal, answer)
         setLocal.await()
+        applyVideoSendParams(pc, fromId)
 
         val answerJson = JSONObject().apply {
             put("type", answer.type.canonicalForm())
@@ -450,7 +527,11 @@ class WebRTCManager(
         val newEnabled = !_camEnabled.value
         localVideoTrack?.setEnabled(newEnabled)
         if (newEnabled) {
-            try { videoCapturer?.startCapture(1280, 720, 30) } catch (_: Exception) {}
+            val (w, h, fps) = when (currentCaptureMode) {
+                CaptureMode.SOLO -> Triple(SOLO_CAPTURE_W, SOLO_CAPTURE_H, SOLO_CAPTURE_FPS)
+                CaptureMode.MULTI -> Triple(MULTI_CAPTURE_W, MULTI_CAPTURE_H, MULTI_CAPTURE_FPS)
+            }
+            try { videoCapturer?.startCapture(w, h, fps) } catch (_: Exception) {}
         } else {
             try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         }
@@ -481,6 +562,16 @@ class WebRTCManager(
         // 1. Stop orientation listener
         orientationListener?.disable()
         orientationListener = null
+
+        // 1b. Stop stats poller
+        statsPollerJob?.cancel()
+        statsPollerJob = null
+        prevBytesSent.clear()
+        prevStatsAt.clear()
+        prevNackPliFir.clear()
+        _remoteQuality.value = emptyMap()
+        _hiddenRemotes.value = emptySet()
+        _primaryUserId.value = null
 
         // 2. Clear state flows FIRST on Main so Compose stops rendering and releases SurfaceViewRenderers
         _localVideoTrackFlow.value = null
@@ -516,6 +607,214 @@ class WebRTCManager(
             // Release EglBase last — renderers must be gone by now
             try { egl?.release() } catch (_: Exception) {}
         }.start()
+    }
+
+    // ---- Outgoing video constraints -------------------------------------
+
+    /**
+     * Computes the outgoing video bitrate cap toward [targetUserId] using
+     * the current primary-participant policy.
+     *
+     *   primary -> anyone           = CAP_PRIMARY_SENDER_BPS
+     *   non-primary -> primary      = CAP_TO_PRIMARY_BPS
+     *   non-primary -> non-primary  = CAP_NON_PRIMARY_BPS
+     *   no primary set              = CAP_DEFAULT_BPS
+     */
+    private fun bitrateCapFor(targetUserId: String): Int {
+        val primary = _primaryUserId.value ?: return CAP_DEFAULT_BPS
+        val iAmPrimary = primary == localUserId
+        val targetIsPrimary = primary == targetUserId
+        return when {
+            iAmPrimary -> CAP_PRIMARY_SENDER_BPS
+            targetIsPrimary -> CAP_TO_PRIMARY_BPS
+            else -> CAP_NON_PRIMARY_BPS
+        }
+    }
+
+    /**
+     * Caps outgoing video bitrate/framerate and asks the encoder to drop
+     * resolution rather than queue frames under congestion. Must be called
+     * after setLocalDescription so that senders/encodings exist.
+     */
+    private fun applyVideoSendParams(pc: PeerConnection, targetUserId: String) {
+        try {
+            val maxBps = bitrateCapFor(targetUserId)
+            for (sender in pc.senders) {
+                val track = sender.track() ?: continue
+                if (track.kind() != "video") continue
+                val params = sender.parameters ?: continue
+                params.degradationPreference =
+                    RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+                for (enc in params.encodings) {
+                    enc.maxBitrateBps = maxBps
+                    enc.maxFramerate = MAX_VIDEO_FRAMERATE
+                }
+                val ok = sender.setParameters(params)
+                Log.d(TAG, "applyVideoSendParams[$targetUserId]: ok=$ok max=${maxBps}bps fps=$MAX_VIDEO_FRAMERATE")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "applyVideoSendParams failed", e)
+        }
+    }
+
+    /** Self-pin or unpin as the call's primary speaker. Pass null to clear. */
+    fun setPrimary(targetUserId: String?) {
+        signalingService?.sendSetPrimary(targetUserId)
+    }
+
+    /**
+     * Picks capture resolution based on remote participant count.
+     * 1 remote -> 720p30. >=2 remotes -> 540p24 to reduce CPU + uplink load.
+     * No-op when video is currently disabled.
+     */
+    private fun updateCaptureMode() {
+        val remoteCount = _participants.value.size
+        val desired = if (remoteCount >= 2) CaptureMode.MULTI else CaptureMode.SOLO
+        if (desired == currentCaptureMode) return
+        if (!_camEnabled.value) {
+            currentCaptureMode = desired
+            return
+        }
+        val cap = videoCapturer ?: return
+        val (w, h, fps) = when (desired) {
+            CaptureMode.SOLO -> Triple(SOLO_CAPTURE_W, SOLO_CAPTURE_H, SOLO_CAPTURE_FPS)
+            CaptureMode.MULTI -> Triple(MULTI_CAPTURE_W, MULTI_CAPTURE_H, MULTI_CAPTURE_FPS)
+        }
+        Log.d(TAG, "updateCaptureMode: remoteCount=$remoteCount -> ${desired} (${w}x${h}@${fps})")
+        try {
+            cap.stopCapture()
+            cap.startCapture(w, h, fps)
+            currentCaptureMode = desired
+        } catch (e: Exception) {
+            Log.w(TAG, "updateCaptureMode: restart failed", e)
+        }
+    }
+
+    // ---- Stats logging --------------------------------------------------
+
+    private fun startStatsPoller() {
+        statsPollerJob?.cancel()
+        prevNackPliFir.clear()
+        statsPollerJob = scope.launch(Dispatchers.IO) {
+            var tick = 0L
+            while (isActive) {
+                kotlinx.coroutines.delay(10_000)
+                tick++
+                val verbose = (tick % 6L == 0L)  // log every ~60s
+                val snapshot = peerConnections.toMap()
+                // Drop quality entries for peers that have left
+                _remoteQuality.update { it.filterKeys { k -> k in snapshot.keys } }
+                for ((peerId, pc) in snapshot) {
+                    try {
+                        pc.getStats { report -> handleStats(peerId, report, verbose) }
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+    }
+
+    private fun num(members: Map<String, Any>, key: String): Double? = when (val v = members[key]) {
+        is Number -> v.toDouble()
+        is java.math.BigInteger -> v.toDouble()
+        else -> null
+    }
+
+    private fun handleStats(peerId: String, report: RTCStatsReport, verbose: Boolean) {
+        val stats = report.statsMap
+
+        // Selected ICE candidate pair (nominated + succeeded)
+        val pair = stats.values.firstOrNull {
+            it.type == "candidate-pair" &&
+                (it.members["nominated"] as? Boolean == true) &&
+                (it.members["state"] as? String == "succeeded")
+        }
+        val rttMs = num(pair?.members ?: emptyMap(), "currentRoundTripTime")?.let { it * 1000.0 }
+        val availOutKbps = num(pair?.members ?: emptyMap(), "availableOutgoingBitrate")?.let { it / 1000.0 }
+        val localCandId = pair?.members?.get("localCandidateId") as? String
+        val remoteCandId = pair?.members?.get("remoteCandidateId") as? String
+        val localType = (stats[localCandId]?.members?.get("candidateType") as? String) ?: "?"
+        val remoteType = (stats[remoteCandId]?.members?.get("candidateType") as? String) ?: "?"
+
+        // Outbound video (the stream WE send to this peer)
+        val outVid = stats.values.firstOrNull {
+            it.type == "outbound-rtp" && (it.members["kind"] as? String == "video")
+        }
+        val bytesSent = num(outVid?.members ?: emptyMap(), "bytesSent")?.toLong() ?: 0L
+        val fps = num(outVid?.members ?: emptyMap(), "framesPerSecond")
+        val w = num(outVid?.members ?: emptyMap(), "frameWidth")?.toInt()
+        val h = num(outVid?.members ?: emptyMap(), "frameHeight")?.toInt()
+        val nack = num(outVid?.members ?: emptyMap(), "nackCount")?.toLong() ?: 0L
+        val pli = num(outVid?.members ?: emptyMap(), "pliCount")?.toLong() ?: 0L
+        val fir = num(outVid?.members ?: emptyMap(), "firCount")?.toLong() ?: 0L
+        val qLimit = outVid?.members?.get("qualityLimitationReason") as? String
+
+        val now = System.currentTimeMillis()
+        val prevBytes = prevBytesSent[peerId] ?: bytesSent
+        val prevAt = prevStatsAt[peerId] ?: now
+        val deltaSec = (now - prevAt) / 1000.0
+        val sendKbps = if (deltaSec > 0) (bytesSent - prevBytes) * 8.0 / 1000.0 / deltaSec else 0.0
+        prevBytesSent[peerId] = bytesSent
+        prevStatsAt[peerId] = now
+
+        // Loss-pressure delta since last tick (any feedback request implies the receiver
+        // is missing or wants a refresh — a sustained nonzero rate signals trouble).
+        val prevLoss = prevNackPliFir[peerId] ?: Triple(nack, pli, fir)
+        val dNack = (nack - prevLoss.first).coerceAtLeast(0)
+        val dPli = (pli - prevLoss.second).coerceAtLeast(0)
+        val dFir = (fir - prevLoss.third).coerceAtLeast(0)
+        prevNackPliFir[peerId] = Triple(nack, pli, fir)
+
+        // Classify quality
+        val quality = classifyQuality(qLimit, rttMs, dPli + dFir, fps)
+        _remoteQuality.update { it + (peerId to quality) }
+
+        if (verbose) {
+            Log.i(
+                TAG,
+                "[stats $peerId] " +
+                    "q=$quality " +
+                    "send=${"%.0f".format(sendKbps)}kbps " +
+                    "fps=${fps?.let { "%.0f".format(it) } ?: "-"} " +
+                    "res=${w ?: "-"}x${h ?: "-"} " +
+                    "qLimit=${qLimit ?: "-"} " +
+                    "availOut=${availOutKbps?.let { "%.0fkbps".format(it) } ?: "-"} " +
+                    "rtt=${rttMs?.let { "%.0fms".format(it) } ?: "-"} " +
+                    "loss(\u0394nack/pli/fir)=$dNack/$dPli/$dFir " +
+                    "ice=$localType->$remoteType"
+            )
+        }
+    }
+
+    private fun classifyQuality(
+        qLimit: String?,
+        rttMs: Double?,
+        feedbackDelta: Long,
+        fps: Double?
+    ): QualityLevel {
+        // POOR: hard bandwidth limit, very high RTT, or sustained loss feedback
+        if (qLimit == "bandwidth") return QualityLevel.POOR
+        if (rttMs != null && rttMs > 500) return QualityLevel.POOR
+        if (feedbackDelta >= 5) return QualityLevel.POOR
+        if (fps != null && fps < 10) return QualityLevel.POOR
+
+        // OK: CPU-limited, elevated RTT, or modest feedback
+        if (qLimit == "cpu") return QualityLevel.OK
+        if (rttMs != null && rttMs > 250) return QualityLevel.OK
+        if (feedbackDelta >= 1) return QualityLevel.OK
+        if (fps != null && fps < 18) return QualityLevel.OK
+
+        return QualityLevel.GOOD
+    }
+
+    // ---- Hide remote video ---------------------------------------------
+
+    fun toggleHideRemote(peerId: String) {
+        val nowHidden = peerId !in _hiddenRemotes.value
+        _hiddenRemotes.update { if (nowHidden) it + peerId else it - peerId }
+        // Disable the track to stop downstream rendering + most of the YUV
+        // pipeline. Decoder still runs (RtpReceiver can't be paused without
+        // renegotiation), but display/upload work goes away.
+        _remoteVideoTracks.value[peerId]?.setEnabled(!nowHidden)
     }
 }
 

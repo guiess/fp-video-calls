@@ -70,7 +70,17 @@ class SignalingService(private val endpoint: String) {
                 }
             }
             val roomInfo = data.opt("roomInfo")
-            runOnMain { handlers.onRoomJoined?.invoke(participants, roomInfo) }
+            val primary = if (data.isNull("primaryUserId")) null else data.optString("primaryUserId", "").ifEmpty { null }
+            runOnMain {
+                handlers.onRoomJoined?.invoke(participants, roomInfo)
+                handlers.onPrimaryChanged?.invoke(primary)
+            }
+        }
+
+        s.on("primary_changed") { args ->
+            val data = args.getOrNull(0) as? JSONObject ?: return@on
+            val primary = if (data.isNull("userId")) null else data.optString("userId", "").ifEmpty { null }
+            runOnMain { handlers.onPrimaryChanged?.invoke(primary) }
         }
 
         s.on("user_joined") { args ->
@@ -206,6 +216,16 @@ class SignalingService(private val endpoint: String) {
             put("muted", muted)
         }
         socket?.emit("mic_state_changed", data)
+    }
+
+    /** Pin / unpin a participant as the call's primary speaker.
+     *  Pass null to clear the current pin. Server enforces last-write-wins. */
+    fun sendSetPrimary(targetUserId: String?) {
+        val data = JSONObject().apply {
+            put("roomId", roomId)
+            if (targetUserId != null) put("userId", targetUserId) else put("userId", JSONObject.NULL)
+        }
+        socket?.emit("set_primary", data)
     }
 
     fun sendChat(text: String) {

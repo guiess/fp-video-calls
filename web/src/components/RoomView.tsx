@@ -60,6 +60,8 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
+  const [primaryUserId, setPrimaryUserId] = useState<string | null>(null);
+  const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [isSharing, setIsSharing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -185,8 +187,13 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         setParticipants((prev) => prev.map((p) => p.userId === uid ? { ...p, micMuted: !!muted } : p));
       },
 
+      onPrimaryChanged: (primary) => {
+        setPrimaryUserId(primary);
+      },
+
       onUserLeft: (uid) => {
         setParticipants((prev) => prev.filter((p) => p.userId !== uid));
+        setHiddenRemotes((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
         if (peerId === uid) { setPeerId(null); peerIdRef.current = null; }
         try { const svc = svcRef.current!; const pc = svc.getPeerConnection(uid); if (pc) { try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {} try { pc.close(); } catch {} } } catch {}
         setRemoteStreams((prev) => {
@@ -774,11 +781,14 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
                 stream,
                 muted: !!(remoteAudioMuted[uid] || p?.micMuted),
                 fullscreen: isTileFs,
+                primary: primaryUserId === uid,
+                hidden: hiddenRemotes.has(uid),
               };
             })}
             isFullscreen={isFullscreen}
             getTileEl={(uid) => remoteTileRefs.current[uid] || null}
             setTileEl={(uid, el) => { remoteTileRefs.current[uid] = el; }}
+            onToggleHide={(uid) => setHiddenRemotes((prev) => { const n = new Set(prev); if (n.has(uid)) n.delete(uid); else n.add(uid); return n; })}
             onToggleFullscreen={(uid, tileEl) => {
               const isFs = document.fullscreenElement === tileEl;
               if (isFs) exitFullscreen(); else requestFullscreen(tileEl || undefined);

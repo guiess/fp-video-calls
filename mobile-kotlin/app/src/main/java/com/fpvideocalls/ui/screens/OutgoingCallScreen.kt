@@ -35,10 +35,12 @@ fun OutgoingCallScreen(
 
     val displayNames = contacts.joinToString(", ") { it.displayName }
 
-    // Start the call when the screen opens
-    LaunchedEffect(Unit) {
-        user?.let { u ->
-            outgoingCallViewModel.initCall(u, contacts, callType)
+    // Start the call when the screen opens and user is available
+    val initDone = remember { mutableStateOf(false) }
+    LaunchedEffect(user) {
+        if (!initDone.value && user != null) {
+            initDone.value = true
+            outgoingCallViewModel.initCall(user!!, contacts, callType)
         }
     }
 
