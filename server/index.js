@@ -16,6 +16,19 @@ import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
 import { isBlobStorageConfigured } from "./blob-storage.js";
+import {
+  isPlainObject,
+  isTelemetryRateLimited,
+  validateTelemetrySample
+} from "./telemetry-validation.js";
+
+function logProcessFailure(kind, failure) {
+  const details = failure instanceof Error ? (failure.stack || failure.message) : String(failure);
+  console.error(`[process:${kind}]`, details);
+}
+
+process.on("uncaughtException", failure => logProcessFailure("uncaughtException", failure));
+process.on("unhandledRejection", failure => logProcessFailure("unhandledRejection", failure));
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
 // Set FIREBASE_SERVICE_ACCOUNT_JSON to a base64-encoded service-account JSON,
@@ -120,23 +133,6 @@ const roomLimiter = rateLimit({
 });
 app.use("/room", roomLimiter);
 
-const TELEMETRY_MAX_PAYLOAD_BYTES = 4096;
-const TELEMETRY_MAX_IDENTIFIER_LENGTH = 128;
-const TELEMETRY_MAX_METRIC_STRING_LENGTH = 32;
-const TELEMETRY_RATE_WINDOW_MS = 10_000;
-const TELEMETRY_MAX_SAMPLES_PER_WINDOW = 20;
-const TELEMETRY_ENVELOPE_KEYS = new Set([
-  "roomId", "roomName", "senderId", "senderName", "peerId", "ts", "metrics"
-]);
-const TELEMETRY_NUMBER_METRICS = new Set([
-  "rttMs", "availIncomingKbps", "availOutgoingKbps", "jbMs",
-  "dFreeze", "dFreezeDurS", "inFps", "dDecoded", "dDropped", "dLost",
-  "outFps", "downMbps", "sendKbps", "outWidth", "outHeight",
-  "dNack", "dPli", "dFir"
-]);
-const TELEMETRY_STRING_METRICS = new Set([
-  "net", "link", "iceLocal", "iceRemote", "qualityLimitation"
-]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -167,6 +163,13 @@ const io = new SocketIOServer(server, {
 // roomId -> { participants: Map(userId -> { socketId, displayName }), settings: { videoQuality, passwordEnabled, passwordHash?, passwordHint? } }
 const rooms = new Map();
 // participants info extended: { socketId, displayName, micMuted?: boolean }
+
+const OBJECT_PAYLOAD_EVENTS = new Set([
+  "chat_auth", "chat_typing", "join_room", "set_primary", "leave_room",
+  "close_room", "offer", "answer", "ice_candidate", "chat_message",
+  "mic_state_changed", "camera_state_changed", "telemetry_subscribe",
+  "telemetry_unsubscribe", "telemetry_data"
+]);
 
 // Health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -466,6 +469,11 @@ app.get("/room/:roomId/meta", (req, res) => {
 
 io.on("connection", (socket) => {
   const telemetryRateByRoom = new Map();
+  socket.use(([eventName, payload], next) => {
+    if (!OBJECT_PAYLOAD_EVENTS.has(eventName) || isPlainObject(payload)) return next();
+    if (eventName.startsWith("telemetry_")) rejectTelemetry(socket, "TELEMETRY_INVALID");
+    else socket.emit("error", { code: "BAD_REQUEST" });
+  });
 
   // Chat: user identifies themselves with Firebase ID token
   socket.on("chat_auth", async ({ uid, token }) => {
@@ -609,6 +617,7 @@ io.on("connection", (socket) => {
 
   socket.on("leave_room", ({ roomId, userId }) => {
     const room = rooms.get(roomId);
+    telemetryRateByRoom.delete(roomId);
     if (room) {
       room.participants.delete(userId);
       room.telemetrySubscribers?.delete(socket.id);
@@ -629,6 +638,7 @@ io.on("connection", (socket) => {
 
   // Admin: close room for everybody
   socket.on("close_room", ({ roomId }) => {
+    telemetryRateByRoom.delete(roomId);
     const room = rooms.get(roomId);
     if (!room) return;
     io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
@@ -708,6 +718,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("telemetry_unsubscribe", ({ roomId }) => {
+    telemetryRateByRoom.delete(roomId);
     const room = rooms.get(roomId);
     if (!room) return;
     if (!getUserIdBySocket(roomId, socket.id)) {
@@ -716,14 +727,15 @@ io.on("connection", (socket) => {
     room.telemetrySubscribers?.delete(socket.id);
   });
 
-  socket.on("telemetry_data", ({ roomId, roomName, senderId, senderName, peerId, ts, metrics, ...unknown }) => {
+  socket.on("telemetry_data", (payload) => {
+    if (!isPlainObject(payload)) return rejectTelemetry(socket, "TELEMETRY_INVALID");
+    const { roomId } = payload;
     const room = rooms.get(roomId);
     if (!room) return;
     const authenticatedSenderId = getUserIdBySocket(roomId, socket.id);
     if (!authenticatedSenderId) {
       return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
     }
-    const payload = { roomId, roomName, senderId, senderName, peerId, ts, metrics, ...unknown };
     const sample = validateTelemetrySample(payload, room, authenticatedSenderId);
     if (!sample) return rejectTelemetry(socket, "TELEMETRY_INVALID");
     if (isTelemetryRateLimited(telemetryRateByRoom, roomId, Date.now())) {
@@ -786,90 +798,7 @@ function getUserIdBySocket(roomId, socketId) {
 }
 
 function rejectTelemetry(socket, code) {
-  socket.emit("error", { code });
-}
-
-function validateTelemetrySample(payload, room, senderId) {
-  if (!isPlainObject(payload) || exceedsTelemetrySize(payload)) return null;
-  if (!hasOnlyKeys(payload, TELEMETRY_ENVELOPE_KEYS)) return null;
-  if (!isBoundedString(payload.roomId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
-  if (!isBoundedString(payload.peerId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
-  if (!isOptionalBoundedString(payload.roomName, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
-  if (!isOptionalBoundedString(payload.senderId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
-  if (!isOptionalBoundedString(payload.senderName, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
-  if (!room.participants.has(payload.peerId) || payload.peerId === senderId) return null;
-  if (!Number.isFinite(payload.ts) || payload.ts <= 0 || payload.ts > Date.now() + 300_000) return null;
-  const sanitizedMetrics = sanitizeTelemetryMetrics(payload.metrics);
-  if (!sanitizedMetrics) return null;
-  const sender = room.participants.get(senderId);
-  return {
-    roomId: payload.roomId,
-    roomName: boundedRoomName(payload.roomName, payload.roomId),
-    senderId,
-    senderName: boundedRoomName(sender?.displayName, "Guest"),
-    peerId: payload.peerId,
-    ts: payload.ts,
-    metrics: sanitizedMetrics
-  };
-}
-
-function sanitizeTelemetryMetrics(metrics) {
-  if (!isPlainObject(metrics) || Object.keys(metrics).length === 0) return null;
-  const sanitized = {};
-  for (const [key, value] of Object.entries(metrics)) {
-    if (TELEMETRY_NUMBER_METRICS.has(key)) {
-      if (!Number.isFinite(value) || value < 0 || value > 1_000_000_000) return null;
-      sanitized[key] = value;
-    } else if (TELEMETRY_STRING_METRICS.has(key)) {
-      if (!isBoundedString(value, TELEMETRY_MAX_METRIC_STRING_LENGTH)) return null;
-      sanitized[key] = value;
-    } else {
-      return null;
-    }
-  }
-  return sanitized;
-}
-
-function isTelemetryRateLimited(rateByRoom, roomId, now) {
-  const current = rateByRoom.get(roomId);
-  if (!current || now - current.startedAt >= TELEMETRY_RATE_WINDOW_MS) {
-    rateByRoom.set(roomId, { startedAt: now, count: 1 });
-    return false;
-  }
-  if (current.count >= TELEMETRY_MAX_SAMPLES_PER_WINDOW) return true;
-  current.count += 1;
-  return false;
-}
-
-function exceedsTelemetrySize(payload) {
-  try {
-    return Buffer.byteLength(JSON.stringify(payload), "utf8") > TELEMETRY_MAX_PAYLOAD_BYTES;
-  } catch {
-    return true;
-  }
-}
-
-function hasOnlyKeys(value, allowedKeys) {
-  return Object.keys(value).every(key => allowedKeys.has(key));
-}
-
-function isPlainObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function isBoundedString(value, maxLength) {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= maxLength
-    && !/[\u0000-\u001F\u007F]/.test(value);
-}
-
-function isOptionalBoundedString(value, maxLength) {
-  return value === undefined || isBoundedString(value, maxLength);
-}
-
-function boundedRoomName(roomName, roomId) {
-  return isBoundedString(roomName, TELEMETRY_MAX_IDENTIFIER_LENGTH) ? roomName : roomId;
+  socket.emit("telemetry_error", { code });
 }
 
 function relayToUser(roomId, targetUserId, event, payload) {
