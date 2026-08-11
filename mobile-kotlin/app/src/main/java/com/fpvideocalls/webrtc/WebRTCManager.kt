@@ -841,15 +841,19 @@ class WebRTCManager(
         }
 
         // Record and publish local-side telemetry (OUR view of the link to peerId).
+        // Publishing must not depend on local persistence: a failed session start
+        // degrades storage only, it must not silence telemetry to our peers.
         val sid = telemetrySessionId
-        if (telemetryEnabled && sid != null) {
-            val peerName = _participants.value.firstOrNull { it.userId == peerId }?.displayName ?: peerId
+        if (telemetryEnabled) {
             signalingService?.sendTelemetryData(peerId, now, metrics)
-            launchTelemetryWrite {
-                com.fpvideocalls.util.TelemetryStore.addEntry(
-                    context, sid, telemetryRoomId, telemetryRoomName,
-                    now, "local→$peerId", "me→$peerName", info
-                )
+            if (sid != null) {
+                val peerName = _participants.value.firstOrNull { it.userId == peerId }?.displayName ?: peerId
+                launchTelemetryWrite {
+                    com.fpvideocalls.util.TelemetryStore.addEntry(
+                        context, sid, telemetryRoomId, telemetryRoomName,
+                        now, "local→$peerId", "me→$peerName", info
+                    )
+                }
             }
         }
 

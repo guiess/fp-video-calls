@@ -27,7 +27,14 @@ function logProcessFailure(kind, failure) {
   console.error(`[process:${kind}]`, details);
 }
 
-process.on("uncaughtException", failure => logProcessFailure("uncaughtException", failure));
+// Node cannot guarantee a consistent process state after an uncaught exception,
+// so log and exit rather than resume; the platform supervisor restarts us.
+// Room state is in-memory and lost on crash either way.
+process.on("uncaughtException", failure => {
+  logProcessFailure("uncaughtException", failure);
+  process.exit(1);
+});
+// A rejected promise does not corrupt process state, so log and keep serving.
 process.on("unhandledRejection", failure => logProcessFailure("unhandledRejection", failure));
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
