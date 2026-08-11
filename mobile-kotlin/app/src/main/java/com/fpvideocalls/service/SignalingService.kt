@@ -64,7 +64,8 @@ class SignalingService(private val endpoint: String) {
                         Participant(
                             userId = p.getString("userId"),
                             displayName = p.getString("displayName"),
-                            micMuted = p.optBoolean("micMuted", false)
+                            micMuted = p.optBoolean("micMuted", false),
+                            cameraOff = p.optBoolean("cameraOff", false)
                         )
                     )
                 }
@@ -81,6 +82,11 @@ class SignalingService(private val endpoint: String) {
             val data = args.getOrNull(0) as? JSONObject ?: return@on
             val primary = if (data.isNull("userId")) null else data.optString("userId", "").ifEmpty { null }
             runOnMain { handlers.onPrimaryChanged?.invoke(primary) }
+        }
+
+        s.on("telemetry_data") { args ->
+            val data = args.getOrNull(0) as? JSONObject ?: return@on
+            runOnMain { handlers.onTelemetryData?.invoke(data) }
         }
 
         s.on("user_joined") { args ->
@@ -123,6 +129,13 @@ class SignalingService(private val endpoint: String) {
             val uid = data.getString("userId")
             val muted = data.optBoolean("muted", false)
             runOnMain { handlers.onPeerMicState?.invoke(uid, muted) }
+        }
+
+        s.on("peer_camera_state") { args ->
+            val data = args.getOrNull(0) as? JSONObject ?: return@on
+            val uid = data.getString("userId")
+            val off = data.optBoolean("off", false)
+            runOnMain { handlers.onPeerCameraState?.invoke(uid, off) }
         }
 
         s.on("chat_message") { args ->
@@ -218,6 +231,15 @@ class SignalingService(private val endpoint: String) {
         socket?.emit("mic_state_changed", data)
     }
 
+    fun sendCameraState(off: Boolean) {
+        val data = JSONObject().apply {
+            put("roomId", roomId)
+            put("userId", userId)
+            put("off", off)
+        }
+        socket?.emit("camera_state_changed", data)
+    }
+
     /** Pin / unpin a participant as the call's primary speaker.
      *  Pass null to clear the current pin. Server enforces last-write-wins. */
     fun sendSetPrimary(targetUserId: String?) {
@@ -226,6 +248,26 @@ class SignalingService(private val endpoint: String) {
             if (targetUserId != null) put("userId", targetUserId) else put("userId", JSONObject.NULL)
         }
         socket?.emit("set_primary", data)
+    }
+
+    /** Register/unregister this socket as a telemetry subscriber for the room. */
+    fun sendTelemetrySubscribe(subscribe: Boolean) {
+        val data = JSONObject().apply { put("roomId", roomId) }
+        socket?.emit(if (subscribe) "telemetry_subscribe" else "telemetry_unsubscribe", data)
+    }
+
+    /** Publishes one bounded structured WebRTC stats sample for a measured peer. */
+    fun sendTelemetryData(peerId: String, ts: Long, metrics: JSONObject) {
+        val data = JSONObject().apply {
+            put("roomId", roomId)
+            put("roomName", roomId)
+            put("senderId", userId)
+            put("senderName", displayName)
+            put("peerId", peerId)
+            put("ts", ts)
+            put("metrics", metrics)
+        }
+        socket?.emit("telemetry_data", data)
     }
 
     fun sendChat(text: String) {

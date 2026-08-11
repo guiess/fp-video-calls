@@ -16,6 +16,26 @@ import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
 import { isBlobStorageConfigured } from "./blob-storage.js";
+import {
+  isPlainObject,
+  isTelemetryRateLimited,
+  validateTelemetrySample
+} from "./telemetry-validation.js";
+
+function logProcessFailure(kind, failure) {
+  const details = failure instanceof Error ? (failure.stack || failure.message) : String(failure);
+  console.error(`[process:${kind}]`, details);
+}
+
+// Node cannot guarantee a consistent process state after an uncaught exception,
+// so log and exit rather than resume; the platform supervisor restarts us.
+// Room state is in-memory and lost on crash either way.
+process.on("uncaughtException", failure => {
+  logProcessFailure("uncaughtException", failure);
+  process.exit(1);
+});
+// A rejected promise does not corrupt process state, so log and keep serving.
+process.on("unhandledRejection", failure => logProcessFailure("unhandledRejection", failure));
 
 // ── Firebase Admin (optional — only initialised when service account is set) ──
 // Set FIREBASE_SERVICE_ACCOUNT_JSON to a base64-encoded service-account JSON,
@@ -119,6 +139,7 @@ const roomLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.use("/room", roomLimiter);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -149,6 +170,13 @@ const io = new SocketIOServer(server, {
 // roomId -> { participants: Map(userId -> { socketId, displayName }), settings: { videoQuality, passwordEnabled, passwordHash?, passwordHint? } }
 const rooms = new Map();
 // participants info extended: { socketId, displayName, micMuted?: boolean }
+
+const OBJECT_PAYLOAD_EVENTS = new Set([
+  "chat_auth", "chat_typing", "join_room", "set_primary", "leave_room",
+  "close_room", "offer", "answer", "ice_candidate", "chat_message",
+  "mic_state_changed", "camera_state_changed", "telemetry_subscribe",
+  "telemetry_unsubscribe", "telemetry_data"
+]);
 
 // Health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -447,6 +475,13 @@ app.get("/room/:roomId/meta", (req, res) => {
 });
 
 io.on("connection", (socket) => {
+  const telemetryRateByRoom = new Map();
+  socket.use(([eventName, payload], next) => {
+    if (!OBJECT_PAYLOAD_EVENTS.has(eventName) || isPlainObject(payload)) return next();
+    if (eventName.startsWith("telemetry_")) rejectTelemetry(socket, "TELEMETRY_INVALID");
+    else socket.emit("error", { code: "BAD_REQUEST" });
+  });
+
   // Chat: user identifies themselves with Firebase ID token
   socket.on("chat_auth", async ({ uid, token }) => {
     if (!uid) return;
@@ -544,14 +579,21 @@ io.on("connection", (socket) => {
 
     const isReconnect = room.participants.has(userId);
     const prevMicMuted = isReconnect ? !!room.participants.get(userId)?.micMuted : false;
-    room.participants.set(userId, { socketId: socket.id, displayName, micMuted: prevMicMuted });
+    const prevCameraOff = isReconnect ? !!room.participants.get(userId)?.cameraOff : false;
+    room.participants.set(userId, {
+      socketId: socket.id,
+      displayName,
+      micMuted: prevMicMuted,
+      cameraOff: prevCameraOff
+    });
     socket.join(roomId);
 
     // Notify caller with existing participants (include micMuted for initial badges)
     const participants = Array.from(room.participants.entries()).map(([id, p]) => ({
       userId: id,
       displayName: p.displayName,
-      micMuted: !!p.micMuted
+      micMuted: !!p.micMuted,
+      cameraOff: !!p.cameraOff
     }));
     console.log(`[room:join] ${userId} ${isReconnect ? "re" : ""}joined ${roomId} (${room.participants.size} participants)`);
     socket.emit("room_joined", {
@@ -582,8 +624,10 @@ io.on("connection", (socket) => {
 
   socket.on("leave_room", ({ roomId, userId }) => {
     const room = rooms.get(roomId);
+    telemetryRateByRoom.delete(roomId);
     if (room) {
       room.participants.delete(userId);
+      room.telemetrySubscribers?.delete(socket.id);
       if (room.primaryUserId === userId) {
         room.primaryUserId = null;
         socket.to(roomId).emit("primary_changed", { userId: null });
@@ -601,6 +645,7 @@ io.on("connection", (socket) => {
 
   // Admin: close room for everybody
   socket.on("close_room", ({ roomId }) => {
+    telemetryRateByRoom.delete(roomId);
     const room = rooms.get(roomId);
     if (!room) return;
     io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
@@ -638,9 +683,11 @@ io.on("connection", (socket) => {
   });
 
   // Broadcast mic mute/unmute state to room participants
-  socket.on("mic_state_changed", ({ roomId, userId, muted }) => {
+  socket.on("mic_state_changed", ({ roomId, muted }) => {
     const room = rooms.get(roomId);
     if (!room) return;
+    const userId = getUserIdBySocket(roomId, socket.id);
+    if (!userId) return;
     const p = room.participants.get(userId);
     if (p) {
       p.micMuted = !!muted;
@@ -649,9 +696,70 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
   });
 
+  // Broadcast camera on/off state to room participants (mirrors mic state).
+  socket.on("camera_state_changed", ({ roomId, off }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const userId = getUserIdBySocket(roomId, socket.id);
+    if (!userId) return;
+    const p = room.participants.get(userId);
+    if (p) {
+      p.cameraOff = !!off;
+      room.participants.set(userId, p);
+    }
+    io.to(roomId).emit("peer_camera_state", { userId, off: !!off });
+  });
+
+  // ── Telemetry relay ──────────────────────────────────────────────
+  // Opted-in room members both publish and subscribe. Membership and identity
+  // are derived from the joined socket; client-provided identity is ignored.
+  socket.on("telemetry_subscribe", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!getUserIdBySocket(roomId, socket.id)) {
+      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
+    }
+    if (!room.telemetrySubscribers) room.telemetrySubscribers = new Set();
+    room.telemetrySubscribers.add(socket.id);
+    console.log(`[telemetry] ${socket.id} subscribed in ${roomId} (${room.telemetrySubscribers.size} total)`);
+  });
+
+  socket.on("telemetry_unsubscribe", ({ roomId }) => {
+    telemetryRateByRoom.delete(roomId);
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!getUserIdBySocket(roomId, socket.id)) {
+      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
+    }
+    room.telemetrySubscribers?.delete(socket.id);
+  });
+
+  socket.on("telemetry_data", (payload) => {
+    if (!isPlainObject(payload)) return rejectTelemetry(socket, "TELEMETRY_INVALID");
+    const { roomId } = payload;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const authenticatedSenderId = getUserIdBySocket(roomId, socket.id);
+    if (!authenticatedSenderId) {
+      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
+    }
+    const sample = validateTelemetrySample(payload, room, authenticatedSenderId);
+    if (!sample) return rejectTelemetry(socket, "TELEMETRY_INVALID");
+    if (isTelemetryRateLimited(telemetryRateByRoom, roomId, Date.now())) {
+      return rejectTelemetry(socket, "TELEMETRY_RATE_LIMITED");
+    }
+    const subs = room?.telemetrySubscribers;
+    if (!subs || subs.size === 0) return; // nobody listening → drop
+    for (const sid of subs) {
+      if (sid === socket.id) continue; // don't echo to sender
+      io.to(sid).emit("telemetry_data", sample);
+    }
+  });
+
   socket.on("disconnect", () => {
     // Cleanup user from any rooms
     for (const [roomId, room] of rooms.entries()) {
+      room.telemetrySubscribers?.delete(socket.id);
       const userId = getUserIdBySocket(roomId, socket.id);
       if (userId) {
         room.participants.delete(userId);
@@ -694,6 +802,10 @@ function getUserIdBySocket(roomId, socketId) {
     if (info.socketId === socketId) return uid;
   }
   return null;
+}
+
+function rejectTelemetry(socket, code) {
+  socket.emit("telemetry_error", { code });
 }
 
 function relayToUser(roomId, targetUserId, event, payload) {

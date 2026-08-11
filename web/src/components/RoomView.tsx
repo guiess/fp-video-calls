@@ -4,7 +4,7 @@ import {
   FiMic, FiMicOff, FiVideo, FiVideoOff,
   FiMaximize, FiMinimize, FiMonitor, FiUsers,
   FiSettings, FiLogOut, FiCopy, FiCheck,
-  FiRefreshCcw, FiGlobe
+  FiRefreshCcw, FiGlobe, FiActivity
 } from "react-icons/fi";
 import VideoGrid from "./VideoGrid";
 import { useLanguage } from "../i18n/LanguageContext";
@@ -21,7 +21,7 @@ export interface RoomViewProps {
   onLeave: () => void;
 }
 
-type Participant = { userId: string; displayName: string; micMuted?: boolean };
+type Participant = { userId: string; displayName: string; micMuted?: boolean; cameraOff?: boolean };
 
 type RoomMeta = {
   roomId: string;
@@ -62,6 +62,8 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
   const [primaryUserId, setPrimaryUserId] = useState<string | null>(null);
   const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
+  const [telemetryOn, setTelemetryOn] = useState(false);
+  const [remoteCamOff, setRemoteCamOff] = useState<Set<string>>(new Set());
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [isSharing, setIsSharing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -148,9 +150,15 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
             },
           });
         }
-        setParticipants(existing.map((p: any) => ({ userId: p.userId, displayName: p.displayName, micMuted: p.micMuted })));
+        setParticipants(existing.map((p) => ({
+          userId: p.userId,
+          displayName: p.displayName,
+          micMuted: p.micMuted,
+          cameraOff: p.cameraOff,
+        })));
         const svc = svcRef.current!;
         const others = existing.filter((p: any) => p.userId !== svc.getUserId());
+        setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
         others.forEach(({ userId: uid }: any) => {
           const pc = svc.createPeerConnection(uid);
           wirePeerHandlers(pc, svc, uid);
@@ -191,9 +199,18 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         setPrimaryUserId(primary);
       },
 
+      onPeerCameraState: (uid, off) => {
+        setRemoteCamOff((prev) => {
+          const n = new Set(prev);
+          if (off) n.add(uid); else n.delete(uid);
+          return n;
+        });
+      },
+
       onUserLeft: (uid) => {
         setParticipants((prev) => prev.filter((p) => p.userId !== uid));
         setHiddenRemotes((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
+        setRemoteCamOff((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
         if (peerId === uid) { setPeerId(null); peerIdRef.current = null; }
         try { const svc = svcRef.current!; const pc = svc.getPeerConnection(uid); if (pc) { try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {} try { pc.close(); } catch {} } } catch {}
         setRemoteStreams((prev) => {
@@ -443,6 +460,15 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
     const next = !camEnabled;
     ls.getVideoTracks().forEach((t) => (t.enabled = next));
     setCamEnabled(next);
+    try { svcRef.current?.sendCameraState(!next); } catch {}
+  }
+
+  function toggleTelemetry() {
+    const svc = svcRef.current;
+    if (!svc) return;
+    const next = !telemetryOn;
+    svc.setTelemetryEnabled(next, roomId);
+    setTelemetryOn(next);
   }
 
   function requestFullscreen(el?: HTMLElement | null) {
@@ -749,6 +775,18 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
               <FiMonitor size={18} />
             </button>
 
+            <button onClick={toggleTelemetry} title={telemetryOn ? "Telemetry sharing on (tap to stop)" : "Send and receive telemetry"} style={{
+              padding: "12px", background: telemetryOn ? "#2563eb" : "rgba(255, 255, 255, 0.1)",
+              border: "none", borderRadius: "12px", color: "white", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+              fontSize: "14px", fontWeight: "500", transition: "all 0.2s",
+            }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.05)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+            >
+              <FiActivity size={18} />
+            </button>
+
             <button onClick={() => {
               const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement || (document as any).mozFullScreenElement || (document as any).msFullscreenElement;
               const isFs = fsEl === localContainerRef.current || localContainerRef.current?.contains(fsEl as any);
@@ -783,6 +821,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
                 fullscreen: isTileFs,
                 primary: primaryUserId === uid,
                 hidden: hiddenRemotes.has(uid),
+                camOff: remoteCamOff.has(uid),
               };
             })}
             isFullscreen={isFullscreen}

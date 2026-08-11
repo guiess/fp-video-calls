@@ -19,64 +19,83 @@ Quick reference for deploying the signaling server to Azure.
 
 ## Steps
 
-### 1. Install production dependencies
+> **Build model: Oryx builds on deploy.** The zip ships **source only** (no
+> `node_modules`). Azure App Service runs `npm ci` + builds native modules
+> (`better-sqlite3`, `sharp`) for Linux during deployment. This avoids shipping
+> a Windows-built or dev-contaminated `node_modules`, which previously caused a
+> startup crash (`EACCES` pruning a stray `vite-node` dev package → 503).
+>
+> Required app settings (already set):
+> - `SCM_DO_BUILD_DURING_DEPLOYMENT=true`
+> - `ENABLE_ORYX_BUILD=true`
+> - Startup command: `mkdir -p /home/data && node index.js` (no `npm install` at startup)
 
-```bash
-cd server
-npm install --omit=dev
-```
-
-### 2. Create the zip
+### 1. Create the zip — SOURCE ONLY (exclude `node_modules`, local db, uploads)
 
 **PowerShell (Windows):**
 
 ```powershell
-# From the server/ directory
-powershell -NoProfile -Command "
-  Add-Type -AssemblyName System.IO.Compression.FileSystem
-  if(Test-Path 'C:\tmp\server-deploy.zip'){ Remove-Item 'C:\tmp\server-deploy.zip' }
-  [System.IO.Compression.ZipFile]::CreateFromDirectory((Get-Location).Path, 'C:\tmp\server-deploy.zip')
-"
+cd C:\prsnl\fp-video-calls\server
+$stage = "C:\tmp\srv-stage"
+if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+New-Item -ItemType Directory $stage | Out-Null
+$exclude = @('node_modules','deploy.zip','chat.db','chat.db-shm','chat.db-wal','uploads')
+Get-ChildItem | Where-Object { $_.Name -notin $exclude } |
+  ForEach-Object { Copy-Item $_.FullName -Destination $stage -Recurse -Force }
+if (Test-Path C:\tmp\server-deploy.zip) { Remove-Item C:\tmp\server-deploy.zip }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($stage, 'C:\tmp\server-deploy.zip')
 ```
 
 **Bash / macOS / Linux:**
 
 ```bash
-# From the server/ directory
-zip -r /tmp/server-deploy.zip . -x "node_modules/.cache/*"
+cd server
+zip -r /tmp/server-deploy.zip . \
+  -x "node_modules/*" "chat.db*" "uploads/*" "deploy.zip"
 ```
 
-### 3. Deploy
+> ⚠️ Never ship `chat.db*` or `uploads/` — production data lives in `/home/data`
+> (persistent storage, separate from `wwwroot`) and on Azure Blob Storage.
+> Shipping local copies risks nothing in prod today (different path) but keeps
+> the zip clean and small (~0.1 MB vs ~32 MB).
+
+### 2. Deploy
 
 ```bash
 az webapp deployment source config-zip \
   --resource-group rg-voice-video \
   --name app-voice-video-server \
   --src C:/tmp/server-deploy.zip \
-  --timeout 300
+  --timeout 600
 ```
 
 > The command may report a local timeout while the build finishes on Azure.
-> This is normal — Oryx builds `node_modules` on the server side which can
-> take a few minutes. Check the health endpoint to confirm.
+> This is normal — Oryx runs `npm ci` + native rebuilds (can take 4–5 min).
+> Wait for `RuntimeSuccessful` / `Site started successfully`, then verify health.
 
-### 4. Verify
+### 3. Verify
 
 ```bash
 curl https://app-voice-video-server.azurewebsites.net/health
 # Expected: {"ok":true,"ts":...}
+curl -o /dev/null -w "%{http_code}\n" \
+  "https://app-voice-video-server.azurewebsites.net/socket.io/?EIO=4&transport=polling"
+# Expected: 200
 ```
 
 ## Notes
 
 - **Do not set `PORT`** — Azure injects it automatically.
-- **WebSockets** and **Always On** must be enabled in App Service Configuration.
-- The zip should contain the full `server/` contents (including `node_modules`).
-  Oryx will re-run `npm install` during the build phase regardless, but
-  including `node_modules` avoids issues if Oryx is disabled.
+- **WebSockets** and **Always On** must be enabled in App Service Configuration
+  (Always On avoids idle cold-restarts that re-run the build path).
+- **Do NOT ship `node_modules`** — Oryx builds it on deploy. Shipping a
+  pre-built tree (esp. with dev deps like `vitest`/`vite-node`) caused a
+  startup `EACCES` crash on container restart. Source-only is the supported path.
 - TLS is terminated by Azure; the server runs in HTTP mode.
 - `az webapp deploy --type zip` also works but is more prone to 504 timeouts
   on larger payloads. Prefer `az webapp deployment source config-zip`.
+
 
 ## Rollback
 

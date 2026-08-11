@@ -30,13 +30,15 @@ export default function ActiveCallScreen() {
   const startWithCamOff = params.get("camOff") === "1";
 
   const [phase, setPhase] = useState<CallPhase>(isIncoming ? "setting_up" : "setting_up");
-  const [participants, setParticipants] = useState<Array<{ userId: string; displayName: string; micMuted?: boolean }>>([]);
+  const [participants, setParticipants] = useState<Array<{ userId: string; displayName: string; micMuted?: boolean; cameraOff?: boolean }>>([]);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(!startWithCamOff);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [primaryUserId, setPrimaryUserId] = useState<string | null>(null);
   const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
+  const [telemetryOn, setTelemetryOn] = useState(false);
+  const [remoteCamOff, setRemoteCamOff] = useState<Set<string>>(new Set());
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -54,9 +56,15 @@ export default function ActiveCallScreen() {
   const buildSignalingHandlers = useCallback((): SignalingHandlers => {
     return {
       onRoomJoined: (existing, _roomInfo) => {
-        setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
+        setParticipants(existing.map(p => ({
+          userId: p.userId,
+          displayName: p.displayName,
+          micMuted: p.micMuted,
+          cameraOff: p.cameraOff,
+        })));
         const svc = svcRef.current!;
         const others = existing.filter(p => p.userId !== svc.getUserId());
+        setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
 
         others.forEach(({ userId: uid }) => {
           const pc = svc.createPeerConnection(uid);
@@ -155,6 +163,14 @@ export default function ActiveCallScreen() {
 
       onPrimaryChanged: (primary) => {
         setPrimaryUserId(primary);
+      },
+
+      onPeerCameraState: (uid, off) => {
+        setRemoteCamOff(prev => {
+          const n = new Set(prev);
+          if (off) n.add(uid); else n.delete(uid);
+          return n;
+        });
       },
 
       onUserLeft: (uid) => {
@@ -292,6 +308,7 @@ export default function ActiveCallScreen() {
         if (startWithCamOff) {
           const ls = svc.getLocalStream();
           if (ls) ls.getVideoTracks().forEach(t => { t.enabled = false; });
+          svc.sendCameraState(true);
         }
         setPhase("in_call");
       } else {
@@ -432,6 +449,15 @@ export default function ActiveCallScreen() {
       ls.getVideoTracks().forEach(t => { t.enabled = newEnabled; });
     }
     setCamEnabled(newEnabled);
+    try { svcRef.current?.sendCameraState(!newEnabled); } catch {}
+  }
+
+  function toggleTelemetry() {
+    const svc = svcRef.current;
+    if (!svc) return;
+    const next = !telemetryOn;
+    svc.setTelemetryEnabled(next, roomIdRef.current);
+    setTelemetryOn(next);
   }
 
   // Fullscreen helpers
@@ -473,6 +499,7 @@ export default function ActiveCallScreen() {
         fullscreen: isTileFs,
         primary: primaryUserId === p.userId,
         hidden: hiddenRemotes.has(p.userId),
+        camOff: remoteCamOff.has(p.userId),
       };
     });
 
@@ -607,16 +634,12 @@ export default function ActiveCallScreen() {
               />
             ) : (
               <>
-                {/* Remote video — fills entire area (hidden → placeholder) */}
-                {tiles[0]?.hidden ? (
-                  <div style={{
-                    position: "absolute", inset: 0, display: "flex",
-                    alignItems: "center", justifyContent: "center",
-                    background: "#1e293b", color: "#94a3b8", fontSize: 14,
-                  }}>
-                    Video hidden
-                  </div>
-                ) : (
+                {/*
+                  Keep the <video> ALWAYS mounted — it carries the remote audio
+                  track (audio+video share one MediaStream). Unmounting it for the
+                  hidden/cam-off placeholder would also silence the peer. Render
+                  the placeholder as an overlay on top instead.
+                */}
                 <video
                   autoPlay
                   playsInline
@@ -631,8 +654,17 @@ export default function ActiveCallScreen() {
                     position: "absolute", inset: 0,
                     width: "100%", height: "100%",
                     objectFit: "contain", background: "#000",
+                    visibility: (tiles[0]?.hidden || tiles[0]?.camOff) ? "hidden" : "visible",
                   }}
                 />
+                {(tiles[0]?.hidden || tiles[0]?.camOff) && (
+                  <div style={{
+                    position: "absolute", inset: 0, zIndex: 3, display: "flex",
+                    alignItems: "center", justifyContent: "center",
+                    background: "#1e293b", color: "#94a3b8", fontSize: 14,
+                  }}>
+                    {tiles[0]?.hidden ? "Video hidden" : "Camera off"}
+                  </div>
                 )}
                 {/* Hide / show remote video */}
                 <button
@@ -729,6 +761,14 @@ export default function ActiveCallScreen() {
               ) : (
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
               )}
+            </button>
+            <button onClick={toggleTelemetry} title={telemetryOn ? "Telemetry sharing on (tap to stop)" : "Send and receive telemetry"} style={{
+              width: 52, height: 52, borderRadius: "50%",
+              background: telemetryOn ? "#2563eb" : "rgba(255,255,255,0.2)",
+              border: "none", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             </button>
           </div>
         </>

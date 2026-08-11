@@ -6,6 +6,18 @@ plugins {
     kotlin("kapt")
 }
 
+// Filename-safe app name used for APK output naming.
+val appShortName = "M2Calls"
+
+// Version scheme: major.minor.change.commitNumber
+val verMajor = 1
+val verMinor = 0
+val verChange = 0
+val gitCommitCount: Int = providers.exec {
+    commandLine("git", "rev-list", "--count", "HEAD")
+}.standardOutput.asText.map { it.trim().toIntOrNull() ?: 0 }.getOrElse(0)
+val computedVersionName = "$verMajor.$verMinor.$verChange.$gitCommitCount"
+
 android {
     namespace = "com.fpvideocalls"
     compileSdk = 34
@@ -14,8 +26,8 @@ android {
         applicationId = "com.fpvideocalls"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = if (gitCommitCount > 0) gitCommitCount else 1
+        versionName = computedVersionName
     }
 
     testOptions {
@@ -58,6 +70,15 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    // Name APK files <AppName>-<versionName>-<buildType>.apk instead of the default.
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                .outputFileName = "$appShortName-${variant.versionName}-${variant.buildType.name}.apk"
         }
     }
 }
@@ -124,6 +145,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-process:2.7.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // WorkManager — periodic keep-alive for location service
     implementation("androidx.work:work-runtime-ktx:2.9.0")
