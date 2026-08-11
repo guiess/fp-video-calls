@@ -2,7 +2,7 @@ package com.fpvideocalls.util
 
 import android.content.Context
 
-/** User opt-in flag for receiving remote telemetry during calls. */
+/** User opt-in flag for exchanging diagnostic telemetry during calls. */
 object TelemetryPrefs {
     private const val PREFS = "telemetry_prefs"
     private const val KEY_ENABLED = "enabled"

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.webrtc.*
 
@@ -167,7 +168,12 @@ class WebRTCManager(
                     onRoomJoined = { existingParticipants, _ ->
                         Log.d(TAG, "room_joined: ${existingParticipants.size} participants: ${existingParticipants.map { it.userId }}")
                         _participants.value = existingParticipants.filter { it.userId != userId }
+                        _remoteCamOff.value = existingParticipants
+                            .filter { it.userId != userId && it.cameraOff }
+                            .mapTo(mutableSetOf()) { it.userId }
                         _signalingState.value = "connected"
+                        if (telemetryEnabled) signaling.sendTelemetrySubscribe(true)
+                        signaling.sendCameraState(!_camEnabled.value)
                         updateCaptureMode()
                         // Create peer connections and send offers following the convention:
                         // lower userId is the canonical offerer (matches web client).
@@ -264,6 +270,14 @@ class WebRTCManager(
                     }
                 ))
 
+                if (telemetryEnabled) {
+                    telemetrySessionId = withContext(Dispatchers.IO) {
+                        com.fpvideocalls.util.TelemetryStore
+                            .startSession(context, telemetryRoomId, telemetryRoomName)
+                    }
+                    Log.d(TAG, "Telemetry session started: $telemetrySessionId")
+                }
+
                 signaling.join(JoinOptions(
                     roomId = roomId,
                     userId = userId,
@@ -273,13 +287,6 @@ class WebRTCManager(
                 ))
 
                 startStatsPoller()
-
-                if (telemetryEnabled) {
-                    telemetrySessionId = com.fpvideocalls.util.TelemetryStore
-                        .startSession(context, telemetryRoomId, telemetryRoomName)
-                    signaling.sendTelemetrySubscribe(true)
-                    Log.d(TAG, "Telemetry session started: $telemetrySessionId")
-                }
             } catch (e: Exception) {
                 Log.e(TAG, "Setup failed", e)
             }
@@ -820,14 +827,33 @@ class WebRTCManager(
             "loss(\u0394nack/pli/fir)=$dNack/$dPli/$dFir " +
             "ice=$localType->$remoteType"
 
-        // Record local-side telemetry (this is OUR view of the link to peerId).
+        val metrics = JSONObject().apply {
+            put("net", networkType())
+            put("iceLocal", localType)
+            put("iceRemote", remoteType)
+            put("sendKbps", sendKbps)
+            put("dNack", dNack)
+            put("dPli", dPli)
+            put("dFir", dFir)
+            rttMs?.let { put("rttMs", it) }
+            availOutKbps?.let { put("availOutgoingKbps", it) }
+            fps?.let { put("outFps", it) }
+            w?.let { put("outWidth", it) }
+            h?.let { put("outHeight", it) }
+            qLimit?.let { put("qualityLimitation", it) }
+        }
+
+        // Record and publish local-side telemetry (OUR view of the link to peerId).
         val sid = telemetrySessionId
         if (telemetryEnabled && sid != null) {
             val peerName = _participants.value.firstOrNull { it.userId == peerId }?.displayName ?: peerId
-            com.fpvideocalls.util.TelemetryStore.addEntry(
-                context, sid, telemetryRoomId, telemetryRoomName,
-                now, "local→$peerId", "me→$peerName", info
-            )
+            signalingService?.sendTelemetryData(peerId, now, metrics)
+            scope.launch(Dispatchers.IO) {
+                com.fpvideocalls.util.TelemetryStore.addEntry(
+                    context, sid, telemetryRoomId, telemetryRoomName,
+                    now, "local→$peerId", "me→$peerName", info
+                )
+            }
         }
 
         if (verbose) {
@@ -839,16 +865,20 @@ class WebRTCManager(
     private fun handleRemoteTelemetry(payload: JSONObject) {
         if (!telemetryEnabled) return
         try {
-            val senderId = payload.optString("senderId", "?")
+            val metrics = payload.optJSONObject("metrics") ?: return
+            if (metrics.length() == 0) return
+            val senderId = payload.optString("senderId", "").ifEmpty { return }
             val senderName = payload.optString("senderName", senderId)
             val peerId = payload.optString("peerId", "")
             val ts = payload.optLong("ts", System.currentTimeMillis())
-            val m = payload.optJSONObject("metrics")
-            val info = if (m != null) formatRemoteMetrics(m, peerId) else payload.toString()
-            com.fpvideocalls.util.TelemetryStore.addEntry(
-                context, telemetrySessionId, telemetryRoomId, telemetryRoomName,
-                ts, "remote:$senderId", senderName, info
-            )
+            if (peerId.isEmpty() || ts <= 0L) return
+            val info = formatRemoteMetrics(metrics, peerId)
+            scope.launch(Dispatchers.IO) {
+                com.fpvideocalls.util.TelemetryStore.addEntry(
+                    context, telemetrySessionId, telemetryRoomId, telemetryRoomName,
+                    ts, "remote:$senderId", senderName, info
+                )
+            }
         } catch (e: Exception) {
             Log.w(TAG, "handleRemoteTelemetry failed", e)
         }
@@ -889,6 +919,8 @@ class WebRTCManager(
             "dec=${d("dDecoded")} drop=${d("dDropped")} " +  // this interval
             "lost=${d("dLost")} " +
             "availIn=${d("availIncomingKbps", "kbps")} " +
+            "availOut=${d("availOutgoingKbps", "kbps")} " +
+            "send=${d("sendKbps", "kbps")} " +
             "qLimit=${m.optString("qualityLimitation", "-")}"
     }
 

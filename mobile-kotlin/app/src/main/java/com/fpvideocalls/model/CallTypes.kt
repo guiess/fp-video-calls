@@ -21,7 +21,8 @@ enum class CallStatus {
 data class Participant(
     val userId: String,
     val displayName: String,
-    val micMuted: Boolean = false
+    val micMuted: Boolean = false,
+    val cameraOff: Boolean = false
 )
 
 data class IncomingCallData(

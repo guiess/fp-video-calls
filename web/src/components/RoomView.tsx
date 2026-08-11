@@ -21,7 +21,7 @@ export interface RoomViewProps {
   onLeave: () => void;
 }
 
-type Participant = { userId: string; displayName: string; micMuted?: boolean };
+type Participant = { userId: string; displayName: string; micMuted?: boolean; cameraOff?: boolean };
 
 type RoomMeta = {
   roomId: string;
@@ -150,9 +150,15 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
             },
           });
         }
-        setParticipants(existing.map((p: any) => ({ userId: p.userId, displayName: p.displayName, micMuted: p.micMuted })));
+        setParticipants(existing.map((p) => ({
+          userId: p.userId,
+          displayName: p.displayName,
+          micMuted: p.micMuted,
+          cameraOff: p.cameraOff,
+        })));
         const svc = svcRef.current!;
         const others = existing.filter((p: any) => p.userId !== svc.getUserId());
+        setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
         others.forEach(({ userId: uid }: any) => {
           const pc = svc.createPeerConnection(uid);
           wirePeerHandlers(pc, svc, uid);

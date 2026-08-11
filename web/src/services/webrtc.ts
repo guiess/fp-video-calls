@@ -8,8 +8,25 @@ export type JoinOptions = {
   quality: "720p" | "1080p";
 };
 
+export type TelemetrySample = {
+  roomId: string;
+  roomName: string;
+  senderId: string;
+  senderName: string;
+  peerId: string;
+  ts: number;
+  metrics: Record<string, unknown>;
+};
+
+type SignalingParticipant = {
+  userId: string;
+  displayName: string;
+  micMuted?: boolean;
+  cameraOff?: boolean;
+};
+
 export type SignalingHandlers = {
-  onRoomJoined?: (participants: Array<{ userId: string; displayName: string; micMuted?: boolean }>, roomInfo: any) => void;
+  onRoomJoined?: (participants: SignalingParticipant[], roomInfo: any) => void;
   onUserJoined?: (userId: string, displayName: string, micMuted?: boolean) => void;
   onUserLeft?: (userId: string) => void;
   onOffer?: (fromId: string, offer: RTCSessionDescriptionInit) => void;
@@ -21,7 +38,10 @@ export type SignalingHandlers = {
   onSignalingStateChange?: (state: "connected" | "disconnected" | "reconnecting") => void;
   onPrimaryChanged?: (primaryUserId: string | null) => void;
   onPeerCameraState?: (userId: string, off: boolean) => void;
+  onTelemetryData?: (sample: TelemetrySample) => void;
 };
+
+const MAX_RECEIVED_TELEMETRY_SAMPLES = 100;
 
 export class WebRTCService {
   private socket: Socket | null = null;
@@ -57,6 +77,8 @@ export class WebRTCService {
   private capNonPrimary: number = 400_000;
   // Current primary speaker (null = none)
   private primaryUserId: string | null = null;
+  private isCameraOff = false;
+  private receivedTelemetry: TelemetrySample[] = [];
 
   /** Set max video bitrate in bps. 0 = uncapped. Applies to all current and future peer connections. */
   setVideoBitrateCap(maxBitrate: number) {
@@ -117,6 +139,8 @@ export class WebRTCService {
       this.primaryUserId = (typeof primaryUserId === "string" && primaryUserId) ? primaryUserId : null;
       this.handlers.onRoomJoined?.(participants, roomInfo);
       this.handlers.onPrimaryChanged?.(this.primaryUserId);
+      this.sendCameraState(this.isCameraOff);
+      if (this.isTelemetryEnabled()) this.sendTelemetrySubscription(true);
       this.reapplyAllCaps();
     });
     this.socket.on("primary_changed", ({ userId }) => {
@@ -132,6 +156,7 @@ export class WebRTCService {
     // Mic mute/unmute broadcast
     this.socket.on("peer_mic_state", ({ userId, muted }) => this.handlers.onPeerMicState?.(userId, !!muted));
     this.socket.on("peer_camera_state", ({ userId, off }) => this.handlers.onPeerCameraState?.(userId, !!off));
+    this.socket.on("telemetry_data", (payload) => this.handleTelemetrySample(payload));
     // Simple chat channel
     this.socket.on("chat_message", ({ roomId, fromId, displayName, text, ts }) =>
       this.handlers.onChatMessage?.(roomId, fromId, displayName, text, ts)
@@ -524,6 +549,7 @@ export class WebRTCService {
   // here: swapping the track out and back in left receivers with frozen video
   // until the next keyframe.
   sendCameraState(off: boolean) {
+    this.isCameraOff = off;
     this.socket?.emit("camera_state_changed", { roomId: this.roomId, userId: this.userId, off });
   }
 
@@ -551,10 +577,8 @@ export class WebRTCService {
   }
 
   // ── Telemetry collector (opt-in, light) ────────────────────────────
-  // When enabled, samples getStats() every 10s for each peer connection and
-  // emits a self-contained `telemetry_data` message. The server forwards it
-  // only to subscribed sockets (and drops it if none), so the sole cost here
-  // is a periodic read-only getStats() call. No effect on media pipeline.
+  // When enabled, this client both publishes its getStats() samples and
+  // subscribes to the other opted-in participants' samples.
   private telemetryTimer: ReturnType<typeof setInterval> | null = null;
   private telemetryRoomName: string = "";
   // Per-peer previous cumulative counters, for windowed deltas.
@@ -571,13 +595,50 @@ export class WebRTCService {
     if (enabled) {
       if (roomName) this.telemetryRoomName = roomName;
       if (this.telemetryTimer) return;
+      this.sendTelemetrySubscription(true);
       this.telemetryTimer = setInterval(() => { void this.collectAndSendTelemetry(); }, 10_000);
       // Fire one sample promptly so the receiver sees data without waiting 10s.
       void this.collectAndSendTelemetry();
     } else {
       if (this.telemetryTimer) { clearInterval(this.telemetryTimer); this.telemetryTimer = null; }
+      this.sendTelemetrySubscription(false);
       this.telemetryPrev.clear();
     }
+  }
+
+  /** Returns the most recent validated remote samples for diagnostic consumers. */
+  getReceivedTelemetry(): readonly TelemetrySample[] {
+    return this.receivedTelemetry;
+  }
+
+  private sendTelemetrySubscription(subscribe: boolean) {
+    if (!this.socket || !this.roomId) return;
+    const event = subscribe ? "telemetry_subscribe" : "telemetry_unsubscribe";
+    this.socket.emit(event, { roomId: this.roomId });
+  }
+
+  private handleTelemetrySample(payload: unknown) {
+    if (!WebRTCService.isTelemetrySample(payload)) return;
+    this.receivedTelemetry = [
+      ...this.receivedTelemetry,
+      payload,
+    ].slice(-MAX_RECEIVED_TELEMETRY_SAMPLES);
+    this.handlers.onTelemetryData?.(payload);
+  }
+
+  private static isTelemetrySample(payload: unknown): payload is TelemetrySample {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+    const sample = payload as Partial<TelemetrySample>;
+    return typeof sample.roomId === "string"
+      && typeof sample.roomName === "string"
+      && typeof sample.senderId === "string"
+      && typeof sample.senderName === "string"
+      && typeof sample.peerId === "string"
+      && typeof sample.ts === "number"
+      && Number.isFinite(sample.ts)
+      && !!sample.metrics
+      && typeof sample.metrics === "object"
+      && !Array.isArray(sample.metrics);
   }
 
   private static num(v: unknown): number | undefined {
@@ -884,6 +945,7 @@ export class WebRTCService {
     } catch {}
     this.pcs.clear();
     this.localStream = null;
+    this.receivedTelemetry = [];
     // Reset room id; userId persists externally in App for stable identity
     this.roomId = "";
     // Clear reconnection state

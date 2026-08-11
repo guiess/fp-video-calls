@@ -72,6 +72,25 @@ function baseStats(overrides: {
 
 type FakeSocket = { emit: ReturnType<typeof vi.fn> };
 
+class EventSocket {
+  emit = vi.fn();
+  handlers = new Map<string, (payload?: any) => void>();
+  managerHandlers = new Map<string, () => void>();
+  io = {
+    on: (event: string, handler: () => void) => {
+      this.managerHandlers.set(event, handler);
+    },
+  };
+
+  on(event: string, handler: (payload?: any) => void) {
+    this.handlers.set(event, handler);
+  }
+
+  trigger(event: string, payload?: any) {
+    this.handlers.get(event)?.(payload);
+  }
+}
+
 // Build a service wired with a fake socket and one or more fake peer
 // connections, ready for collectAndSendTelemetry().
 function makeService(pcs: Record<string, { connectionState: string; report: RTCStatsReport | (() => Promise<never>) }>) {
@@ -348,5 +367,70 @@ describe("WebRTCService telemetry — collection lifecycle", () => {
     // The immediate collectAndSendTelemetry() is async; flush microtasks.
     await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("telemetry_data", expect.anything()));
     svc.setTelemetryEnabled(false);
+  });
+
+  it("[AC] enabling subscribes and disabling unsubscribes from room telemetry", () => {
+    const svc = new WebRTCService();
+    const socket = { emit: vi.fn() };
+    (svc as any).socket = socket;
+    (svc as any).roomId = "room-1";
+
+    svc.setTelemetryEnabled(true, "Room");
+    expect(socket.emit).toHaveBeenCalledWith("telemetry_subscribe", { roomId: "room-1" });
+
+    svc.setTelemetryEnabled(false);
+    expect(socket.emit).toHaveBeenCalledWith("telemetry_unsubscribe", { roomId: "room-1" });
+  });
+
+  it("[RECONNECT] room_joined restores telemetry subscription and current camera state", () => {
+    const svc = new WebRTCService();
+    const socket = new EventSocket();
+    (svc as any).socket = socket;
+    (svc as any).roomId = "room-1";
+    (svc as any).telemetryTimer = 123;
+    svc.sendCameraState(true);
+    (svc as any).bindSocketEvents();
+    socket.emit.mockClear();
+
+    socket.trigger("room_joined", {
+      participants: [],
+      roomInfo: { roomId: "room-1" },
+      primaryUserId: null,
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith("telemetry_subscribe", { roomId: "room-1" });
+    expect(socket.emit).toHaveBeenCalledWith("camera_state_changed", {
+      roomId: "room-1",
+      userId: "",
+      off: true,
+    });
+  });
+
+  it("[AC] accepts bounded structured remote samples and rejects missing metrics", () => {
+    const onTelemetryData = vi.fn();
+    const svc = new WebRTCService();
+    const socket = new EventSocket();
+    (svc as any).socket = socket;
+    (svc as any).handlers = { onTelemetryData };
+    (svc as any).bindSocketEvents();
+
+    socket.trigger("telemetry_data", {
+      roomId: "room-1",
+      roomName: "Room",
+      senderId: "peer-a",
+      senderName: "Peer A",
+      peerId: "me",
+      ts: 123,
+      metrics: { rttMs: 42 },
+    });
+    socket.trigger("telemetry_data", {
+      roomId: "room-1",
+      senderId: "peer-a",
+      peerId: "me",
+      ts: 124,
+    });
+
+    expect(onTelemetryData).toHaveBeenCalledTimes(1);
+    expect(svc.getReceivedTelemetry()).toHaveLength(1);
   });
 });

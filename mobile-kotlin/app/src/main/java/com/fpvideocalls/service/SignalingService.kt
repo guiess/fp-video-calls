@@ -64,7 +64,8 @@ class SignalingService(private val endpoint: String) {
                         Participant(
                             userId = p.getString("userId"),
                             displayName = p.getString("displayName"),
-                            micMuted = p.optBoolean("micMuted", false)
+                            micMuted = p.optBoolean("micMuted", false),
+                            cameraOff = p.optBoolean("cameraOff", false)
                         )
                     )
                 }
@@ -253,6 +254,20 @@ class SignalingService(private val endpoint: String) {
     fun sendTelemetrySubscribe(subscribe: Boolean) {
         val data = JSONObject().apply { put("roomId", roomId) }
         socket?.emit(if (subscribe) "telemetry_subscribe" else "telemetry_unsubscribe", data)
+    }
+
+    /** Publishes one bounded structured WebRTC stats sample for a measured peer. */
+    fun sendTelemetryData(peerId: String, ts: Long, metrics: JSONObject) {
+        val data = JSONObject().apply {
+            put("roomId", roomId)
+            put("roomName", roomId)
+            put("senderId", userId)
+            put("senderName", displayName)
+            put("peerId", peerId)
+            put("ts", ts)
+            put("metrics", metrics)
+        }
+        socket?.emit("telemetry_data", data)
     }
 
     fun sendChat(text: String) {

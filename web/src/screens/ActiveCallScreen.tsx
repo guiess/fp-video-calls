@@ -30,7 +30,7 @@ export default function ActiveCallScreen() {
   const startWithCamOff = params.get("camOff") === "1";
 
   const [phase, setPhase] = useState<CallPhase>(isIncoming ? "setting_up" : "setting_up");
-  const [participants, setParticipants] = useState<Array<{ userId: string; displayName: string; micMuted?: boolean }>>([]);
+  const [participants, setParticipants] = useState<Array<{ userId: string; displayName: string; micMuted?: boolean; cameraOff?: boolean }>>([]);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(!startWithCamOff);
@@ -56,9 +56,15 @@ export default function ActiveCallScreen() {
   const buildSignalingHandlers = useCallback((): SignalingHandlers => {
     return {
       onRoomJoined: (existing, _roomInfo) => {
-        setParticipants(existing.map(p => ({ userId: p.userId, displayName: p.displayName, micMuted: (p as any).micMuted })));
+        setParticipants(existing.map(p => ({
+          userId: p.userId,
+          displayName: p.displayName,
+          micMuted: p.micMuted,
+          cameraOff: p.cameraOff,
+        })));
         const svc = svcRef.current!;
         const others = existing.filter(p => p.userId !== svc.getUserId());
+        setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
 
         others.forEach(({ userId: uid }) => {
           const pc = svc.createPeerConnection(uid);
@@ -302,6 +308,7 @@ export default function ActiveCallScreen() {
         if (startWithCamOff) {
           const ls = svc.getLocalStream();
           if (ls) ls.getVideoTracks().forEach(t => { t.enabled = false; });
+          svc.sendCameraState(true);
         }
         setPhase("in_call");
       } else {
