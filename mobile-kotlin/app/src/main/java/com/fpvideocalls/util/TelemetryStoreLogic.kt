@@ -14,6 +14,41 @@ data class TelemetryLoadPlan(
 /** Pure telemetry-store decisions kept independent from Android file APIs. */
 object TelemetryStoreLogic {
 
+    fun prepareForWrite(
+        sessions: List<TelemetrySession>,
+        limits: TelemetryStoreLimits
+    ): List<TelemetrySession> {
+        var remainingEntries = limits.maxTotalEntries.coerceAtLeast(0)
+        return sessions
+            .filter { isValidSession(it, limits) }
+            .sortedWith(compareByDescending<TelemetrySession> { it.startedAt }.thenBy { it.id })
+            .take(limits.maxSessions.coerceAtLeast(0))
+            .map { session ->
+                val validEntries = session.entries.filter { isValidEntry(it, limits) }
+                val capped = capEntries(validEntries, limits.maxEntriesPerSession.coerceAtLeast(0))
+                val kept = capped.takeLast(remainingEntries.coerceAtMost(capped.size))
+                remainingEntries -= kept.size
+                session.copy(entries = kept)
+            }
+    }
+
+    fun isValidSession(session: TelemetrySession, limits: TelemetryStoreLimits): Boolean =
+        isBoundedText(session.id, limits.maxIdentifierLength)
+            && isBoundedText(session.roomId, limits.maxIdentifierLength)
+            && isBoundedText(session.roomName, limits.maxIdentifierLength)
+            && session.startedAt > 0L
+
+    fun isValidEntry(entry: TelemetryEntry, limits: TelemetryStoreLimits): Boolean =
+        entry.ts > 0L
+            && isBoundedText(entry.peerId, limits.maxPeerLabelLength)
+            && isBoundedText(entry.peerName, limits.maxPeerLabelLength)
+            && isBoundedText(entry.info, limits.maxInfoLength)
+
+    fun isBoundedText(value: String, maxLength: Int): Boolean =
+        value.isNotEmpty()
+            && value.length <= maxLength
+            && value.none { it.code < 32 || it.code == 127 }
+
     fun selectOrphanTarget(
         sessions: List<TelemetrySession>,
         roomId: String,

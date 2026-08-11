@@ -2,8 +2,6 @@ package com.fpvideocalls.util
 
 import android.content.Context
 import android.util.Log
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
@@ -42,73 +40,50 @@ object TelemetryStore {
     private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
     private const val ORPHAN_GAP_MS = 3L * 60 * 1000
     private const val MAX_ENTRIES_PER_SESSION = 5000
+    private const val MAX_TOTAL_ENTRIES = 5000
     private const val MAX_SESSIONS = 1000
-    private const val MAX_FILE_BYTES = 16L * 1024 * 1024
+    private const val MAX_FILE_BYTES = 16 * 1024 * 1024
     private const val MAX_IDENTIFIER_LENGTH = 128
     private const val MAX_PEER_LABEL_LENGTH = 256
     private const val MAX_INFO_LENGTH = 2048
 
     private val lock = Any()
+    private val limits = TelemetryStoreLimits(
+        maxSessions = MAX_SESSIONS,
+        maxEntriesPerSession = MAX_ENTRIES_PER_SESSION,
+        maxTotalEntries = MAX_TOTAL_ENTRIES,
+        maxFileBytes = MAX_FILE_BYTES,
+        maxIdentifierLength = MAX_IDENTIFIER_LENGTH,
+        maxPeerLabelLength = MAX_PEER_LABEL_LENGTH,
+        maxInfoLength = MAX_INFO_LENGTH
+    )
 
     private fun file(context: Context) = File(context.filesDir, FILE)
 
     private fun loadAll(context: Context): TelemetryLoadState {
         val f = file(context)
         if (!f.exists()) return TelemetryLoadState(emptyList(), isWholeFileValid = true)
-        if (f.length() > MAX_FILE_BYTES) {
+        if (f.length() > MAX_FILE_BYTES.toLong()) {
             Log.e(TAG, "Telemetry file exceeds $MAX_FILE_BYTES bytes; quarantining it")
             return corruptLoad(f)
         }
         return try {
-            val arr = JSONArray(f.readText())
-            require(arr.length() <= MAX_SESSIONS) { "Telemetry session count exceeds $MAX_SESSIONS" }
-            val sessions = (0 until arr.length()).mapNotNull { index ->
-                try {
-                    parseSession(arr.getJSONObject(index))
-                } catch (e: Exception) {
-                    Log.w(TAG, "Skipping corrupt telemetry session at index $index", e)
-                    null
-                }
+            val decoded = TelemetryStoreCodec.decode(f.readText(), limits)
+            if (!decoded.isWholeFileValid) {
+                Log.e(TAG, "Telemetry file has an invalid root or exceeds read limits")
+                return corruptLoad(f)
             }
-            TelemetryLoadState(sessions, isWholeFileValid = true)
+            if (decoded.skippedSessions > 0 || decoded.skippedEntries > 0) {
+                Log.w(
+                    TAG,
+                    "Skipped ${decoded.skippedSessions} corrupt sessions and ${decoded.skippedEntries} entries"
+                )
+            }
+            TelemetryLoadState(decoded.sessions, isWholeFileValid = true)
         } catch (e: Exception) {
             Log.e(TAG, "Telemetry file is corrupt; quarantining it", e)
             corruptLoad(f)
         }
-    }
-
-    private fun parseSession(value: JSONObject): TelemetrySession {
-        val id = requireBounded(value.getString("id"), MAX_IDENTIFIER_LENGTH, "session id")
-        val roomId = requireBounded(value.getString("roomId"), MAX_IDENTIFIER_LENGTH, "room id")
-        val roomName = requireBounded(
-            value.optString("roomName", roomId),
-            MAX_IDENTIFIER_LENGTH,
-            "room name"
-        )
-        val startedAt = requirePositive(value.getLong("startedAt"), "session timestamp")
-        val entriesArray = value.optJSONArray("entries") ?: JSONArray()
-        val firstEntry = (entriesArray.length() - MAX_ENTRIES_PER_SESSION).coerceAtLeast(0)
-        val entries = (firstEntry until entriesArray.length()).mapNotNull { index ->
-            try {
-                val entry = entriesArray.getJSONObject(index)
-                TelemetryEntry(
-                    ts = requirePositive(entry.getLong("ts"), "entry timestamp"),
-                    peerId = requireBounded(entry.optString("peerId", ""), MAX_PEER_LABEL_LENGTH, "peer id"),
-                    peerName = requireBounded(entry.optString("peerName", ""), MAX_PEER_LABEL_LENGTH, "peer name"),
-                    info = requireBounded(entry.optString("info", ""), MAX_INFO_LENGTH, "entry info")
-                )
-            } catch (e: Exception) {
-                Log.w(TAG, "Skipping corrupt telemetry entry at index $index", e)
-                null
-            }
-        }
-        return TelemetrySession(
-            id = id,
-            roomId = roomId,
-            roomName = roomName,
-            startedAt = startedAt,
-            entries = TelemetryStoreLogic.capEntries(entries, MAX_ENTRIES_PER_SESSION)
-        )
     }
 
     private fun corruptLoad(source: File): TelemetryLoadState = TelemetryLoadState(
@@ -117,19 +92,8 @@ object TelemetryStore {
         canReplaceCorruptFile = quarantine(source)
     )
 
-    private fun requireBounded(value: String, maxLength: Int, fieldName: String): String {
-        require(value.isNotEmpty() && value.length <= maxLength) { "Invalid $fieldName length" }
-        require(value.none { it.code < 32 || it.code == 127 }) { "Invalid $fieldName characters" }
-        return value
-    }
-
-    private fun requirePositive(value: Long, fieldName: String): Long {
-        require(value > 0L) { "Invalid $fieldName" }
-        return value
-    }
-
     private fun quarantine(source: File): Boolean {
-        val backup = nextBackupFile(source)
+        val backup = File(source.parentFile, "$FILE.bak")
         return try {
             Files.move(
                 source.toPath(),
@@ -144,33 +108,13 @@ object TelemetryStore {
         }
     }
 
-    private fun nextBackupFile(source: File): File {
-        val defaultBackup = File(source.parentFile, "$FILE.bak")
-        if (!defaultBackup.exists()) return defaultBackup
-        return File(source.parentFile, "$FILE.${System.currentTimeMillis()}.bak")
-    }
-
     private fun saveAll(context: Context, sessions: List<TelemetrySession>): Boolean {
-        val arr = JSONArray()
-        for (s in sessions) {
-            val entriesArr = JSONArray()
-            for (e in s.entries) {
-                entriesArr.put(JSONObject().apply {
-                    put("ts", e.ts)
-                    put("peerId", e.peerId)
-                    put("peerName", e.peerName)
-                    put("info", e.info)
-                })
-            }
-            arr.put(JSONObject().apply {
-                put("id", s.id)
-                put("roomId", s.roomId)
-                put("roomName", s.roomName)
-                put("startedAt", s.startedAt)
-                put("entries", entriesArr)
-            })
+        val payload = TelemetryStoreCodec.prepareWrite(sessions, limits)
+        if (payload == null) {
+            Log.e(TAG, "Telemetry data cannot be compacted within write limits")
+            return false
         }
-        return writeAtomically(file(context), arr.toString())
+        return writeAtomically(file(context), payload.json)
     }
 
     private fun writeAtomically(target: File, content: String): Boolean {
@@ -228,20 +172,17 @@ object TelemetryStore {
     }
 
     /** Opens a new session for a starting call and returns its id. */
-    fun startSession(context: Context, roomId: String, roomName: String): String {
+    fun startSession(context: Context, roomId: String, roomName: String): String? {
         synchronized(lock) {
             val (loadState, plan) = prepare(context)
             val id = UUID.randomUUID().toString()
-            val sessions = listOf(
-                TelemetrySession(
-                    id,
-                    requireBounded(roomId, MAX_IDENTIFIER_LENGTH, "room id"),
-                    requireBounded(roomName, MAX_IDENTIFIER_LENGTH, "room name"),
-                    System.currentTimeMillis()
-                )
-            ) + plan.sessions
-            if (canSaveNonEmpty(loadState, plan)) saveAll(context, sessions)
-            return id
+            val session = TelemetrySession(id, roomId, roomName, System.currentTimeMillis())
+            if (!TelemetryStoreLogic.isValidSession(session, limits)) {
+                Log.w(TAG, "Rejected invalid telemetry session metadata")
+                return null
+            }
+            if (!canSaveNonEmpty(loadState, plan)) return null
+            return id.takeIf { saveAll(context, listOf(session) + plan.sessions) }
         }
     }
 
@@ -259,23 +200,23 @@ object TelemetryStore {
         peerId: String,
         peerName: String,
         info: String
-    ) {
+    ): Boolean {
         synchronized(lock) {
             val (loadState, plan) = prepare(context)
             val sessions = plan.sessions.toMutableList()
-            val validRoomId = requireBounded(roomId, MAX_IDENTIFIER_LENGTH, "room id")
-            val validRoomName = requireBounded(roomName, MAX_IDENTIFIER_LENGTH, "room name")
-            val entry = TelemetryEntry(
-                requirePositive(ts, "entry timestamp"),
-                requireBounded(peerId, MAX_PEER_LABEL_LENGTH, "peer id"),
-                requireBounded(peerName, MAX_PEER_LABEL_LENGTH, "peer name"),
-                requireBounded(info, MAX_INFO_LENGTH, "entry info")
-            )
+            val entry = TelemetryEntry(ts, peerId, peerName, info)
+            val sessionMetadata = TelemetrySession("validation", roomId, roomName, ts)
+            if (!TelemetryStoreLogic.isValidSession(sessionMetadata, limits)
+                || !TelemetryStoreLogic.isValidEntry(entry, limits)
+            ) {
+                Log.w(TAG, "Rejected invalid telemetry entry")
+                return false
+            }
 
             val explicit = sessions.firstOrNull { sessionId != null && it.id == sessionId }
             val target = explicit ?: TelemetryStoreLogic.selectOrphanTarget(
                 sessions,
-                validRoomId,
+                roomId,
                 ts,
                 ORPHAN_GAP_MS
             )
@@ -285,8 +226,8 @@ object TelemetryStore {
                     0,
                     TelemetrySession(
                         UUID.randomUUID().toString(),
-                        validRoomId,
-                        validRoomName,
+                        roomId,
+                        roomName,
                         ts,
                         listOf(entry)
                     )
@@ -304,7 +245,8 @@ object TelemetryStore {
                 System.currentTimeMillis(),
                 RETENTION_MS
             )
-            if (canSaveNonEmpty(loadState, plan)) saveAll(context, ordered)
+            if (!canSaveNonEmpty(loadState, plan)) return false
+            return saveAll(context, ordered)
         }
     }
 

@@ -271,10 +271,7 @@ class WebRTCManager(
                 ))
 
                 if (telemetryEnabled) {
-                    telemetrySessionId = withContext(Dispatchers.IO) {
-                        com.fpvideocalls.util.TelemetryStore
-                            .startSession(context, telemetryRoomId, telemetryRoomName)
-                    }
+                    telemetrySessionId = startTelemetrySessionSafely()
                     Log.d(TAG, "Telemetry session started: $telemetrySessionId")
                 }
 
@@ -848,7 +845,7 @@ class WebRTCManager(
         if (telemetryEnabled && sid != null) {
             val peerName = _participants.value.firstOrNull { it.userId == peerId }?.displayName ?: peerId
             signalingService?.sendTelemetryData(peerId, now, metrics)
-            scope.launch(Dispatchers.IO) {
+            launchTelemetryWrite {
                 com.fpvideocalls.util.TelemetryStore.addEntry(
                     context, sid, telemetryRoomId, telemetryRoomName,
                     now, "local→$peerId", "me→$peerName", info
@@ -873,7 +870,7 @@ class WebRTCManager(
             val ts = payload.optLong("ts", System.currentTimeMillis())
             if (peerId.isEmpty() || ts <= 0L) return
             val info = formatRemoteMetrics(metrics, peerId)
-            scope.launch(Dispatchers.IO) {
+            launchTelemetryWrite {
                 com.fpvideocalls.util.TelemetryStore.addEntry(
                     context, telemetrySessionId, telemetryRoomId, telemetryRoomName,
                     ts, "remote:$senderId", senderName, info
@@ -881,6 +878,26 @@ class WebRTCManager(
             }
         } catch (e: Exception) {
             Log.w(TAG, "handleRemoteTelemetry failed", e)
+        }
+    }
+
+    private suspend fun startTelemetrySessionSafely(): String? = withContext(Dispatchers.IO) {
+        try {
+            com.fpvideocalls.util.TelemetryStore
+                .startSession(context, telemetryRoomId, telemetryRoomName)
+        } catch (e: Exception) {
+            Log.w(TAG, "Telemetry session start failed; continuing call without persistence", e)
+            null
+        }
+    }
+
+    private fun launchTelemetryWrite(write: () -> Boolean) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (!write()) Log.w(TAG, "Telemetry sample was not persisted")
+            } catch (e: Exception) {
+                Log.w(TAG, "Telemetry persistence failed; call remains active", e)
+            }
         }
     }
 
