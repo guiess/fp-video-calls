@@ -775,7 +775,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
               <FiMonitor size={18} />
             </button>
 
-            <button onClick={toggleTelemetry} title={telemetryOn ? "Telemetry on (tap to stop)" : "Send telemetry"} style={{
+            <button onClick={toggleTelemetry} title={telemetryOn ? "Telemetry sharing on (tap to stop)" : "Send and receive telemetry"} style={{
               padding: "12px", background: telemetryOn ? "#2563eb" : "rgba(255, 255, 255, 0.1)",
               border: "none", borderRadius: "12px", color: "white", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
