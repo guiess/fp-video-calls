@@ -119,6 +119,24 @@ const roomLimiter = rateLimit({
   legacyHeaders: false,
 });
 app.use("/room", roomLimiter);
+
+const TELEMETRY_MAX_PAYLOAD_BYTES = 4096;
+const TELEMETRY_MAX_IDENTIFIER_LENGTH = 128;
+const TELEMETRY_MAX_METRIC_STRING_LENGTH = 32;
+const TELEMETRY_RATE_WINDOW_MS = 10_000;
+const TELEMETRY_MAX_SAMPLES_PER_WINDOW = 20;
+const TELEMETRY_ENVELOPE_KEYS = new Set([
+  "roomId", "roomName", "senderId", "senderName", "peerId", "ts", "metrics"
+]);
+const TELEMETRY_NUMBER_METRICS = new Set([
+  "rttMs", "availIncomingKbps", "availOutgoingKbps", "jbMs",
+  "dFreeze", "dFreezeDurS", "inFps", "dDecoded", "dDropped", "dLost",
+  "outFps", "downMbps", "sendKbps", "outWidth", "outHeight",
+  "dNack", "dPli", "dFir"
+]);
+const TELEMETRY_STRING_METRICS = new Set([
+  "net", "link", "iceLocal", "iceRemote", "qualityLimitation"
+]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -447,6 +465,8 @@ app.get("/room/:roomId/meta", (req, res) => {
 });
 
 io.on("connection", (socket) => {
+  const telemetryRateByRoom = new Map();
+
   // Chat: user identifies themselves with Firebase ID token
   socket.on("chat_auth", async ({ uid, token }) => {
     if (!uid) return;
@@ -544,7 +564,13 @@ io.on("connection", (socket) => {
 
     const isReconnect = room.participants.has(userId);
     const prevMicMuted = isReconnect ? !!room.participants.get(userId)?.micMuted : false;
-    room.participants.set(userId, { socketId: socket.id, displayName, micMuted: prevMicMuted });
+    const prevCameraOff = isReconnect ? !!room.participants.get(userId)?.cameraOff : false;
+    room.participants.set(userId, {
+      socketId: socket.id,
+      displayName,
+      micMuted: prevMicMuted,
+      cameraOff: prevCameraOff
+    });
     socket.join(roomId);
 
     // Notify caller with existing participants (include micMuted for initial badges)
@@ -640,9 +666,11 @@ io.on("connection", (socket) => {
   });
 
   // Broadcast mic mute/unmute state to room participants
-  socket.on("mic_state_changed", ({ roomId, userId, muted }) => {
+  socket.on("mic_state_changed", ({ roomId, muted }) => {
     const room = rooms.get(roomId);
     if (!room) return;
+    const userId = getUserIdBySocket(roomId, socket.id);
+    if (!userId) return;
     const p = room.participants.get(userId);
     if (p) {
       p.micMuted = !!muted;
@@ -652,9 +680,11 @@ io.on("connection", (socket) => {
   });
 
   // Broadcast camera on/off state to room participants (mirrors mic state).
-  socket.on("camera_state_changed", ({ roomId, userId, off }) => {
+  socket.on("camera_state_changed", ({ roomId, off }) => {
     const room = rooms.get(roomId);
     if (!room) return;
+    const userId = getUserIdBySocket(roomId, socket.id);
+    if (!userId) return;
     const p = room.participants.get(userId);
     if (p) {
       p.cameraOff = !!off;
@@ -664,14 +694,14 @@ io.on("connection", (socket) => {
   });
 
   // ── Telemetry relay ──────────────────────────────────────────────
-  // A subscriber (mobile with telemetry enabled) registers its socket.
-  // Web clients emit telemetry_data unconditionally when their toggle is on;
-  // the server forwards each sample ONLY to subscribed sockets in that room,
-  // and silently drops it when nobody is listening. Subscribers are tracked
-  // by socket.id in a per-room Set.
+  // Opted-in room members both publish and subscribe. Membership and identity
+  // are derived from the joined socket; client-provided identity is ignored.
   socket.on("telemetry_subscribe", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
+    if (!getUserIdBySocket(roomId, socket.id)) {
+      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
+    }
     if (!room.telemetrySubscribers) room.telemetrySubscribers = new Set();
     room.telemetrySubscribers.add(socket.id);
     console.log(`[telemetry] ${socket.id} subscribed in ${roomId} (${room.telemetrySubscribers.size} total)`);
@@ -679,18 +709,31 @@ io.on("connection", (socket) => {
 
   socket.on("telemetry_unsubscribe", ({ roomId }) => {
     const room = rooms.get(roomId);
-    room?.telemetrySubscribers?.delete(socket.id);
+    if (!room) return;
+    if (!getUserIdBySocket(roomId, socket.id)) {
+      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
+    }
+    room.telemetrySubscribers?.delete(socket.id);
   });
 
-  socket.on("telemetry_data", (payload) => {
-    const roomId = payload?.roomId;
-    if (!roomId) return;
+  socket.on("telemetry_data", ({ roomId, roomName, senderId, senderName, peerId, ts, metrics, ...unknown }) => {
     const room = rooms.get(roomId);
+    if (!room) return;
+    const authenticatedSenderId = getUserIdBySocket(roomId, socket.id);
+    if (!authenticatedSenderId) {
+      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
+    }
+    const payload = { roomId, roomName, senderId, senderName, peerId, ts, metrics, ...unknown };
+    const sample = validateTelemetrySample(payload, room, authenticatedSenderId);
+    if (!sample) return rejectTelemetry(socket, "TELEMETRY_INVALID");
+    if (isTelemetryRateLimited(telemetryRateByRoom, roomId, Date.now())) {
+      return rejectTelemetry(socket, "TELEMETRY_RATE_LIMITED");
+    }
     const subs = room?.telemetrySubscribers;
     if (!subs || subs.size === 0) return; // nobody listening → drop
     for (const sid of subs) {
       if (sid === socket.id) continue; // don't echo to sender
-      io.to(sid).emit("telemetry_data", payload);
+      io.to(sid).emit("telemetry_data", sample);
     }
   });
 
@@ -740,6 +783,93 @@ function getUserIdBySocket(roomId, socketId) {
     if (info.socketId === socketId) return uid;
   }
   return null;
+}
+
+function rejectTelemetry(socket, code) {
+  socket.emit("error", { code });
+}
+
+function validateTelemetrySample(payload, room, senderId) {
+  if (!isPlainObject(payload) || exceedsTelemetrySize(payload)) return null;
+  if (!hasOnlyKeys(payload, TELEMETRY_ENVELOPE_KEYS)) return null;
+  if (!isBoundedString(payload.roomId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
+  if (!isBoundedString(payload.peerId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
+  if (!isOptionalBoundedString(payload.roomName, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
+  if (!isOptionalBoundedString(payload.senderId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
+  if (!isOptionalBoundedString(payload.senderName, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return null;
+  if (!room.participants.has(payload.peerId) || payload.peerId === senderId) return null;
+  if (!Number.isFinite(payload.ts) || payload.ts <= 0 || payload.ts > Date.now() + 300_000) return null;
+  const sanitizedMetrics = sanitizeTelemetryMetrics(payload.metrics);
+  if (!sanitizedMetrics) return null;
+  const sender = room.participants.get(senderId);
+  return {
+    roomId: payload.roomId,
+    roomName: boundedRoomName(payload.roomName, payload.roomId),
+    senderId,
+    senderName: boundedRoomName(sender?.displayName, "Guest"),
+    peerId: payload.peerId,
+    ts: payload.ts,
+    metrics: sanitizedMetrics
+  };
+}
+
+function sanitizeTelemetryMetrics(metrics) {
+  if (!isPlainObject(metrics) || Object.keys(metrics).length === 0) return null;
+  const sanitized = {};
+  for (const [key, value] of Object.entries(metrics)) {
+    if (TELEMETRY_NUMBER_METRICS.has(key)) {
+      if (!Number.isFinite(value) || value < 0 || value > 1_000_000_000) return null;
+      sanitized[key] = value;
+    } else if (TELEMETRY_STRING_METRICS.has(key)) {
+      if (!isBoundedString(value, TELEMETRY_MAX_METRIC_STRING_LENGTH)) return null;
+      sanitized[key] = value;
+    } else {
+      return null;
+    }
+  }
+  return sanitized;
+}
+
+function isTelemetryRateLimited(rateByRoom, roomId, now) {
+  const current = rateByRoom.get(roomId);
+  if (!current || now - current.startedAt >= TELEMETRY_RATE_WINDOW_MS) {
+    rateByRoom.set(roomId, { startedAt: now, count: 1 });
+    return false;
+  }
+  if (current.count >= TELEMETRY_MAX_SAMPLES_PER_WINDOW) return true;
+  current.count += 1;
+  return false;
+}
+
+function exceedsTelemetrySize(payload) {
+  try {
+    return Buffer.byteLength(JSON.stringify(payload), "utf8") > TELEMETRY_MAX_PAYLOAD_BYTES;
+  } catch {
+    return true;
+  }
+}
+
+function hasOnlyKeys(value, allowedKeys) {
+  return Object.keys(value).every(key => allowedKeys.has(key));
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBoundedString(value, maxLength) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maxLength
+    && !/[\u0000-\u001F\u007F]/.test(value);
+}
+
+function isOptionalBoundedString(value, maxLength) {
+  return value === undefined || isBoundedString(value, maxLength);
+}
+
+function boundedRoomName(roomName, roomId) {
+  return isBoundedString(roomName, TELEMETRY_MAX_IDENTIFIER_LENGTH) ? roomName : roomId;
 }
 
 function relayToUser(roomId, targetUserId, event, payload) {
