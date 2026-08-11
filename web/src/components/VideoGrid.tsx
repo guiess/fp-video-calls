@@ -10,6 +10,7 @@ export type RemoteTile = {
   fullscreen?: boolean;
   primary?: boolean;
   hidden?: boolean;
+  camOff?: boolean;
 };
 
 type Props = {
@@ -69,7 +70,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
       height: "100%",
       alignContent: singleTile ? undefined : "start",
     }}>
-      {tiles.map(({ userId, displayName, stream, muted, fullscreen, primary, hidden }) => {
+      {tiles.map(({ userId, displayName, stream, muted, fullscreen, primary, hidden, camOff }) => {
         const tileEl = getTileEl?.(userId) || null;
         const fsActive = !!fullscreen;
         return (
@@ -128,7 +129,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
             {hidden && (
               <div
                 style={{
-                  position: "absolute", inset: 0, zIndex: 1,
+                  position: "absolute", inset: 0, zIndex: 3,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   background: "#1e293b", color: "#94a3b8", fontSize: 13,
                 }}
@@ -138,7 +139,26 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 </span>
               </div>
             )}
-            {!hidden && (
+            {!hidden && camOff && (
+              <div
+                style={{
+                  position: "absolute", inset: 0, zIndex: 3,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "#1e293b", color: "#94a3b8", fontSize: 13,
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <FiVideoOff size={16} /> Camera off
+                </span>
+              </div>
+            )}
+            {/*
+              The <video> element MUST stay mounted whenever there is a stream —
+              it carries the remote AUDIO track too (audio+video share one
+              MediaStream). Unmounting it to show a placeholder would also detach
+              the audio and the peer would go silent. So for hidden/cam-off we
+              keep the element mounted and just cover it with the overlay above.
+            */}
             <video
               autoPlay
               playsInline
@@ -187,13 +207,15 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 height: "100%",
                 objectFit: "contain",
                 display: "block",
+                // Hide the (frozen/black) video frames when covered, but keep the
+                // element mounted so audio keeps playing.
+                visibility: (hidden || camOff) ? "hidden" : "visible",
                 zIndex: fsActive ? 1 : undefined,
                 pointerEvents: "none",
                 userSelect: "none",
                 touchAction: "none"
               }}
             />
-            )}
             {fsActive && (
               <>
                 {/* Control bar at top right */}

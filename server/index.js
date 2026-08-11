@@ -551,7 +551,8 @@ io.on("connection", (socket) => {
     const participants = Array.from(room.participants.entries()).map(([id, p]) => ({
       userId: id,
       displayName: p.displayName,
-      micMuted: !!p.micMuted
+      micMuted: !!p.micMuted,
+      cameraOff: !!p.cameraOff
     }));
     console.log(`[room:join] ${userId} ${isReconnect ? "re" : ""}joined ${roomId} (${room.participants.size} participants)`);
     socket.emit("room_joined", {
@@ -584,6 +585,7 @@ io.on("connection", (socket) => {
     const room = rooms.get(roomId);
     if (room) {
       room.participants.delete(userId);
+      room.telemetrySubscribers?.delete(socket.id);
       if (room.primaryUserId === userId) {
         room.primaryUserId = null;
         socket.to(roomId).emit("primary_changed", { userId: null });
@@ -649,9 +651,53 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
   });
 
+  // Broadcast camera on/off state to room participants (mirrors mic state).
+  socket.on("camera_state_changed", ({ roomId, userId, off }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const p = room.participants.get(userId);
+    if (p) {
+      p.cameraOff = !!off;
+      room.participants.set(userId, p);
+    }
+    io.to(roomId).emit("peer_camera_state", { userId, off: !!off });
+  });
+
+  // ── Telemetry relay ──────────────────────────────────────────────
+  // A subscriber (mobile with telemetry enabled) registers its socket.
+  // Web clients emit telemetry_data unconditionally when their toggle is on;
+  // the server forwards each sample ONLY to subscribed sockets in that room,
+  // and silently drops it when nobody is listening. Subscribers are tracked
+  // by socket.id in a per-room Set.
+  socket.on("telemetry_subscribe", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    if (!room.telemetrySubscribers) room.telemetrySubscribers = new Set();
+    room.telemetrySubscribers.add(socket.id);
+    console.log(`[telemetry] ${socket.id} subscribed in ${roomId} (${room.telemetrySubscribers.size} total)`);
+  });
+
+  socket.on("telemetry_unsubscribe", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    room?.telemetrySubscribers?.delete(socket.id);
+  });
+
+  socket.on("telemetry_data", (payload) => {
+    const roomId = payload?.roomId;
+    if (!roomId) return;
+    const room = rooms.get(roomId);
+    const subs = room?.telemetrySubscribers;
+    if (!subs || subs.size === 0) return; // nobody listening → drop
+    for (const sid of subs) {
+      if (sid === socket.id) continue; // don't echo to sender
+      io.to(sid).emit("telemetry_data", payload);
+    }
+  });
+
   socket.on("disconnect", () => {
     // Cleanup user from any rooms
     for (const [roomId, room] of rooms.entries()) {
+      room.telemetrySubscribers?.delete(socket.id);
       const userId = getUserIdBySocket(roomId, socket.id);
       if (userId) {
         room.participants.delete(userId);

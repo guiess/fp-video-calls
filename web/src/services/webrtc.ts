@@ -20,6 +20,7 @@ export type SignalingHandlers = {
   onError?: (code: string, message?: string) => void;
   onSignalingStateChange?: (state: "connected" | "disconnected" | "reconnecting") => void;
   onPrimaryChanged?: (primaryUserId: string | null) => void;
+  onPeerCameraState?: (userId: string, off: boolean) => void;
 };
 
 export class WebRTCService {
@@ -130,6 +131,7 @@ export class WebRTCService {
     this.socket.on("ice_candidate_received", async ({ fromId, candidate }) => this.handlers.onIceCandidate?.(fromId, candidate));
     // Mic mute/unmute broadcast
     this.socket.on("peer_mic_state", ({ userId, muted }) => this.handlers.onPeerMicState?.(userId, !!muted));
+    this.socket.on("peer_camera_state", ({ userId, off }) => this.handlers.onPeerCameraState?.(userId, !!off));
     // Simple chat channel
     this.socket.on("chat_message", ({ roomId, fromId, displayName, text, ts }) =>
       this.handlers.onChatMessage?.(roomId, fromId, displayName, text, ts)
@@ -514,6 +516,17 @@ export class WebRTCService {
     this.socket?.emit("mic_state_changed", { roomId: this.roomId, userId: this.userId, muted });
   }
 
+  // Camera on/off state helper (mirrors mic). Broadcasts the state so peers can
+  // show a "Camera off" placeholder. The caller already toggles
+  // `videoTrack.enabled`, which drops the outgoing video to near-zero (static
+  // black frames) — freeing most uplink — and, crucially, resumes INSTANTLY on
+  // re-enable with no keyframe/track-swap. We deliberately do NOT replaceTrack(null)
+  // here: swapping the track out and back in left receivers with frozen video
+  // until the next keyframe.
+  sendCameraState(off: boolean) {
+    this.socket?.emit("camera_state_changed", { roomId: this.roomId, userId: this.userId, off });
+  }
+
   // Chat helper
   sendChat(text: string) {
     const payload = { roomId: this.roomId, userId: this.userId, displayName: this.displayName, text, ts: Date.now() };
@@ -535,6 +548,152 @@ export class WebRTCService {
   }
   getUserId() {
     return this.userId;
+  }
+
+  // ── Telemetry collector (opt-in, light) ────────────────────────────
+  // When enabled, samples getStats() every 10s for each peer connection and
+  // emits a self-contained `telemetry_data` message. The server forwards it
+  // only to subscribed sockets (and drops it if none), so the sole cost here
+  // is a periodic read-only getStats() call. No effect on media pipeline.
+  private telemetryTimer: ReturnType<typeof setInterval> | null = null;
+  private telemetryRoomName: string = "";
+  // Per-peer previous cumulative counters, for windowed deltas.
+  private telemetryPrev: Map<string, {
+    ts: number;
+    jbDelay: number; jbCount: number;
+    freezeCount: number; freezeDur: number;
+    framesDecoded: number; framesDropped: number; packetsLost: number;
+  }> = new Map();
+
+  isTelemetryEnabled(): boolean { return this.telemetryTimer !== null; }
+
+  setTelemetryEnabled(enabled: boolean, roomName?: string) {
+    if (enabled) {
+      if (roomName) this.telemetryRoomName = roomName;
+      if (this.telemetryTimer) return;
+      this.telemetryTimer = setInterval(() => { void this.collectAndSendTelemetry(); }, 10_000);
+      // Fire one sample promptly so the receiver sees data without waiting 10s.
+      void this.collectAndSendTelemetry();
+    } else {
+      if (this.telemetryTimer) { clearInterval(this.telemetryTimer); this.telemetryTimer = null; }
+      this.telemetryPrev.clear();
+    }
+  }
+
+  private static num(v: unknown): number | undefined {
+    return typeof v === "number" && isFinite(v) ? v : undefined;
+  }
+
+  /**
+   * Network info from the Network Information API. Returns transport and a
+   * separate quality bucket — these are NOT the same:
+   *   - `net`  = physical transport (wifi/cellular/ethernet) — undefined on most
+   *              desktop browsers, so reported as "unknown" there.
+   *   - `link` = effectiveType quality bucket (slow-2g/2g/3g/4g). "4g" is the
+   *              MAX value and means "decent", NOT cellular.
+   *   - `downMbps` = estimated downlink, when available.
+   */
+  private static networkInfo(): { net: string; link: string; downMbps?: number } {
+    try {
+      const c = (navigator as any)?.connection;
+      if (!c) return { net: "unknown", link: "unknown" };
+      return {
+        net: c.type || "unknown",
+        link: c.effectiveType || "unknown",
+        downMbps: typeof c.downlink === "number" ? c.downlink : undefined,
+      };
+    } catch { return { net: "unknown", link: "unknown" }; }
+  }
+
+  private async collectAndSendTelemetry() {
+    if (!this.socket || !this.roomId) return;
+    const ni = WebRTCService.networkInfo();
+    for (const [peerId, pc] of this.pcs.entries()) {
+      if (pc.connectionState === "closed") continue;
+      try {
+        const report = await pc.getStats();
+        const m = this.extractMetrics(peerId, report);
+        m.net = ni.net;
+        m.link = ni.link;
+        if (ni.downMbps !== undefined) m.downMbps = ni.downMbps;
+        this.socket.emit("telemetry_data", {
+          roomId: this.roomId,
+          roomName: this.telemetryRoomName || this.roomId,
+          senderId: this.userId,
+          senderName: this.displayName,
+          peerId,
+          ts: Date.now(),
+          metrics: m,
+        });
+      } catch { /* ignore one bad sample */ }
+    }
+  }
+
+  private extractMetrics(peerId: string, report: RTCStatsReport): Record<string, unknown> {
+    const N = WebRTCService.num;
+    let pair: any = null, localCand: any = null, remoteCand: any = null;
+    let inVid: any = null, outVid: any = null;
+    const byId: Record<string, any> = {};
+    report.forEach((s: any) => { byId[s.id] = s; });
+    report.forEach((s: any) => {
+      if (s.type === "candidate-pair" && (s.nominated || s.selected) && s.state === "succeeded") pair = s;
+      else if (s.type === "inbound-rtp" && s.kind === "video") inVid = s;
+      else if (s.type === "outbound-rtp" && s.kind === "video") outVid = s;
+    });
+    if (pair) {
+      localCand = byId[pair.localCandidateId];
+      remoteCand = byId[pair.remoteCandidateId];
+    }
+
+    // Cumulative inbound counters
+    const jbDelay = N(inVid?.jitterBufferDelay) ?? 0;
+    const jbCount = N(inVid?.jitterBufferEmittedCount) ?? 0;
+    const freezeCount = N(inVid?.freezeCount) ?? 0;
+    const freezeDur = N(inVid?.totalFreezesDuration) ?? 0;
+    const framesDecoded = N(inVid?.framesDecoded) ?? 0;
+    const framesDropped = N(inVid?.framesDropped) ?? 0;
+    const packetsLost = N(inVid?.packetsLost) ?? 0;
+
+    // Windowed deltas vs previous sample for this peer
+    const now = Date.now();
+    const prev = this.telemetryPrev.get(peerId);
+    this.telemetryPrev.set(peerId, {
+      ts: now, jbDelay, jbCount, freezeCount, freezeDur,
+      framesDecoded, framesDropped, packetsLost,
+    });
+
+    // Windowed average jitter-buffer delay over the last interval (the real
+    // "current delay" signal — not the lifetime average).
+    let jbWindowMs: number | undefined;
+    if (prev) {
+      const dDelay = jbDelay - prev.jbDelay;
+      const dCount = jbCount - prev.jbCount;
+      jbWindowMs = dCount > 0 ? (dDelay / dCount) * 1000 : 0;
+    }
+    const dFreeze = prev ? Math.max(0, freezeCount - prev.freezeCount) : undefined;
+    const dFreezeDur = prev ? Math.max(0, freezeDur - prev.freezeDur) : undefined;
+    const dDecoded = prev ? Math.max(0, framesDecoded - prev.framesDecoded) : undefined;
+    const dDropped = prev ? Math.max(0, framesDropped - prev.framesDropped) : undefined;
+    const dLost = prev ? Math.max(0, packetsLost - prev.packetsLost) : undefined;
+
+    return {
+      // path
+      rttMs: pair ? (N(pair.currentRoundTripTime) ?? 0) * 1000 : undefined,
+      availIncomingKbps: pair ? (N(pair.availableIncomingBitrate) ?? 0) / 1000 : undefined,
+      iceLocal: localCand?.candidateType,
+      iceRemote: remoteCand?.candidateType,
+      // inbound video = how THIS client sees the remote stream (windowed)
+      jbMs: jbWindowMs,                 // current jitter buffer over last interval
+      dFreeze,                          // new freezes this interval
+      dFreezeDurS: dFreezeDur,          // seconds frozen this interval
+      inFps: N(inVid?.framesPerSecond),
+      dDecoded,                         // frames decoded this interval
+      dDropped,                         // frames dropped this interval
+      dLost,                            // packets lost this interval
+      // outbound
+      outFps: N(outVid?.framesPerSecond),
+      qualityLimitation: outVid?.qualityLimitationReason,
+    };
   }
 
   // Switch camera between front(user) and back(environment) and replace tracks on all peer connections
@@ -698,6 +857,8 @@ export class WebRTCService {
   }
  
   leave() {
+    // Stop telemetry collection
+    this.setTelemetryEnabled(false);
     // Clean up mirroring resources
     this.cleanupMirroring();
 

@@ -89,6 +89,7 @@ fun InCallScreen(
     val remoteHangUp by (webRTCManager?.remoteHangUp ?: MutableStateFlow(false)).collectAsState()
     val remoteQuality by (webRTCManager?.remoteQuality ?: MutableStateFlow(emptyMap())).collectAsState()
     val hiddenRemotes by (webRTCManager?.hiddenRemotes ?: MutableStateFlow(emptySet())).collectAsState()
+    val remoteCamOff by (webRTCManager?.remoteCamOff ?: MutableStateFlow(emptySet())).collectAsState()
     val primaryUserId by (webRTCManager?.primaryUserId ?: MutableStateFlow<String?>(null)).collectAsState()
     val isPrimary = primaryUserId == userId
 
@@ -186,6 +187,7 @@ fun InCallScreen(
             eglBase = webRTCManager?.getEglBase(),
             remoteQuality = remoteQuality,
             hiddenRemotes = hiddenRemotes,
+            remoteCamOff = remoteCamOff,
             primaryUserId = primaryUserId,
             onToggleHide = { peerId -> webRTCManager?.toggleHideRemote(peerId) },
             modifier = Modifier.fillMaxSize(),

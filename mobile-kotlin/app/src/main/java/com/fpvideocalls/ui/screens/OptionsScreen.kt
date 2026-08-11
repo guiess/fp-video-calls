@@ -170,6 +170,24 @@ fun OptionsScreen(
         }
     }
 
+    // Telemetry sub-navigation (kept local so the tab nav graph is untouched)
+    var telemetryEnabled by remember { mutableStateOf(com.fpvideocalls.util.TelemetryPrefs.isEnabled(context)) }
+    var telemetryRoute by remember { mutableStateOf<String?>(null) }  // null=options, "list", or sessionId
+
+    if (telemetryRoute == "list") {
+        TelemetryScreen(
+            onBack = { telemetryRoute = null },
+            onOpenSession = { sid -> telemetryRoute = sid }
+        )
+        return
+    } else if (telemetryRoute != null) {
+        TelemetrySessionScreen(
+            sessionId = telemetryRoute!!,
+            onBack = { telemetryRoute = "list" }
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -472,6 +490,56 @@ fun OptionsScreen(
         }
 
         Spacer(Modifier.weight(1f))
+
+        // Telemetry (diagnostics) section
+        Text(
+            "Telemetry",
+            fontSize = 14.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Collect call diagnostics from participants who enable it. Kept 7 days on this device.",
+            fontSize = 12.sp,
+            color = TextTertiary
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Surface, RoundedCornerShape(12.dp))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Enable telemetry", color = OnBackground, fontSize = 16.sp)
+            Switch(
+                checked = telemetryEnabled,
+                onCheckedChange = { on ->
+                    telemetryEnabled = on
+                    com.fpvideocalls.util.TelemetryPrefs.setEnabled(context, on)
+                },
+                colors = SwitchDefaults.colors(checkedTrackColor = Purple)
+            )
+        }
+        if (telemetryEnabled) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Surface, RoundedCornerShape(12.dp))
+                    .clickable { telemetryRoute = "list" }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Telemetry sessions", color = OnBackground, fontSize = 16.sp)
+                Text("›", color = TextSecondary, fontSize = 20.sp)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
 
         // Sign out
         TextButton(

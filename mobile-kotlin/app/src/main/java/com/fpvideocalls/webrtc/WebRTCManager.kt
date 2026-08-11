@@ -81,9 +81,20 @@ class WebRTCManager(
     private val _hiddenRemotes = MutableStateFlow<Set<String>>(emptySet())
     val hiddenRemotes: StateFlow<Set<String>> = _hiddenRemotes.asStateFlow()
 
+    /** Peers that have turned their camera off — show a placeholder, skip rendering. */
+    private val _remoteCamOff = MutableStateFlow<Set<String>>(emptySet())
+    val remoteCamOff: StateFlow<Set<String>> = _remoteCamOff.asStateFlow()
+
     /** The user currently designated as the call's primary speaker (or null). */
     private val _primaryUserId = MutableStateFlow<String?>(null)
     val primaryUserId: StateFlow<String?> = _primaryUserId.asStateFlow()
+
+    // Telemetry capture
+    private var telemetryEnabled = false
+    private var telemetrySessionId: String? = null
+    private var telemetryRoomId: String = ""
+    private var telemetryRoomName: String = ""
+    private var localName: String = ""
 
     // Exposed state
     private val _localVideoTrackFlow = MutableStateFlow<VideoTrack?>(null)
@@ -120,7 +131,11 @@ class WebRTCManager(
 
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
         localUserId = userId
-        Log.d(TAG, "setup() called: room=$roomId user=$userId")
+        localName = displayName
+        telemetryRoomId = roomId
+        telemetryRoomName = roomId
+        telemetryEnabled = com.fpvideocalls.util.TelemetryPrefs.isEnabled(context)
+        Log.d(TAG, "setup() called: room=$roomId user=$userId telemetry=$telemetryEnabled")
         scope.launch(Dispatchers.Main) {
             try {
                 initWebRTC()
@@ -175,6 +190,9 @@ class WebRTCManager(
                             .filter { it.userId != joinedId } +
                             Participant(joinedId, joinedName, micMutedState)
                         updateCaptureMode()
+                        // Announce our current camera state so the new peer can
+                        // render a placeholder if our camera is already off.
+                        if (!_camEnabled.value) signaling.sendCameraState(true)
                         // Always create peer connection; only send offer if we are
                         // the canonical offerer (lower userId), matching web client.
                         createPeerConnection(joinedId)
@@ -191,6 +209,7 @@ class WebRTCManager(
                         _participants.value = _participants.value.filter { it.userId != leftId }
                         _remoteVideoTracks.update { it - leftId }
                         _hiddenRemotes.update { it - leftId }
+                        _remoteCamOff.update { it - leftId }
                         _remoteQuality.update { it - leftId }
                         prevBytesSent.remove(leftId)
                         prevStatsAt.remove(leftId)
@@ -235,6 +254,13 @@ class WebRTCManager(
                         for ((peerId, pc) in peerConnections) {
                             applyVideoSendParams(pc, peerId)
                         }
+                    },
+                    onTelemetryData = { payload ->
+                        handleRemoteTelemetry(payload)
+                    },
+                    onPeerCameraState = { peerId, off ->
+                        Log.d(TAG, "peer_camera_state: $peerId off=$off")
+                        _remoteCamOff.update { if (off) it + peerId else it - peerId }
                     }
                 ))
 
@@ -247,6 +273,13 @@ class WebRTCManager(
                 ))
 
                 startStatsPoller()
+
+                if (telemetryEnabled) {
+                    telemetrySessionId = com.fpvideocalls.util.TelemetryStore
+                        .startSession(context, telemetryRoomId, telemetryRoomName)
+                    signaling.sendTelemetrySubscribe(true)
+                    Log.d(TAG, "Telemetry session started: $telemetrySessionId")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Setup failed", e)
             }
@@ -536,6 +569,7 @@ class WebRTCManager(
             try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         }
         _camEnabled.value = newEnabled
+        signalingService?.sendCameraState(!newEnabled)
     }
 
     fun switchCamera() {
@@ -571,7 +605,14 @@ class WebRTCManager(
         prevNackPliFir.clear()
         _remoteQuality.value = emptyMap()
         _hiddenRemotes.value = emptySet()
+        _remoteCamOff.value = emptySet()
         _primaryUserId.value = null
+
+        // 1c. Close telemetry session (session stays persisted for later review)
+        if (telemetryEnabled) {
+            try { signalingService?.sendTelemetrySubscribe(false) } catch (_: Exception) {}
+        }
+        telemetrySessionId = null
 
         // 2. Clear state flows FIRST on Main so Compose stops rendering and releases SurfaceViewRenderers
         _localVideoTrackFlow.value = null
@@ -768,21 +809,87 @@ class WebRTCManager(
         val quality = classifyQuality(qLimit, rttMs, dPli + dFir, fps)
         _remoteQuality.update { it + (peerId to quality) }
 
-        if (verbose) {
-            Log.i(
-                TAG,
-                "[stats $peerId] " +
-                    "q=$quality " +
-                    "send=${"%.0f".format(sendKbps)}kbps " +
-                    "fps=${fps?.let { "%.0f".format(it) } ?: "-"} " +
-                    "res=${w ?: "-"}x${h ?: "-"} " +
-                    "qLimit=${qLimit ?: "-"} " +
-                    "availOut=${availOutKbps?.let { "%.0fkbps".format(it) } ?: "-"} " +
-                    "rtt=${rttMs?.let { "%.0fms".format(it) } ?: "-"} " +
-                    "loss(\u0394nack/pli/fir)=$dNack/$dPli/$dFir " +
-                    "ice=$localType->$remoteType"
+        val info = "q=$quality " +
+            "net=${networkType()} " +
+            "send=${"%.0f".format(sendKbps)}kbps " +
+            "fps=${fps?.let { "%.0f".format(it) } ?: "-"} " +
+            "res=${w ?: "-"}x${h ?: "-"} " +
+            "qLimit=${qLimit ?: "-"} " +
+            "availOut=${availOutKbps?.let { "%.0fkbps".format(it) } ?: "-"} " +
+            "rtt=${rttMs?.let { "%.0fms".format(it) } ?: "-"} " +
+            "loss(\u0394nack/pli/fir)=$dNack/$dPli/$dFir " +
+            "ice=$localType->$remoteType"
+
+        // Record local-side telemetry (this is OUR view of the link to peerId).
+        val sid = telemetrySessionId
+        if (telemetryEnabled && sid != null) {
+            val peerName = _participants.value.firstOrNull { it.userId == peerId }?.displayName ?: peerId
+            com.fpvideocalls.util.TelemetryStore.addEntry(
+                context, sid, telemetryRoomId, telemetryRoomName,
+                now, "local→$peerId", "me→$peerName", info
             )
         }
+
+        if (verbose) {
+            Log.i(TAG, "[stats $peerId] $info")
+        }
+    }
+
+    /** Stores a remote peer's self-reported telemetry sample into the open session. */
+    private fun handleRemoteTelemetry(payload: JSONObject) {
+        if (!telemetryEnabled) return
+        try {
+            val senderId = payload.optString("senderId", "?")
+            val senderName = payload.optString("senderName", senderId)
+            val peerId = payload.optString("peerId", "")
+            val ts = payload.optLong("ts", System.currentTimeMillis())
+            val m = payload.optJSONObject("metrics")
+            val info = if (m != null) formatRemoteMetrics(m, peerId) else payload.toString()
+            com.fpvideocalls.util.TelemetryStore.addEntry(
+                context, telemetrySessionId, telemetryRoomId, telemetryRoomName,
+                ts, "remote:$senderId", senderName, info
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "handleRemoteTelemetry failed", e)
+        }
+    }
+
+    /** Best-effort current network transport (wifi/cellular/ethernet/none). */
+    private fun networkType(): String {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as android.net.ConnectivityManager
+            val nw = cm.activeNetwork ?: return "none"
+            val caps = cm.getNetworkCapabilities(nw) ?: return "none"
+            when {
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                else -> "other"
+            }
+        } catch (_: Exception) { "?" }
+    }
+
+    private fun formatRemoteMetrics(m: JSONObject, peerId: String): String {
+        fun d(k: String, suffix: String = "", fmt: String = "%.0f"): String {
+            if (m.isNull(k) || !m.has(k)) return "-"
+            val v = m.opt(k)
+            return if (v is Number) fmt.format(v.toDouble()) + suffix else v.toString()
+        }
+        val toPeer = if (peerId.isNotEmpty()) "←$peerId " else ""
+        return toPeer +
+            "net=${m.optString("net", "?")} " +
+            "link=${m.optString("link", "?")} " +     // effectiveType quality bucket, NOT transport
+            "down=${d("downMbps", "Mbps", "%.1f")} " +
+            "rtt=${d("rttMs", "ms")} " +
+            "ice=${m.optString("iceLocal", "?")}->${m.optString("iceRemote", "?")} " +
+            "jb=${d("jbMs", "ms")} " +              // windowed jitter buffer (current)
+            "freeze=${d("dFreeze")}/${d("dFreezeDurS", "s", "%.1f")} " +  // this interval
+            "inFps=${d("inFps")} " +
+            "dec=${d("dDecoded")} drop=${d("dDropped")} " +  // this interval
+            "lost=${d("dLost")} " +
+            "availIn=${d("availIncomingKbps", "kbps")} " +
+            "qLimit=${m.optString("qualityLimitation", "-")}"
     }
 
     private fun classifyQuality(

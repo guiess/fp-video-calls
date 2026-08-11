@@ -37,6 +37,7 @@ fun VideoGrid(
     eglBase: EglBase?,
     remoteQuality: Map<String, QualityLevel> = emptyMap(),
     hiddenRemotes: Set<String> = emptySet(),
+    remoteCamOff: Set<String> = emptySet(),
     primaryUserId: String? = null,
     onToggleHide: (String) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -57,12 +58,17 @@ fun VideoGrid(
     val remoteTile: @Composable (Participant, Modifier) -> Unit = { p, mod ->
         val track = remoteVideoTracks[p.userId]
         val hidden = p.userId in hiddenRemotes
+        val camOff = p.userId in remoteCamOff
         val isPrimary = primaryUserId == p.userId
         Box(mod.clickable { if (!hidden) pinnedId = p.userId }) {
-            if (track != null && !hidden) {
+            if (track != null && !hidden && !camOff) {
                 WebRTCVideoView(track, eglBase, Modifier.fillMaxSize())
             } else {
-                Box(Modifier.fillMaxSize().background(SurfaceVariant))
+                Box(Modifier.fillMaxSize().background(SurfaceVariant), contentAlignment = Alignment.Center) {
+                    if (camOff && !hidden) {
+                        Icon(Icons.Default.VideocamOff, stringResource(R.string.cd_camera_off), tint = Color.Gray, modifier = Modifier.size(32.dp))
+                    }
+                }
             }
 
             // Top-left: hide/show toggle

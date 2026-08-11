@@ -33,9 +33,21 @@ mobile-kotlin/app/google-services.json
 .claude/
 
 # Logs / archives
-server-logs.zip
-server-logs-extracted/
-server-deploy.zip
+server-logs*.zip
+server-logs*/
+server-deploy*.zip
+server-debug-deploy.zip
+server/deploy.zip
+
+# Rust remote-control build output
+remote-control/target/
+
+# Local dev scratch
+nul
+start-dev.bat
+test-upload.json
+/package.json
+/package-lock.json
 
 # OS
 Thumbs.db
