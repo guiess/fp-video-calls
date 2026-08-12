@@ -21,6 +21,7 @@ import {
   isTelemetryRateLimited,
   validateTelemetrySample
 } from "./telemetry-validation.js";
+import { parseTurnRequestQuery, resolveTurnTtlSeconds } from "./turn-config.js";
 
 function logProcessFailure(kind, failure) {
   const details = failure instanceof Error ? (failure.stack || failure.message) : String(failure);
@@ -184,10 +185,11 @@ app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 app.get("/cors-check", (_req, res) => res.json({ ok: true, origin: _req.headers.origin ?? null }));
 
 // TURN (coturn REST auth) ephemeral credentials
-const TURN_TTL_SECONDS = parseInt(process.env.TURN_TTL_SECONDS || "300", 10);
+const TURN_TTL_SECONDS = resolveTurnTtlSeconds(process.env.TURN_TTL_SECONDS);
 const TURN_SECRET = (process.env.TURN_HMAC_SECRET || "").trim();
 const TURN_REALM = (process.env.TURN_REALM || process.env.TURN_DOMAIN || "").trim();
 const TURN_URLS = (process.env.TURN_URLS || "").split(",").map(s => s.trim()).filter(Boolean);
+console.info(`[turn] effective credential TTL: ${TURN_TTL_SECONDS}s`);
 
 function issueTurnCredentials(userId, roomId, realm, urls) {
   const ts = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
@@ -200,9 +202,13 @@ function issueTurnCredentials(userId, roomId, realm, urls) {
 
 // GET /api/turn?userId=...&roomId=...
 app.get("/api/turn", (req, res) => {
+  res.set("Cache-Control", "no-store");
   try {
-    const userId = String(req.query.userId || "").trim();
-    const roomId = String(req.query.roomId || "").trim();
+    const turnRequest = parseTurnRequestQuery(req.query);
+    if (!turnRequest) {
+      return res.status(400).json({ ok: false, error: "BAD_REQUEST", hint: "valid userId required" });
+    }
+    const { userId, roomId } = turnRequest;
     if (!TURN_SECRET || TURN_SECRET.length < 8) {
       return res.status(500).json({ ok: false, error: "TURN_SECRET_NOT_CONFIGURED" });
     }
@@ -215,7 +221,6 @@ app.get("/api/turn", (req, res) => {
       `turn:turn.${TURN_REALM}:3478?transport=udp`,
       `turn:turn.${TURN_REALM}:3478?transport=tcp`
     ];
-    if (!userId) return res.status(400).json({ ok: false, error: "BAD_REQUEST", hint: "userId required" });
     // Optional: room existence check for basic scoping
     const room = rooms.get(roomId);
     if (roomId && !room) {

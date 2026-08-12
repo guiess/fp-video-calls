@@ -4,6 +4,7 @@ import {
   DEFAULT_TURN_TTL_SECONDS,
   MAX_TURN_TTL_SECONDS,
   MIN_TURN_TTL_SECONDS,
+  parseTurnRequestQuery,
   resolveTurnTtlSeconds
 } from "./turn-config.js";
 
@@ -26,5 +27,26 @@ test("TURN TTL clamps configured values to the accepted range", () => {
 test("TURN TTL parser accepts only canonical integer strings", () => {
   for (const value of ["0300", "+300", "300seconds", "0x12c", "Infinity", "NaN"]) {
     assert.equal(resolveTurnTtlSeconds(value), DEFAULT_TURN_TTL_SECONDS);
+  }
+});
+
+test("TURN request query validation rejects malformed and oversized identifiers", () => {
+  assert.deepEqual(parseTurnRequestQuery({ userId: "user-a", roomId: "room-a" }), {
+    userId: "user-a",
+    roomId: "room-a"
+  });
+  assert.deepEqual(parseTurnRequestQuery({ userId: "user-a" }), {
+    userId: "user-a",
+    roomId: ""
+  });
+  for (const query of [
+    {},
+    { userId: ["user-a"] },
+    { userId: "bad\u0000user" },
+    { userId: "x".repeat(257) },
+    { userId: "user-a", roomId: ["room-a"] },
+    { userId: "user-a", roomId: "x".repeat(257) }
+  ]) {
+    assert.equal(parseTurnRequestQuery(query), null);
   }
 });
