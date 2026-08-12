@@ -61,6 +61,10 @@ class WebRTCManager(
             PeerRecoveryStatus.REPLACING,
             PeerRecoveryStatus.COOLDOWN
         )
+        private val SERIALIZED_RECOVERY_STATES = setOf(
+            PeerRecoveryStatus.RESTARTING,
+            PeerRecoveryStatus.REPLACING
+        )
     }
 
     private var factory: PeerConnectionFactory? = null
@@ -85,6 +89,11 @@ class WebRTCManager(
             credentialInstaller = TurnCredentialInstaller(::installTurnCredentials)
         )
     )
+    /**
+     * Recovery is always enabled in this client build. The project has no
+     * remote Android recovery flag, so releases must use the staged pilot
+     * rollout required by the parent media-path recovery specification.
+     */
     private val iceRecoveryCoordinator = IceRecoveryCoordinator(
         runtime = IceRecoveryRuntime(
             scope = scope,
@@ -93,11 +102,18 @@ class WebRTCManager(
         ports = IceRecoveryPorts(
             iceServerPreparer = RecoveryIceServerPreparer(::prepareRecoveryIceServers),
             restartOfferSender = IceRestartOfferSender(::sendIceRestartOffer),
-            peerConnectionReplacer = PeerConnectionReplacer(::replacePeerConnection)
+            peerConnectionReplacer = PeerConnectionReplacer(::replacePeerConnection),
+            eventRecorder = RecoveryEventRecorder(::recordRecoveryEvent),
+            completionNotifier = RecoveryCompletionNotifier {
+                replayPendingPeerActions()
+            }
         )
     )
     /** TURN credential readiness, independent from signaling connectivity. */
     val turnReadiness: StateFlow<TurnReadiness> = turnLeaseManager.readiness
+    /** Per-peer bounded recovery status for disconnected-state presentation. */
+    val recoveryStates: StateFlow<Map<String, PeerRecoveryStatus>> =
+        iceRecoveryCoordinator.statuses
     private val pendingPeerActions =
         java.util.concurrent.ConcurrentHashMap<String, PendingPeerAction>()
     private val pendingIceCandidates =
@@ -569,6 +585,8 @@ class WebRTCManager(
     }
 
     private fun isPeerRecoveryBlocking(targetId: String): Boolean {
+        val recoveryStatus = iceRecoveryCoordinator.status(targetId)
+        if (recoveryStatus in SERIALIZED_RECOVERY_STATES) return true
         val peerConnection = peerConnections[targetId]
             ?: return iceRecoveryCoordinator.status(targetId) in ACTIVE_RECOVERY_STATES
         return cachedPeerDisposition(
@@ -762,7 +780,7 @@ class WebRTCManager(
         }
         val offer = createLocalOffer(peerConnection, isIceRestart = true) ?: return false
         if (!isRecoveryContextCurrent(context)) return false
-        installLocalOffer(peerConnection, offer, context.peerId)
+        if (!installLocalOffer(peerConnection, offer, context.peerId)) return false
         if (!isRecoveryContextCurrent(context)) return false
         return signalOffer(context.peerId, offer)
     }
@@ -813,7 +831,7 @@ class WebRTCManager(
         }
         val pc = (result as PeerConnectionResult.Ready).peerConnection
         val offer = createLocalOffer(pc, isIceRestart = false) ?: return
-        installLocalOffer(pc, offer, targetId)
+        if (!installLocalOffer(pc, offer, targetId)) return
         signalOffer(targetId, offer, signaling)
     }
 
@@ -823,18 +841,19 @@ class WebRTCManager(
     ): SessionDescription? {
         val observer = SdpObserverAdapter()
         peerConnection.createOffer(observer, offerConstraints(isIceRestart))
-        return observer.await()
+        return observer.awaitCreated()
     }
 
     private suspend fun installLocalOffer(
         peerConnection: PeerConnection,
         offer: SessionDescription,
         targetId: String
-    ) {
+    ): Boolean {
         val observer = SdpObserverAdapter()
         peerConnection.setLocalDescription(observer, offer)
-        observer.await()
+        if (!observer.awaitSet()) return false
         applyVideoSendParams(peerConnection, targetId)
+        return true
     }
 
     private fun offerConstraints(isIceRestart: Boolean) = MediaConstraints().apply {
@@ -889,7 +908,7 @@ class WebRTCManager(
                 Log.d(TAG, "Glare with $fromId — we are polite, rolling back our offer")
                 val rollback = SdpObserverAdapter()
                 pc.setLocalDescription(rollback, SessionDescription(SessionDescription.Type.ROLLBACK, ""))
-                rollback.await()
+                if (!rollback.awaitSet()) return
             } else {
                 Log.d(TAG, "Glare with $fromId — we are impolite, ignoring their offer")
                 return
@@ -898,17 +917,17 @@ class WebRTCManager(
 
         val setRemote = SdpObserverAdapter()
         pc.setRemoteDescription(setRemote, sdp)
-        setRemote.await()
+        if (!setRemote.awaitSet()) return
         remoteDescriptionReadyPeers.add(fromId)
         flushPendingIceCandidates(fromId, pc)
 
         val answerObserver = SdpObserverAdapter()
         pc.createAnswer(answerObserver, MediaConstraints())
-        val answer = answerObserver.await() ?: return
+        val answer = answerObserver.awaitCreated() ?: return
 
         val setLocal = SdpObserverAdapter()
         pc.setLocalDescription(setLocal, answer)
-        setLocal.await()
+        if (!setLocal.awaitSet()) return
         applyVideoSendParams(pc, fromId)
 
         val answerJson = JSONObject().apply {
@@ -937,7 +956,7 @@ class WebRTCManager(
 
         val observer = SdpObserverAdapter()
         pc.setRemoteDescription(observer, sdp)
-        observer.await()
+        if (!observer.awaitSet()) return
         remoteDescriptionReadyPeers.add(fromId)
         flushPendingIceCandidates(fromId, pc)
     }
@@ -1343,6 +1362,30 @@ class WebRTCManager(
         }
     }
 
+    /** Persists one identity-free recovery transition when diagnostics are opted in. */
+    private fun recordRecoveryEvent(
+        peerContext: PeerRecoveryContext,
+        event: RecoveryEvent
+    ) {
+        if (!telemetryEnabled) return
+        if (!peerCallFence.isCurrent(peerContext.callGeneration)) return
+        val sessionId = telemetrySessionId ?: return
+        val now = System.currentTimeMillis()
+        val info = RecoveryTelemetryPolicy.format(event, networkType())
+        launchTelemetryWrite {
+            com.fpvideocalls.util.TelemetryStore.addEntry(
+                context,
+                sessionId,
+                telemetryRoomId,
+                telemetryRoomName,
+                now,
+                "recovery",
+                "recovery",
+                info
+            )
+        }
+    }
+
     /** Stores a remote peer's self-reported telemetry sample into the open session. */
     private fun handleRemoteTelemetry(payload: JSONObject) {
         if (!telemetryEnabled) return
@@ -1459,38 +1502,56 @@ class WebRTCManager(
     }
 }
 
-/** Adapter that turns PeerConnection's callback-based SDP API into a suspending call. */
+/**
+ * Cancellable adapter for PeerConnection's callback-based SDP API.
+ *
+ * Recovery's outer absolute deadline cancels these awaits, so the fallback
+ * timeout cannot accumulate on top of the 15-second recovery RTO.
+ */
 private class SdpObserverAdapter : SdpObserver {
-    private val result = java.util.concurrent.CompletableFuture<SessionDescription?>()
+    private val result = kotlinx.coroutines.CompletableDeferred<SdpOperationResult>()
 
-    suspend fun await(): SessionDescription? {
-        return try {
-            kotlinx.coroutines.withTimeout(10_000) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    result.get()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("SdpObserver", "SDP operation failed", e)
-            null
+    suspend fun awaitCreated(): SessionDescription? =
+        when (val operation = awaitResult()) {
+            is SdpOperationResult.Created -> operation.description
+            SdpOperationResult.Failed,
+            SdpOperationResult.Set -> null
         }
-    }
+
+    suspend fun awaitSet(): Boolean =
+        awaitResult() == SdpOperationResult.Set
+
+    private suspend fun awaitResult(): SdpOperationResult =
+        kotlinx.coroutines.withTimeoutOrNull(SDP_CALLBACK_TIMEOUT_MILLIS) {
+            result.await()
+        } ?: SdpOperationResult.Failed
 
     override fun onCreateSuccess(sdp: SessionDescription?) {
-        result.complete(sdp)
+        val operation = sdp?.let(SdpOperationResult::Created) ?: SdpOperationResult.Failed
+        result.complete(operation)
     }
 
     override fun onSetSuccess() {
-        result.complete(null)
+        result.complete(SdpOperationResult.Set)
     }
 
     override fun onCreateFailure(error: String?) {
-        Log.e("SdpObserver", "Create failed: $error")
-        result.complete(null)
+        Log.e("SdpObserver", "SDP creation failed")
+        result.complete(SdpOperationResult.Failed)
     }
 
     override fun onSetFailure(error: String?) {
-        Log.e("SdpObserver", "Set failed: $error")
-        result.complete(null)
+        Log.e("SdpObserver", "SDP application failed")
+        result.complete(SdpOperationResult.Failed)
+    }
+
+    private sealed interface SdpOperationResult {
+        data class Created(val description: SessionDescription) : SdpOperationResult
+        data object Set : SdpOperationResult
+        data object Failed : SdpOperationResult
+    }
+
+    private companion object {
+        const val SDP_CALLBACK_TIMEOUT_MILLIS = 10_000L
     }
 }
