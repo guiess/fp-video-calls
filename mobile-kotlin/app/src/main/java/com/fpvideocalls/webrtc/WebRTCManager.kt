@@ -55,6 +55,12 @@ class WebRTCManager(
         private const val MULTI_CAPTURE_FPS = 24
         private const val PEER_CREATION_TURN_WAIT_MILLIS = 10_000L
         private const val MAX_PENDING_ICE_CANDIDATES_PER_PEER = 64
+        private val ACTIVE_RECOVERY_STATES = setOf(
+            PeerRecoveryStatus.DISCONNECT_GRACE,
+            PeerRecoveryStatus.RESTARTING,
+            PeerRecoveryStatus.REPLACING,
+            PeerRecoveryStatus.COOLDOWN
+        )
     }
 
     private var factory: PeerConnectionFactory? = null
@@ -556,7 +562,19 @@ class WebRTCManager(
         pendingPeerActions.merge(targetId, action, ::preferPendingAction)
         Log.w(TAG, "[turn] peer action deferred until credentials are ready")
         val canReplay = action is PendingPeerAction.Create || signalingService != null
-        if (canReplay && turnLeaseManager.hasValidCredentials()) replayPendingPeerActions()
+        val isRecoveryBlocking = isPeerRecoveryBlocking(targetId)
+        if (canReplay && turnLeaseManager.hasValidCredentials() && !isRecoveryBlocking) {
+            replayPendingPeerActions()
+        }
+    }
+
+    private fun isPeerRecoveryBlocking(targetId: String): Boolean {
+        val peerConnection = peerConnections[targetId]
+            ?: return iceRecoveryCoordinator.status(targetId) in ACTIVE_RECOVERY_STATES
+        return cachedPeerDisposition(
+            targetId,
+            peerConnection
+        ) == CachedPeerDisposition.WAIT_FOR_RECOVERY
     }
 
     private fun preferPendingAction(
@@ -657,7 +675,7 @@ class WebRTCManager(
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 Log.i(TAG, "[ice $targetId] iceConnection=$state")
                 state?.let {
-                    iceRecoveryCoordinator.observe(recoveryContext, it.toRecoveryState())
+                    observeRecoveryState(recoveryContext, it.toRecoveryState())
                 }
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {
@@ -669,7 +687,7 @@ class WebRTCManager(
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
                 Log.i(TAG, "[ice $targetId] connection=$newState")
                 newState?.let {
-                    iceRecoveryCoordinator.observe(recoveryContext, it.toRecoveryState())
+                    observeRecoveryState(recoveryContext, it.toRecoveryState())
                 }
             }
 
@@ -778,6 +796,14 @@ class WebRTCManager(
     private fun isRecoveryContextCurrent(context: PeerRecoveryContext): Boolean =
         peerCallFence.isCurrent(context.callGeneration) &&
             iceRecoveryCoordinator.isCurrent(context)
+
+    private fun observeRecoveryState(
+        context: PeerRecoveryContext,
+        state: RecoveryTransportState
+    ) {
+        iceRecoveryCoordinator.observe(context, state)
+        if (state == RecoveryTransportState.CONNECTED) replayPendingPeerActions()
+    }
 
     private suspend fun createAndSendOffer(targetId: String, signaling: SignalingService) {
         val result = getOrCreatePeerConnection(targetId)
