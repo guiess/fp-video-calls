@@ -9,7 +9,7 @@
     "dev": "NODE_ENV=development node index.js",
     "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
     "test:telemetry": "node --test telemetry-validation.test.js",
-    "test:turn": "node --test turn-config.test.js",
+    "test:turn": "node --test turn-config.test.js turn-config.qa.test.js",
     "test:watch": "node --experimental-vm-modules node_modules/.bin/vitest"
   },
   "dependencies": {

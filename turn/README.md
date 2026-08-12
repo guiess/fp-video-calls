@@ -498,7 +498,7 @@ TURN_URLS=turns:myturn-vm.eastus.cloudapp.azure.com:5349?transport=udp,turns:myt
 TURN_URLS=turns:turn.example.com:5349?transport=udp,turns:turn.example.com:5349?transport=tcp,turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
 
 # Credential TTL in seconds
-TURN_TTL_SECONDS=300
+TURN_TTL_SECONDS=3600
 ```
 
 **How to set based on your deployment:**
@@ -526,11 +526,16 @@ cat > .env << EOF
 TURN_HMAC_SECRET=your_secret_here
 TURN_REALM=myturn-vm.eastus.cloudapp.azure.com
 TURN_URLS=turns:myturn-vm.eastus.cloudapp.azure.com:5349?transport=udp,turns:myturn-vm.eastus.cloudapp.azure.com:5349?transport=tcp,turn:myturn-vm.eastus.cloudapp.azure.com:3478?transport=udp,turn:myturn-vm.eastus.cloudapp.azure.com:3478?transport=tcp
-TURN_TTL_SECONDS=300
+TURN_TTL_SECONDS=3600
 EOF
 ```
 
 **Redeploy/restart** the signaling server to pick up new env vars.
+
+**Verify the deployed value:** check the startup log for
+`[turn] effective credential TTL: 3600s`, then confirm a controlled
+`GET /api/turn` response contains `"ttl":3600`. Never copy the returned
+credential into deployment logs or tickets.
 
 **Test endpoint** (after server restart):
 ```bash
@@ -538,7 +543,7 @@ EOF
 curl "https://<signaling-host>/api/turn?userId=test&roomId=test-room"
 
 # Expected response:
-# {"username":"test:1734022800","credential":"xyz...","ttl":300,"urls":["turns:..."],"realm":"myturn-vm.eastus.cloudapp.azure.com",...}
+# {"username":"test:1734022800","credential":"xyz...","ttl":3600,"urls":["turns:..."],"realm":"myturn-vm.eastus.cloudapp.azure.com",...}
 ```
 
 Code references:
@@ -627,9 +632,9 @@ journalctl -u coturn -n 200 --no-pager
 - [ ] Certbot renewal hook created (/etc/letsencrypt/renewal-hooks/deploy/coturn-copy.sh)
 - [ ] Port 5349 listening verified: `sudo ss -lntp | grep ':5349'`
 - [ ] TLS validated: `openssl s_client -connect <fqdn>:5349` shows "Verify return code: 0"
-- [ ] Signaling server env vars set (TURN_HMAC_SECRET, TURN_REALM, TURN_URLS, TURN_TTL_SECONDS)
+- [ ] Signaling server env vars set, including `TURN_TTL_SECONDS=3600`
 - [ ] Signaling server redeployed with new env vars
-- [ ] /api/turn endpoint tested and returns valid credentials
+- [ ] Startup log reports effective TURN TTL 3600s and `/api/turn` returns `ttl: 3600`
 - [ ] Client tested in browser: typ=relay candidates visible in webrtc-internals
 - [ ] Cross-NAT test successful (Wi-Fi ↔ mobile)
 - [ ] Coturn logs show successful allocations
