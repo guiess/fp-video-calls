@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { WebRTCService } from "./services/webrtc";
 import { FiMic, FiMicOff, FiVideo, FiVideoOff, FiMaximize, FiMinimize } from "react-icons/fi";
 import VideoGrid from "./components/VideoGrid";
+import {
+  clearRemoteStream,
+  replaceRemoteTrack,
+  resetRemoteStream,
+} from "./services/remoteMedia";
 
 function safeRandomId() {
   const c: any = (typeof window !== "undefined" && (window as any).crypto) || undefined;
@@ -42,6 +47,7 @@ export default function App() {
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
   // Track remote peers' audio mute state (best-effort based on track events)
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
+  const [terminalPeers, setTerminalPeers] = useState<Set<string>>(new Set());
   // Camera facing mode toggle (user = front, environment = back)
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   // Screen sharing state
@@ -67,100 +73,58 @@ export default function App() {
   const localContainerRef = useRef<HTMLDivElement | null>(null);
   const remoteTileRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string | null) {
-    pc.ontrack = (e) => {
-      console.log("[ontrack]", {
-        targetId,
-        kind: e.track.kind,
-        streamsCount: e.streams.length,
-        videoTracksInStreams: e.streams.map((s) => s.getVideoTracks().length),
-        audioTracksInStreams: e.streams.map((s) => s.getAudioTracks().length)
-      });
-      const hasVideoInStreams = e.streams.find((s) => s.getVideoTracks().length > 0);
-      const stream = hasVideoInStreams || (e.track.kind === "video" ? new MediaStream([e.track]) : e.streams[0]);
-      if (stream && targetId) {
-        setRemoteStreams((prev) => {
-          const next = { ...prev };
-          next[targetId] = stream as MediaStream;
+  function ensurePeerConnection(svc: WebRTCService, targetId: string) {
+    return svc.ensurePeerConnection(targetId, {
+      onRecoveryStateChange: (state) => {
+        setTerminalPeers((prev) => {
+          if (state === "terminal" && prev.has(targetId)) return prev;
+          if (state !== "terminal" && !prev.has(targetId)) return prev;
+          const next = new Set(prev);
+          if (state === "terminal") next.add(targetId); else next.delete(targetId);
           return next;
         });
-        // Attach audio mute listeners to reflect remote mute state
-        const audioTrack = (stream as MediaStream).getAudioTracks()[0] || (e.track.kind === "audio" ? e.track : null);
-        if (audioTrack) {
-          // Initialize based on current muted value
-          setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !!(audioTrack as any).muted || audioTrack.enabled === false }));
-          audioTrack.onmute = () => {
-            setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
+      },
+      onPeerReplaced: () => {
+        setRemoteStreams((prev) => {
+          return {
+            ...prev,
+            [targetId]: resetRemoteStream(prev[targetId]),
           };
-          audioTrack.onunmute = () => {
-            setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
-          };
-          audioTrack.onended = () => {
-            setRemoteAudioMuted((prev) => {
-              const next = { ...prev };
-              delete next[targetId];
-              return next;
-            });
-          };
+        });
+        setRemoteAudioMuted((prev) => {
+          const next = { ...prev };
+          delete next[targetId];
+          return next;
+        });
+      },
+      onTrack: (event) => {
+        setRemoteStreams((prev) => {
+          const stream = prev[targetId] ?? new MediaStream();
+          replaceRemoteTrack(stream, event.track);
+          return { ...prev, [targetId]: stream };
+        });
+        if (event.track.kind === "audio") {
+          const track = event.track;
+          setRemoteAudioMuted((prev) => ({
+            ...prev,
+            [targetId]: track.muted || !track.enabled,
+          }));
+          track.onmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
+          track.onunmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
+          track.onended = () => setRemoteAudioMuted((prev) => {
+            const next = { ...prev };
+            delete next[targetId];
+            return next;
+          });
         }
-      } else {
-        console.warn("[ontrack] no remote stream or targetId missing");
-      }
-    };
-    pc.onicecandidate = (e) => {
-      const target = targetId ?? peerIdRef.current;
-      if (e.candidate && target) {
-        console.log("[ice] send candidate ->", target, e.candidate.type, e.candidate.protocol);
-        svc.sendIceCandidate(target, e.candidate.toJSON());
-      }
-    };
-    pc.oniceconnectionstatechange = () => {
-      const st = pc.iceConnectionState;
-      console.log("[iceConnectionState]", st);
-      if (st === "failed") {
-        try {
-          console.log("[ice] restartIce()");
-          pc.restartIce();
-        } catch (err) {
-          console.warn("[ice] restartIce failed", err);
-        }
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      const st = pc.connectionState;
-      console.log("[connectionState]", st);
-      if (st === "connected") {
+      },
+      onConnected: () => {
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls && localVideoRef.current.srcObject !== ls) {
           localVideoRef.current.srcObject = ls;
-          console.log("[local] preview bound", { streamId: ls.id, tracks: ls.getTracks().map((t) => t.id) });
         }
-      }
-    };
-    // Ensure the late joiner kicks off negotiation once local tracks/transceivers exist
-    pc.onnegotiationneeded = async () => {
-      try {
-        const target = peerIdRef.current;
-        console.log("[negotiationneeded]", { target, signalingState: pc.signalingState });
-        // Only send if stable; late-joiner path sets target
-        if (!target) return;
-        if (pc.signalingState !== "stable") return;
-        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-        await pc.setLocalDescription(offer);
-        svc.sendOffer(target, offer);
-        console.log("[offer] onnegotiationneeded -> sent");
-      } catch (err) {
-        console.warn("[negotiationneeded] failed", err);
-      }
-    };
-    // ICE restart on failures (helps recover connectivity when switching tracks or networks)
-    pc.oniceconnectionstatechange = () => {
-      const st = pc.iceConnectionState;
-      console.log("[iceConnectionState]", st);
-      if (st === "failed" || st === "disconnected") {
-        try { pc.restartIce(); } catch (err) { console.warn("[ice] restartIce failed", err); }
-      }
-    };
+      },
+    });
   }
 
   useEffect(() => {
@@ -185,8 +149,7 @@ export default function App() {
         const others = existing.filter((p) => p.userId !== svc.getUserId());
         // Create per-peer PCs for all existing participants
         others.forEach(({ userId: uid }) => {
-          const pc = svc.createPeerConnection(uid);
-          wirePeerHandlers(pc, svc, uid);
+          ensurePeerConnection(svc, uid);
         });
         // Newcomer initiates offers to all existing peers
         if (others.length > 0) {
@@ -216,8 +179,7 @@ export default function App() {
         });
         // Prepare a PC for the newcomer so we can answer their offer
         const svc = svcRef.current!;
-        const pc = svc.createPeerConnection(uid);
-        wirePeerHandlers(pc, svc, uid);
+        ensurePeerConnection(svc, uid);
       },
       onPeerMicState: (uid, muted) => {
         setParticipants((prev) => prev.map(p => p.userId === uid ? { ...p, micMuted: !!muted } : p));
@@ -230,20 +192,18 @@ export default function App() {
           peerIdRef.current = null;
         }
 
-        // Close and remove the peer connection (if any)
-        try {
-          const svc = svcRef.current!;
-          const pc = svc.getPeerConnection(uid);
-          if (pc) {
-            try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
-            try { pc.close(); } catch {}
-          }
-        } catch {}
+        try { svcRef.current?.removePeerConnection(uid); } catch {}
+        setTerminalPeers((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
 
         // Remove the remote stream tile and clear single preview if it matches
         setRemoteStreams((prev) => {
           const next = { ...prev };
           const removed = next[uid] as MediaStream | undefined;
+          clearRemoteStream(removed);
           delete next[uid];
 
           // If single remote preview shows the removed stream, clear it
@@ -256,15 +216,8 @@ export default function App() {
       },
       onOffer: async (fromId, offer) => {
         const svc = svcRef.current!;
-        let pc = svc.getPeerConnection(fromId);
-
-        // Recreate PC if missing or closed (e.g., after leave/teardown)
-        if (!pc || pc.signalingState === "closed") {
-          pc = svc.createPeerConnection(fromId);
-          wirePeerHandlers(pc, svc, fromId);
-        } else {
-          wirePeerHandlers(pc, svc, fromId);
-        }
+        let pc = ensurePeerConnection(svc, fromId);
+        if (!svc.acceptRemoteOffer(fromId, offer)) return;
 
         // Glare-safe rollback if not stable
         if (pc.signalingState !== "stable") {
@@ -274,14 +227,14 @@ export default function App() {
         }
 
         try {
-          await pc.setRemoteDescription(offer);
+          await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
         } catch (err) {
           console.warn("[onOffer] setRemoteDescription failed; recreating PC", err);
           try {
-            // Hard recreate on SRD failure
-            pc = svc.createPeerConnection(fromId);
-            wirePeerHandlers(pc, svc, fromId);
-            await pc.setRemoteDescription(offer);
+            svc.removePeerConnection(fromId);
+            pc = ensurePeerConnection(svc, fromId);
+            if (!svc.acceptRemoteOffer(fromId, offer)) return;
+            await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
           } catch (err2) {
             console.error("[onOffer] SRD failed after recreate", err2);
             return;
@@ -294,16 +247,16 @@ export default function App() {
       },
       onAnswer: async (fromId, answer) => {
         const svc = svcRef.current!;
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
-        await pc.setRemoteDescription(answer);
+        await svc.applyAnswer(fromId, svc.getPeerGeneration(answer), answer);
       },
       onIceCandidate: async (fromId, candidate) => {
         const svc = svcRef.current!;
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
         try {
-          await pc.addIceCandidate(candidate);
+          await svc.applyRemoteCandidate(
+            fromId,
+            svc.getPeerGeneration(candidate),
+            candidate,
+          );
         } catch {}
       },
       onError: (code, message) => {
@@ -314,6 +267,7 @@ export default function App() {
           setPeerId(null);
           peerIdRef.current = null;
           setRemoteStreams({});
+          setTerminalPeers(new Set());
           try { if (localVideoRef.current) localVideoRef.current.srcObject = null; } catch {}
           try { if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null; } catch {}
           setTimeout(() => {
@@ -554,6 +508,7 @@ export default function App() {
     setPeerId(null);
     peerIdRef.current = null;
     setRemoteStreams({});
+    setTerminalPeers(new Set());
     autoJoinTriggeredRef.current = false;
 
     // Recreate service and rebind handlers so subsequent joins have fresh signaling + PCs
@@ -575,8 +530,7 @@ export default function App() {
         setParticipants(existing);
         const others = existing.filter((p) => p.userId !== svc.getUserId());
         others.forEach(({ userId: uid }) => {
-          const pc = svc.createPeerConnection(uid);
-          wirePeerHandlers(pc, svc, uid);
+          ensurePeerConnection(svc, uid);
         });
         if (others.length > 0) {
           others.forEach(({ userId: uid }) => {
@@ -599,8 +553,7 @@ export default function App() {
           const exists = prev.some(p => p.userId === uid);
           return exists ? prev : [...prev, { userId: uid, displayName: _name }];
         });
-        const pc = svc.createPeerConnection(uid);
-        wirePeerHandlers(pc, svc, uid);
+        ensurePeerConnection(svc, uid);
       },
       onUserLeft: (uid) => {
         setParticipants((prev) => prev.filter((p) => p.userId !== uid));
@@ -608,16 +561,16 @@ export default function App() {
           setPeerId(null);
           peerIdRef.current = null;
         }
-        try {
-          const pc = svc.getPeerConnection(uid);
-          if (pc) {
-            try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
-            try { pc.close(); } catch {}
-          }
-        } catch {}
+        try { svc.removePeerConnection(uid); } catch {}
+        setTerminalPeers((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
         setRemoteStreams((prev) => {
           const next = { ...prev };
           const removed = next[uid] as MediaStream | undefined;
+          clearRemoteStream(removed);
           delete next[uid];
           const current = remoteVideoRef.current?.srcObject as MediaStream | null;
           if (current && removed && current.id === removed.id && remoteVideoRef.current) {
@@ -627,25 +580,27 @@ export default function App() {
         });
       },
       onOffer: async (fromId, offer) => {
-        const pc = svc.getPeerConnection(fromId) ?? svc.createPeerConnection(fromId);
-        wirePeerHandlers(pc, svc, fromId);
+        const pc = ensurePeerConnection(svc, fromId);
+        if (!svc.acceptRemoteOffer(fromId, offer)) return;
         if (pc.signalingState !== "stable") {
           try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {}
         }
-        await pc.setRemoteDescription(offer);
+        await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         svc.sendAnswer(fromId, answer);
       },
       onAnswer: async (fromId, answer) => {
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
-        await pc.setRemoteDescription(answer);
+        await svc.applyAnswer(fromId, svc.getPeerGeneration(answer), answer);
       },
       onIceCandidate: async (fromId, candidate) => {
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc) return;
-        try { await pc.addIceCandidate(candidate); } catch {}
+        try {
+          await svc.applyRemoteCandidate(
+            fromId,
+            svc.getPeerGeneration(candidate),
+            candidate,
+          );
+        } catch {}
       },
       onError: (code, message) => {
         alert(`Error: ${code}${message ? ` - ${message}` : ""}`);
@@ -989,7 +944,8 @@ export default function App() {
                 stream,
                 muted: !!(remoteAudioMuted[uid] || p?.micMuted),
                 // Consider fullscreen active if the tile container OR a descendant (e.g., video) is fullscreen
-                fullscreen: isTileFs
+                fullscreen: isTileFs,
+                disconnected: terminalPeers.has(uid),
               };
             })}
             isFullscreen={isFullscreen}

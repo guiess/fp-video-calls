@@ -7,6 +7,11 @@ import { createRoom, sendCallInvite, cancelCall } from "../services/callService"
 import { saveCallRecord } from "../services/callHistoryService";
 import { subscribeChatEvents } from "../services/chatSocket";
 import VideoGrid, { RemoteTile } from "../components/VideoGrid";
+import {
+  clearRemoteStream,
+  replaceRemoteTrack,
+  resetRemoteStream,
+} from "../services/remoteMedia";
 
 function safeRandomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -39,6 +44,7 @@ export default function ActiveCallScreen() {
   const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
   const [telemetryOn, setTelemetryOn] = useState(false);
   const [remoteCamOff, setRemoteCamOff] = useState<Set<string>>(new Set());
+  const [terminalPeers, setTerminalPeers] = useState<Set<string>>(new Set());
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -67,20 +73,7 @@ export default function ActiveCallScreen() {
         setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
 
         others.forEach(({ userId: uid }) => {
-          const pc = svc.createPeerConnection(uid);
-          wirePeerHandlers(pc, svc, uid);
-          try {
-            if (pc.getTransceivers().length === 0) {
-              pc.addTransceiver("audio", { direction: "sendrecv" });
-              pc.addTransceiver("video", { direction: "sendrecv" });
-            }
-          } catch {}
-          try {
-            const ls = svc.getLocalStream();
-            if (ls) ls.getTracks().forEach(t => {
-              if (!pc.getSenders().some(s => s.track?.id === t.id)) pc.addTrack(t, ls);
-            });
-          } catch {}
+          ensurePeerConnection(svc, uid);
         });
 
         const myId = svc.getUserId();
@@ -114,21 +107,7 @@ export default function ActiveCallScreen() {
         hadRemoteRef.current = true;
         setParticipants(prev => prev.some(p => p.userId === uid) ? prev : [...prev, { userId: uid, displayName: name, micMuted: !!micMuted }]);
         const svc = svcRef.current!;
-        const pc = svc.createPeerConnection(uid);
-        wirePeerHandlers(pc, svc, uid);
-
-        try {
-          if (pc.getTransceivers().length === 0) {
-            pc.addTransceiver("audio", { direction: "sendrecv" });
-            pc.addTransceiver("video", { direction: "sendrecv" });
-          }
-        } catch {}
-        try {
-          const ls = svc.getLocalStream();
-          if (ls) ls.getTracks().forEach(t => {
-            if (!pc.getSenders().some(s => s.track?.id === t.id)) pc.addTrack(t, ls);
-          });
-        } catch {}
+        const pc = ensurePeerConnection(svc, uid);
 
         if (svc.getUserId() < uid && pc.signalingState === "stable") {
           pc.createOffer().then(async offer => {
@@ -185,12 +164,15 @@ export default function ActiveCallScreen() {
           return updated;
         });
         const svc = svcRef.current!;
-        try {
-          const pc = svc.getPeerConnection(uid);
-          if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.close(); }
-        } catch {}
+        try { svc.removePeerConnection(uid); } catch {}
+        setTerminalPeers(prev => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
         setRemoteStreams(prev => {
           const next = { ...prev };
+          clearRemoteStream(next[uid]);
           delete next[uid];
           return next;
         });
@@ -198,22 +180,15 @@ export default function ActiveCallScreen() {
 
       onOffer: async (fromId, offer) => {
         const svc = svcRef.current!;
-        let pc = svc.getPeerConnection(fromId);
-        if (!pc || pc.signalingState === "closed") {
-          pc = svc.createPeerConnection(fromId);
-          wirePeerHandlers(pc, svc, fromId);
-        }
+        const pc = ensurePeerConnection(svc, fromId);
         const isPolite = svc.getUserId() > fromId;
         if (pc.signalingState !== "stable" && !isPolite) return;
         if (pc.signalingState !== "stable") {
           try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {}
         }
         try {
-          await pc.setRemoteDescription(offer);
-          const ls = svc.getLocalStream();
-          if (ls) ls.getTracks().forEach(t => {
-            if (!pc.getSenders().some(s => s.track?.id === t.id)) pc.addTrack(t, ls);
-          });
+          if (!svc.acceptRemoteOffer(fromId, offer)) return;
+          await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           svc.sendAnswer(fromId, answer);
@@ -222,15 +197,21 @@ export default function ActiveCallScreen() {
 
       onAnswer: async (fromId, answer) => {
         const svc = svcRef.current!;
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc || pc.signalingState !== "have-local-offer") return;
-        try { await pc.setRemoteDescription(answer); } catch {}
+        try {
+          await svc.applyAnswer(fromId, svc.getPeerGeneration(answer), answer);
+        } catch {}
       },
 
       onIceCandidate: async (fromId, candidate) => {
-        const pc = svcRef.current?.getPeerConnection(fromId);
-        if (!pc) return;
-        try { await pc.addIceCandidate(candidate); } catch {}
+        const svc = svcRef.current;
+        if (!svc) return;
+        try {
+          await svc.applyRemoteCandidate(
+            fromId,
+            svc.getPeerGeneration(candidate),
+            candidate,
+          );
+        } catch {}
       },
 
       onError: (code, message) => {
@@ -244,36 +225,37 @@ export default function ActiveCallScreen() {
     };
   }, [phase]);
 
-  function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string) {
-    pc.ontrack = (e) => {
-      setRemoteStreams(prev => {
-        const stream = prev[targetId] ?? new MediaStream();
-        if (!stream.getTracks().some(t => t.id === e.track.id)) {
-          stream.addTrack(e.track);
-        }
-        return { ...prev, [targetId]: stream };
-      });
-    };
-    pc.onicecandidate = (e) => {
-      if (e.candidate) svc.sendIceCandidate(targetId, e.candidate.toJSON());
-    };
-    pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
-        pc.createOffer({ iceRestart: true }).then(async offer => {
-          await pc.setLocalDescription(offer);
-          svc.sendOffer(targetId, offer);
-        }).catch(() => {});
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
+  function ensurePeerConnection(svc: WebRTCService, targetId: string) {
+    return svc.ensurePeerConnection(targetId, {
+      onRecoveryStateChange: (state) => {
+        setTerminalPeers(prev => {
+          if (state === "terminal" && prev.has(targetId)) return prev;
+          if (state !== "terminal" && !prev.has(targetId)) return prev;
+          const next = new Set(prev);
+          if (state === "terminal") next.add(targetId); else next.delete(targetId);
+          return next;
+        });
+      },
+      onPeerReplaced: () => {
+        setRemoteStreams(prev => ({
+          ...prev,
+          [targetId]: resetRemoteStream(prev[targetId]),
+        }));
+      },
+      onTrack: (e) => {
+        setRemoteStreams(prev => {
+          const stream = prev[targetId] ?? new MediaStream();
+          replaceRemoteTrack(stream, e.track);
+          return { ...prev, [targetId]: stream };
+        });
+      },
+      onConnected: () => {
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls && localVideoRef.current.srcObject !== ls) {
           localVideoRef.current.srcObject = ls;
         }
-      }
-    };
-    pc.onnegotiationneeded = () => {};
+      },
+    });
   }
 
   // Initialize WebRTC and start call flow
@@ -304,6 +286,10 @@ export default function ActiveCallScreen() {
           password: passwordRef.current || undefined,
           quality,
         });
+        if (cancelled) {
+          svc.leave();
+          return;
+        }
         // Disable camera if answering audio-only
         if (startWithCamOff) {
           const ls = svc.getLocalStream();
@@ -361,7 +347,10 @@ export default function ActiveCallScreen() {
           password: room.password,
           quality,
         });
-        if (cancelled) return;
+        if (cancelled) {
+          svc.leave();
+          return;
+        }
 
         // Bind local video for preview during ringing
         const ls = svc.getLocalStream();
@@ -391,6 +380,8 @@ export default function ActiveCallScreen() {
     return () => {
       cancelled = true;
       if (timerRef.current) clearTimeout(timerRef.current);
+      try { svcRef.current?.leave(); } catch {}
+      svcRef.current = null;
     };
   }, []);
 
@@ -500,6 +491,7 @@ export default function ActiveCallScreen() {
         primary: primaryUserId === p.userId,
         hidden: hiddenRemotes.has(p.userId),
         camOff: remoteCamOff.has(p.userId),
+        disconnected: terminalPeers.has(p.userId),
       };
     });
 
