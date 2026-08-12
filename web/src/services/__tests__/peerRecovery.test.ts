@@ -552,7 +552,7 @@ describe("review-gate regressions", () => {
   it("echoes an accepted offer generation on answers and ICE candidates", () => {
     const { service, socket } = makeService();
     service.ensurePeerConnection("peer-a", {});
-    const remoteOffer = {
+    const remoteOffer: RTCSessionDescriptionInit & { peerGeneration: number } = {
       type: "offer" as RTCSdpType,
       sdp: "remote",
       peerGeneration: 9,
@@ -568,10 +568,11 @@ describe("review-gate regressions", () => {
     expect(socket.emit).toHaveBeenCalledWith("ice_candidate", expect.objectContaining({
       candidate: expect.objectContaining({ peerGeneration: 9 }),
     }));
-    expect(service.acceptRemoteOffer("peer-a", {
+    const invalidOffer: RTCSessionDescriptionInit & { peerGeneration: number } = {
       ...remoteOffer,
       peerGeneration: -1,
-    })).toBe(false);
+    };
+    expect(service.acceptRemoteOffer("peer-a", invalidOffer)).toBe(false);
   });
 
   it("adds receive transceivers when no local tracks exist", () => {
