@@ -55,6 +55,17 @@ class WebRTCManager(
         private const val MULTI_CAPTURE_FPS = 24
         private const val PEER_CREATION_TURN_WAIT_MILLIS = 10_000L
         private const val MAX_PENDING_ICE_CANDIDATES_PER_PEER = 64
+        private val ACTIVE_RECOVERY_STATES = setOf(
+            PeerRecoveryStatus.DISCONNECT_GRACE,
+            PeerRecoveryStatus.RESTARTING,
+            PeerRecoveryStatus.REPLACING,
+            PeerRecoveryStatus.COOLDOWN,
+            PeerRecoveryStatus.TERMINAL
+        )
+        private val SERIALIZED_RECOVERY_STATES = setOf(
+            PeerRecoveryStatus.RESTARTING,
+            PeerRecoveryStatus.REPLACING
+        )
     }
 
     private var factory: PeerConnectionFactory? = null
@@ -79,14 +90,38 @@ class WebRTCManager(
             credentialInstaller = TurnCredentialInstaller(::installTurnCredentials)
         )
     )
+    /**
+     * Recovery is always enabled in this client build. The project has no
+     * remote Android recovery flag, so releases must use the staged pilot
+     * rollout required by the parent media-path recovery specification.
+     */
+    private val iceRecoveryCoordinator = IceRecoveryCoordinator(
+        runtime = IceRecoveryRuntime(
+            scope = scope,
+            clock = MonotonicClock(SystemClock::elapsedRealtime)
+        ),
+        ports = IceRecoveryPorts(
+            iceServerPreparer = RecoveryIceServerPreparer(::prepareRecoveryIceServers),
+            restartOfferSender = IceRestartOfferSender(::sendIceRestartOffer),
+            peerConnectionReplacer = PeerConnectionReplacer(::replacePeerConnection),
+            eventRecorder = RecoveryEventRecorder(::recordRecoveryEvent),
+            completionNotifier = RecoveryCompletionNotifier {
+                replayPendingPeerActions()
+            }
+        )
+    )
     /** TURN credential readiness, independent from signaling connectivity. */
     val turnReadiness: StateFlow<TurnReadiness> = turnLeaseManager.readiness
+    /** Per-peer bounded recovery status for disconnected-state presentation. */
+    val recoveryStates: StateFlow<Map<String, PeerRecoveryStatus>> =
+        iceRecoveryCoordinator.statuses
     private val pendingPeerActions =
         java.util.concurrent.ConcurrentHashMap<String, PendingPeerAction>()
     private val pendingIceCandidates =
         PendingIceCandidateBuffer<IceCandidate>(MAX_PENDING_ICE_CANDIDATES_PER_PEER)
     private val remoteDescriptionReadyPeers =
         java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val peerGenerationEchoes = PeerGenerationEchoRegistry()
     private val peerCallFence = CallGenerationFence()
     private val turnResumeListener = { turnLeaseManager.reconcileDeadline() }
     private var turnNetworkCallback: ConnectivityManager.NetworkCallback? = null
@@ -171,10 +206,12 @@ class WebRTCManager(
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
-        peerCallFence.start()
+        val callGeneration = peerCallFence.start()
+        iceRecoveryCoordinator.start(callGeneration)
         pendingPeerActions.clear()
         pendingIceCandidates.start()
         remoteDescriptionReadyPeers.clear()
+        peerGenerationEchoes.clearAll()
         registerTurnRefreshTriggers()
         localUserId = userId
         localName = displayName
@@ -261,12 +298,7 @@ class WebRTCManager(
                         prevStatsAt.remove(leftId)
                         prevNackPliFir.remove(leftId)
                         pendingPeerActions.remove(leftId)
-                        pendingIceCandidates.clear(leftId)
-                        remoteDescriptionReadyPeers.remove(leftId)
-                        peerConnections[leftId]?.let { pc ->
-                            try { pc.close() } catch (_: Exception) {}
-                        }
-                        peerConnections.remove(leftId)
+                        removePeerConnection(leftId)
                         updateCaptureMode()
                         if (_participants.value.isEmpty() && peerConnections.isEmpty()) {
                             Log.d(TAG, "All remote participants left — signaling remote hang-up")
@@ -448,7 +480,7 @@ class WebRTCManager(
 
     private suspend fun getOrCreatePeerConnection(targetId: String): PeerConnectionResult {
         val generation = peerCallFence.current() ?: return PeerConnectionResult.Retryable
-        existingPeerConnection(targetId)?.let { return PeerConnectionResult.Ready(it) }
+        cachedPeerConnectionResult(targetId)?.let { return it }
         if (turnLeaseManager.hasExpiredCredentials()) {
             val isReady = turnLeaseManager.awaitValidCredentials(
                 PEER_CREATION_TURN_WAIT_MILLIS
@@ -461,10 +493,74 @@ class WebRTCManager(
         return PeerConnectionResult.Ready(peerConnection)
     }
 
-    private fun existingPeerConnection(targetId: String): PeerConnection? =
-        peerConnections[targetId]?.takeIf {
-            it.connectionState() != PeerConnection.PeerConnectionState.CLOSED
+    private fun cachedPeerConnectionResult(targetId: String): PeerConnectionResult? {
+        val peerConnection = peerConnections[targetId] ?: return null
+        return when (cachedPeerDisposition(targetId, peerConnection)) {
+            CachedPeerDisposition.REUSE -> PeerConnectionResult.Ready(peerConnection)
+            CachedPeerDisposition.WAIT_FOR_RECOVERY -> PeerConnectionResult.Retryable
+            CachedPeerDisposition.REBUILD -> {
+                discardCachedPeerConnection(targetId, peerConnection)
+                null
+            }
         }
+    }
+
+    private fun candidatePeerConnection(targetId: String): PeerConnection? {
+        val peerConnection = peerConnections[targetId] ?: return null
+        return peerConnection.takeIf {
+            cachedPeerDisposition(targetId, it) == CachedPeerDisposition.REUSE
+        }
+    }
+
+    private fun cachedPeerDisposition(
+        targetId: String,
+        peerConnection: PeerConnection
+    ): CachedPeerDisposition = try {
+        IceRecoveryPolicy.cachedPeerDisposition(
+            transportState = peerConnection.recoveryTransportState(),
+            recoveryStatus = iceRecoveryCoordinator.status(targetId)
+        )
+    } catch (error: IllegalStateException) {
+        Log.w(TAG, "[recovery] cached peer state was unavailable", error)
+        CachedPeerDisposition.REBUILD
+    }
+
+    private fun PeerConnection.recoveryTransportState(): RecoveryTransportState {
+        val connectionState = connectionState().toRecoveryState()
+        val iceState = iceConnectionState().toRecoveryState()
+        return when {
+            RecoveryTransportState.CLOSED in setOf(connectionState, iceState) ->
+                RecoveryTransportState.CLOSED
+            RecoveryTransportState.FAILED in setOf(connectionState, iceState) ->
+                RecoveryTransportState.FAILED
+            RecoveryTransportState.DISCONNECTED in setOf(connectionState, iceState) ->
+                RecoveryTransportState.DISCONNECTED
+            RecoveryTransportState.CONNECTED in setOf(connectionState, iceState) ->
+                RecoveryTransportState.CONNECTED
+            RecoveryTransportState.CONNECTING in setOf(connectionState, iceState) ->
+                RecoveryTransportState.CONNECTING
+            else -> RecoveryTransportState.NEW
+        }
+    }
+
+    private fun PeerConnection.PeerConnectionState.toRecoveryState() = when (this) {
+        PeerConnection.PeerConnectionState.NEW -> RecoveryTransportState.NEW
+        PeerConnection.PeerConnectionState.CONNECTING -> RecoveryTransportState.CONNECTING
+        PeerConnection.PeerConnectionState.CONNECTED -> RecoveryTransportState.CONNECTED
+        PeerConnection.PeerConnectionState.DISCONNECTED -> RecoveryTransportState.DISCONNECTED
+        PeerConnection.PeerConnectionState.FAILED -> RecoveryTransportState.FAILED
+        PeerConnection.PeerConnectionState.CLOSED -> RecoveryTransportState.CLOSED
+    }
+
+    private fun PeerConnection.IceConnectionState.toRecoveryState() = when (this) {
+        PeerConnection.IceConnectionState.NEW -> RecoveryTransportState.NEW
+        PeerConnection.IceConnectionState.CHECKING -> RecoveryTransportState.CONNECTING
+        PeerConnection.IceConnectionState.CONNECTED,
+        PeerConnection.IceConnectionState.COMPLETED -> RecoveryTransportState.CONNECTED
+        PeerConnection.IceConnectionState.DISCONNECTED -> RecoveryTransportState.DISCONNECTED
+        PeerConnection.IceConnectionState.FAILED -> RecoveryTransportState.FAILED
+        PeerConnection.IceConnectionState.CLOSED -> RecoveryTransportState.CLOSED
+    }
 
     private suspend fun ensurePeerConnection(targetId: String) {
         if (getOrCreatePeerConnection(targetId) is PeerConnectionResult.Retryable) {
@@ -485,7 +581,21 @@ class WebRTCManager(
         pendingPeerActions.merge(targetId, action, ::preferPendingAction)
         Log.w(TAG, "[turn] peer action deferred until credentials are ready")
         val canReplay = action is PendingPeerAction.Create || signalingService != null
-        if (canReplay && turnLeaseManager.hasValidCredentials()) replayPendingPeerActions()
+        val isRecoveryBlocking = isPeerRecoveryBlocking(targetId)
+        if (canReplay && turnLeaseManager.hasValidCredentials() && !isRecoveryBlocking) {
+            replayPendingPeerActions()
+        }
+    }
+
+    private fun isPeerRecoveryBlocking(targetId: String): Boolean {
+        val recoveryStatus = iceRecoveryCoordinator.status(targetId)
+        if (recoveryStatus in SERIALIZED_RECOVERY_STATES) return true
+        val peerConnection = peerConnections[targetId]
+            ?: return iceRecoveryCoordinator.status(targetId) in ACTIVE_RECOVERY_STATES
+        return cachedPeerDisposition(
+            targetId,
+            peerConnection
+        ) == CachedPeerDisposition.WAIT_FOR_RECOVERY
     }
 
     private fun preferPendingAction(
@@ -556,15 +666,27 @@ class WebRTCManager(
 
     private fun createPeerConnectionNow(
         targetId: String,
-        generation: Long
+        generation: Long,
+        replacementContext: PeerRecoveryContext? = null
     ): PeerConnection? {
         if (!peerCallFence.isCurrent(generation)) return null
-        existingPeerConnection(targetId)?.let { return it }
+        if (replacementContext == null) {
+            when (val cached = cachedPeerConnectionResult(targetId)) {
+                is PeerConnectionResult.Ready -> return cached.peerConnection
+                PeerConnectionResult.Retryable -> return null
+                null -> Unit
+            }
+        } else if (!iceRecoveryCoordinator.isCurrent(replacementContext)) {
+            return null
+        }
         val activeFactory = factory
         if (activeFactory == null) {
             Log.w(TAG, "[turn] peer creation skipped because call resources are unavailable")
             return null
         }
+        val recoveryContext = replacementContext
+            ?: iceRecoveryCoordinator.attachPeer(targetId, generation)
+            ?: return null
         val rtcConfig = createRtcConfiguration(iceServers)
 
         val observer = object : PeerConnection.Observer {
@@ -573,6 +695,9 @@ class WebRTCManager(
             }
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 Log.i(TAG, "[ice $targetId] iceConnection=$state")
+                state?.let {
+                    observeRecoveryState(recoveryContext, it.toRecoveryState())
+                }
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {
                 Log.i(TAG, "[ice $targetId] iceReceiving=$receiving")
@@ -582,14 +707,19 @@ class WebRTCManager(
             }
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
                 Log.i(TAG, "[ice $targetId] connection=$newState")
+                newState?.let {
+                    observeRecoveryState(recoveryContext, it.toRecoveryState())
+                }
             }
 
             override fun onIceCandidate(candidate: IceCandidate?) {
                 candidate ?: return
+                if (!isRecoveryContextCurrent(recoveryContext)) return
                 val json = JSONObject().apply {
                     put("sdpMLineIndex", candidate.sdpMLineIndex)
                     put("sdpMid", candidate.sdpMid)
                     put("candidate", candidate.sdp)
+                    echoPeerGeneration(targetId, this)
                 }
                 signalingService?.sendIceCandidate(targetId, json)
             }
@@ -601,6 +731,7 @@ class WebRTCManager(
             override fun onRenegotiationNeeded() {}
 
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                if (!isRecoveryContextCurrent(recoveryContext)) return
                 val track = receiver?.track()
                 if (track is VideoTrack) {
                     // Honor an existing "hidden" choice if this peer's video is
@@ -615,6 +746,9 @@ class WebRTCManager(
 
         val pc = activeFactory.createPeerConnection(rtcConfig, observer)
         if (pc == null) {
+            if (replacementContext == null) {
+                iceRecoveryCoordinator.removePeer(targetId)
+            }
             Log.w(TAG, "[turn] peer connection factory rejected creation")
             return null
         }
@@ -628,6 +762,72 @@ class WebRTCManager(
         return pc
     }
 
+    private suspend fun prepareRecoveryIceServers(
+        context: PeerRecoveryContext
+    ): Boolean {
+        if (!isRecoveryContextCurrent(context)) return false
+        turnLeaseManager.reconcileDeadline()
+        val isReady = turnLeaseManager.awaitValidCredentials(
+            IceRecoveryPolicy.TURN_PREPARATION_TIMEOUT_MILLIS
+        )
+        return isReady && isRecoveryContextCurrent(context)
+    }
+
+    private suspend fun sendIceRestartOffer(
+        context: PeerRecoveryContext
+    ): Boolean {
+        if (!isRecoveryContextCurrent(context)) return false
+        val peerConnection = peerConnections[context.peerId] ?: return false
+        if (!applyCurrentIceServers(peerConnection)) return false
+        if (peerConnection.signalingState() != PeerConnection.SignalingState.STABLE) {
+            return false
+        }
+        peerGenerationEchoes.clear(context.peerId)
+        val offer = createLocalOffer(peerConnection, isIceRestart = true) ?: return false
+        if (!isRecoveryContextCurrent(context)) return false
+        if (!installLocalOffer(peerConnection, offer, context.peerId)) return false
+        if (!isRecoveryContextCurrent(context)) return false
+        return signalOffer(context.peerId, offer)
+    }
+
+    private suspend fun replacePeerConnection(
+        context: PeerRecoveryContext
+    ): Boolean {
+        if (!isRecoveryContextCurrent(context)) return false
+        val previous = peerConnections.remove(context.peerId) ?: return false
+        releasePeerConnection(context.peerId, previous)
+        if (!isRecoveryContextCurrent(context)) return false
+        val replacement = createPeerConnectionNow(
+            context.peerId,
+            context.callGeneration,
+            context
+        ) ?: return false
+        return sendIceRestartOffer(context) && peerConnections[context.peerId] === replacement
+    }
+
+    private fun applyCurrentIceServers(peerConnection: PeerConnection): Boolean {
+        return try {
+            val wasApplied = peerConnection.setConfiguration(createRtcConfiguration(iceServers))
+            if (!wasApplied) Log.w(TAG, "[recovery] current ICE configuration was rejected")
+            wasApplied
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "[recovery] current ICE configuration was rejected", error)
+            false
+        }
+    }
+
+    private fun isRecoveryContextCurrent(context: PeerRecoveryContext): Boolean =
+        peerCallFence.isCurrent(context.callGeneration) &&
+            iceRecoveryCoordinator.isCurrent(context)
+
+    private fun observeRecoveryState(
+        context: PeerRecoveryContext,
+        state: RecoveryTransportState
+    ) {
+        iceRecoveryCoordinator.observe(context, state)
+        if (state == RecoveryTransportState.CONNECTED) replayPendingPeerActions()
+    }
+
     private suspend fun createAndSendOffer(targetId: String, signaling: SignalingService) {
         val result = getOrCreatePeerConnection(targetId)
         if (result is PeerConnectionResult.Retryable) {
@@ -635,26 +835,58 @@ class WebRTCManager(
             return
         }
         val pc = (result as PeerConnectionResult.Ready).peerConnection
-        val constraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+        peerGenerationEchoes.clear(targetId)
+        val offer = createLocalOffer(pc, isIceRestart = false) ?: return
+        if (!installLocalOffer(pc, offer, targetId)) return
+        signalOffer(targetId, offer, signaling)
+    }
+
+    private suspend fun createLocalOffer(
+        peerConnection: PeerConnection,
+        isIceRestart: Boolean
+    ): SessionDescription? {
+        val observer = SdpObserverAdapter()
+        peerConnection.createOffer(observer, offerConstraints(isIceRestart))
+        return observer.awaitCreated()
+    }
+
+    private suspend fun installLocalOffer(
+        peerConnection: PeerConnection,
+        offer: SessionDescription,
+        targetId: String
+    ): Boolean {
+        val observer = SdpObserverAdapter()
+        peerConnection.setLocalDescription(observer, offer)
+        if (!observer.awaitSet()) return false
+        applyVideoSendParams(peerConnection, targetId)
+        return true
+    }
+
+    private fun offerConstraints(isIceRestart: Boolean) = MediaConstraints().apply {
+        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+        if (isIceRestart) {
+            mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
         }
+    }
 
-        val sdpObserver = SdpObserverAdapter()
-        pc.createOffer(sdpObserver, constraints)
-        val offer = sdpObserver.await() ?: return
-
-        val setObserver = SdpObserverAdapter()
-        pc.setLocalDescription(setObserver, offer)
-        setObserver.await()
-        applyVideoSendParams(pc, targetId)
-
+    private fun signalOffer(
+        targetId: String,
+        offer: SessionDescription,
+        signaling: SignalingService? = signalingService
+    ): Boolean {
+        signaling ?: return false
         val offerJson = JSONObject().apply {
             put("type", offer.type.canonicalForm())
             put("sdp", offer.description)
         }
-        Log.d(TAG, "Sending offer to $targetId")
-        signaling.sendOffer(targetId, offerJson)
+        return try {
+            signaling.sendOffer(targetId, offerJson)
+            true
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "[recovery] offer signaling was unavailable", error)
+            false
+        }
     }
 
     private suspend fun handleOffer(fromId: String, offerData: Any, signaling: SignalingService) {
@@ -682,31 +914,37 @@ class WebRTCManager(
                 Log.d(TAG, "Glare with $fromId — we are polite, rolling back our offer")
                 val rollback = SdpObserverAdapter()
                 pc.setLocalDescription(rollback, SessionDescription(SessionDescription.Type.ROLLBACK, ""))
-                rollback.await()
+                if (!rollback.awaitSet()) return
             } else {
                 Log.d(TAG, "Glare with $fromId — we are impolite, ignoring their offer")
                 return
             }
         }
+        val peerGeneration = offerJson
+            .takeIf { it.has(PeerGenerationEchoRegistry.FIELD_NAME) }
+            ?.opt(PeerGenerationEchoRegistry.FIELD_NAME)
+            ?.takeUnless { it == JSONObject.NULL }
+        peerGenerationEchoes.rememberOffer(fromId, peerGeneration)
 
         val setRemote = SdpObserverAdapter()
         pc.setRemoteDescription(setRemote, sdp)
-        setRemote.await()
+        if (!setRemote.awaitSet()) return
         remoteDescriptionReadyPeers.add(fromId)
         flushPendingIceCandidates(fromId, pc)
 
         val answerObserver = SdpObserverAdapter()
         pc.createAnswer(answerObserver, MediaConstraints())
-        val answer = answerObserver.await() ?: return
+        val answer = answerObserver.awaitCreated() ?: return
 
         val setLocal = SdpObserverAdapter()
         pc.setLocalDescription(setLocal, answer)
-        setLocal.await()
+        if (!setLocal.awaitSet()) return
         applyVideoSendParams(pc, fromId)
 
         val answerJson = JSONObject().apply {
             put("type", answer.type.canonicalForm())
             put("sdp", answer.description)
+            echoPeerGeneration(fromId, this)
         }
         Log.d(TAG, "Sending answer to $fromId")
         signaling.sendAnswer(fromId, answerJson)
@@ -730,7 +968,7 @@ class WebRTCManager(
 
         val observer = SdpObserverAdapter()
         pc.setRemoteDescription(observer, sdp)
-        observer.await()
+        if (!observer.awaitSet()) return
         remoteDescriptionReadyPeers.add(fromId)
         flushPendingIceCandidates(fromId, pc)
     }
@@ -742,7 +980,7 @@ class WebRTCManager(
             candidateJson.optInt("sdpMLineIndex", 0),
             candidateJson.optString("candidate", "")
         )
-        val peerConnection = existingPeerConnection(fromId)
+        val peerConnection = candidatePeerConnection(fromId)
         if (peerConnection != null && fromId in remoteDescriptionReadyPeers) {
             addIceCandidate(peerConnection, candidate)
             return
@@ -775,6 +1013,54 @@ class WebRTCManager(
         } catch (error: IllegalStateException) {
             Log.w(TAG, "[ice] candidate could not be applied", error)
         }
+    }
+
+    private fun removePeerConnection(peerId: String) {
+        iceRecoveryCoordinator.removePeer(peerId)
+        val peerConnection = peerConnections.remove(peerId) ?: run {
+            clearPeerConnectionState(peerId)
+            return
+        }
+        releasePeerConnection(peerId, peerConnection)
+    }
+
+    private fun discardCachedPeerConnection(
+        peerId: String,
+        peerConnection: PeerConnection
+    ) {
+        if (!peerConnections.remove(peerId, peerConnection)) return
+        iceRecoveryCoordinator.removePeer(peerId)
+        releasePeerConnection(peerId, peerConnection)
+    }
+
+    private fun releasePeerConnection(
+        peerId: String,
+        peerConnection: PeerConnection
+    ) {
+        clearPeerConnectionState(peerId)
+        try {
+            peerConnection.close()
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "[recovery] peer close failed", error)
+        }
+        try {
+            peerConnection.dispose()
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "[recovery] peer disposal failed", error)
+        }
+    }
+
+    private fun clearPeerConnectionState(peerId: String) {
+        pendingIceCandidates.clear(peerId)
+        remoteDescriptionReadyPeers.remove(peerId)
+        peerGenerationEchoes.clear(peerId)
+        _remoteVideoTracks.update { it - peerId }
+    }
+
+    private fun echoPeerGeneration(peerId: String, payload: JSONObject) {
+        val fields = mutableMapOf<String, Any?>()
+        peerGenerationEchoes.decoratePayload(peerId, fields)
+        fields.forEach { (key, value) -> payload.put(key, value) }
     }
 
     fun toggleMic() {
@@ -822,8 +1108,10 @@ class WebRTCManager(
 
     fun cleanup() {
         peerCallFence.stop()
+        iceRecoveryCoordinator.stop()
         pendingIceCandidates.stop()
         remoteDescriptionReadyPeers.clear()
+        peerGenerationEchoes.clearAll()
         unregisterTurnRefreshTriggers()
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
@@ -1094,6 +1382,30 @@ class WebRTCManager(
         }
     }
 
+    /** Persists one identity-free recovery transition when diagnostics are opted in. */
+    private fun recordRecoveryEvent(
+        peerContext: PeerRecoveryContext,
+        event: RecoveryEvent
+    ) {
+        if (!telemetryEnabled) return
+        if (!peerCallFence.isCurrent(peerContext.callGeneration)) return
+        val sessionId = telemetrySessionId ?: return
+        val now = System.currentTimeMillis()
+        val info = RecoveryTelemetryPolicy.format(event, networkType())
+        launchTelemetryWrite {
+            com.fpvideocalls.util.TelemetryStore.addEntry(
+                context,
+                sessionId,
+                telemetryRoomId,
+                telemetryRoomName,
+                now,
+                "recovery",
+                "recovery",
+                info
+            )
+        }
+    }
+
     /** Stores a remote peer's self-reported telemetry sample into the open session. */
     private fun handleRemoteTelemetry(payload: JSONObject) {
         if (!telemetryEnabled) return
@@ -1210,38 +1522,56 @@ class WebRTCManager(
     }
 }
 
-/** Adapter that turns PeerConnection's callback-based SDP API into a suspending call. */
+/**
+ * Cancellable adapter for PeerConnection's callback-based SDP API.
+ *
+ * Recovery's outer absolute deadline cancels these awaits, so the fallback
+ * timeout cannot accumulate on top of the 15-second recovery RTO.
+ */
 private class SdpObserverAdapter : SdpObserver {
-    private val result = java.util.concurrent.CompletableFuture<SessionDescription?>()
+    private val result = kotlinx.coroutines.CompletableDeferred<SdpOperationResult>()
 
-    suspend fun await(): SessionDescription? {
-        return try {
-            kotlinx.coroutines.withTimeout(10_000) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    result.get()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("SdpObserver", "SDP operation failed", e)
-            null
+    suspend fun awaitCreated(): SessionDescription? =
+        when (val operation = awaitResult()) {
+            is SdpOperationResult.Created -> operation.description
+            SdpOperationResult.Failed,
+            SdpOperationResult.Set -> null
         }
-    }
+
+    suspend fun awaitSet(): Boolean =
+        awaitResult() == SdpOperationResult.Set
+
+    private suspend fun awaitResult(): SdpOperationResult =
+        kotlinx.coroutines.withTimeoutOrNull(SDP_CALLBACK_TIMEOUT_MILLIS) {
+            result.await()
+        } ?: SdpOperationResult.Failed
 
     override fun onCreateSuccess(sdp: SessionDescription?) {
-        result.complete(sdp)
+        val operation = sdp?.let(SdpOperationResult::Created) ?: SdpOperationResult.Failed
+        result.complete(operation)
     }
 
     override fun onSetSuccess() {
-        result.complete(null)
+        result.complete(SdpOperationResult.Set)
     }
 
     override fun onCreateFailure(error: String?) {
-        Log.e("SdpObserver", "Create failed: $error")
-        result.complete(null)
+        Log.e("SdpObserver", "SDP creation failed")
+        result.complete(SdpOperationResult.Failed)
     }
 
     override fun onSetFailure(error: String?) {
-        Log.e("SdpObserver", "Set failed: $error")
-        result.complete(null)
+        Log.e("SdpObserver", "SDP application failed")
+        result.complete(SdpOperationResult.Failed)
+    }
+
+    private sealed interface SdpOperationResult {
+        data class Created(val description: SessionDescription) : SdpOperationResult
+        data object Set : SdpOperationResult
+        data object Failed : SdpOperationResult
+    }
+
+    private companion object {
+        const val SDP_CALLBACK_TIMEOUT_MILLIS = 10_000L
     }
 }
