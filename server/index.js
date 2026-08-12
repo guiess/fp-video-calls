@@ -22,6 +22,7 @@ import {
   validateTelemetrySample
 } from "./telemetry-validation.js";
 import { parseTurnRequestQuery, resolveTurnTtlSeconds } from "./turn-config.js";
+import { issueTurnCredentials } from "./turn-credentials.js";
 
 function logProcessFailure(kind, failure) {
   const details = failure instanceof Error ? (failure.stack || failure.message) : String(failure);
@@ -191,15 +192,6 @@ const TURN_REALM = (process.env.TURN_REALM || process.env.TURN_DOMAIN || "").tri
 const TURN_URLS = (process.env.TURN_URLS || "").split(",").map(s => s.trim()).filter(Boolean);
 console.info(`[turn] effective credential TTL: ${TURN_TTL_SECONDS}s`);
 
-function issueTurnCredentials(userId, roomId, realm, urls) {
-  const ts = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
-  const username = `${userId}:${ts}`;
-  const hmac = crypto.createHmac("sha1", TURN_SECRET);
-  hmac.update(username);
-  const credential = hmac.digest("base64");
-  return { username, credential, ttl: TURN_TTL_SECONDS, urls, realm, roomId, userId };
-}
-
 // GET /api/turn?userId=...&roomId=...
 app.get("/api/turn", (req, res) => {
   res.set("Cache-Control", "no-store");
@@ -227,7 +219,15 @@ app.get("/api/turn", (req, res) => {
       // Not fatal; allow issuance for pre-join flows, but you can require room existence by uncommenting:
       // return res.status(404).json({ ok: false, error: "ROOM_NOT_FOUND" });
     }
-    const payload = issueTurnCredentials(userId, roomId || null, TURN_REALM, urls);
+    const payload = issueTurnCredentials({
+      userId,
+      roomId: roomId || null,
+      realm: TURN_REALM,
+      urls,
+      ttlSeconds: TURN_TTL_SECONDS,
+      secret: TURN_SECRET,
+      nowSeconds: Math.floor(Date.now() / 1000)
+    });
     return res.json(payload);
   } catch (e) {
     console.error("[turn] issue failed", e);

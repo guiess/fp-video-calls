@@ -543,7 +543,7 @@ credential into deployment logs or tickets.
 curl "https://<signaling-host>/api/turn?userId=test&roomId=test-room"
 
 # Expected response:
-# {"username":"test:1734022800","credential":"xyz...","ttl":3600,"urls":["turns:..."],"realm":"myturn-vm.eastus.cloudapp.azure.com",...}
+# {"username":"1734022800:test","credential":"xyz...","ttl":3600,"urls":["turns:..."],"realm":"myturn-vm.eastus.cloudapp.azure.com",...}
 ```
 
 Code references:
