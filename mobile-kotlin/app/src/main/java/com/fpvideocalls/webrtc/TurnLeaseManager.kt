@@ -107,7 +107,7 @@ object TurnLeasePolicy {
     private const val REFRESH_PERCENT = 80L
     private const val PERCENT_BASE = 100L
     private const val INITIAL_RETRY_MILLIS = 1_000L
-    private const val MAX_RETRY_MILLIS = 30_000L
+    private const val MAX_RETRY_MILLIS = 5_000L
     private const val JITTER_SPREAD = 0.2
 
     fun parseTtlSeconds(value: Any?): Int {

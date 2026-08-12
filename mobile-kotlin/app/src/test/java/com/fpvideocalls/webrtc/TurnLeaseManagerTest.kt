@@ -131,7 +131,7 @@ class TurnLeaseManagerTest {
         assertEquals(800, TurnLeasePolicy.retryDelayMillis(1, 0.0))
         assertEquals(1_000, TurnLeasePolicy.retryDelayMillis(1, 0.5))
         assertEquals(1_200, TurnLeasePolicy.retryDelayMillis(1, 1.0))
-        assertTrue(TurnLeasePolicy.retryDelayMillis(100, 1.0) <= 30_000)
+        assertTrue(TurnLeasePolicy.retryDelayMillis(100, 1.0) <= 5_000)
         manager.stop()
     }
 
