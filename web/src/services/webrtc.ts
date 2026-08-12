@@ -56,6 +56,7 @@ export type PeerMediaHandlers = {
 const MAX_RECEIVED_TELEMETRY_SAMPLES = 100;
 const MAX_PEER_GENERATION = 1_000_000_000;
 const PEER_GENERATION_FIELD = "peerGeneration";
+const MIRROR_METADATA_TIMEOUT_MS = 5_000;
 
 export class PeerRecoveryCancelledError extends Error {
   constructor() {
@@ -78,6 +79,20 @@ export class PeerConnectionLifecycleError extends Error {
   }
 }
 
+export class MediaCaptureCancelledError extends Error {
+  constructor() {
+    super("Media capture was cancelled because the call lifecycle changed");
+    this.name = "MediaCaptureCancelledError";
+  }
+}
+
+export class MediaMetadataTimeoutError extends Error {
+  constructor() {
+    super("Camera metadata did not become available before the timeout");
+    this.name = "MediaMetadataTimeoutError";
+  }
+}
+
 export class WebRTCService {
   private socket: Socket | null = null;
   private pcs: Map<string, RTCPeerConnection> = new Map();
@@ -86,6 +101,8 @@ export class WebRTCService {
   private peerMediaHandlers = new Map<string, PeerMediaHandlers>();
   private isTearingDown = false;
   private lifecycleGeneration = 0;
+  private joinAbortController: AbortController | null = null;
+  private mirrorGeneration = 0;
   private recovery = new PeerRecoveryCoordinator({
     isCurrent: (targetId, generation) => this.isCurrentPeer(targetId, generation),
     getCurrent: (targetId) => this.getCurrentPeerState(targetId),
@@ -300,7 +317,11 @@ export class WebRTCService {
   }
 
   // Capture stream without mutating localStream (callers decide assignment)
-  async getCaptureStream(quality: "720p" | "1080p", facing: "user" | "environment" = "user"): Promise<MediaStream> {
+  async getCaptureStream(
+    quality: "720p" | "1080p",
+    facing: "user" | "environment" = "user",
+    signal?: AbortSignal,
+  ): Promise<MediaStream> {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) {
       const host = typeof window !== "undefined" ? window.location.hostname : "unknown-host";
       const msg =
@@ -356,9 +377,14 @@ export class WebRTCService {
       }
     }
 
+    if (signal?.aborted) {
+      this.stopMediaStream(rawStream);
+      throw new MediaCaptureCancelledError();
+    }
+
     // Mirror the video track for frontal camera before sending to peers
     if (facing === "user") {
-      return await this.mirrorVideoStream(rawStream);
+      return await this.mirrorVideoStream(rawStream, signal);
     }
     
     return rawStream;
@@ -366,12 +392,18 @@ export class WebRTCService {
 
   // Clean up mirroring resources
   private cleanupMirroring() {
+    this.mirrorGeneration += 1;
+    this.releaseSharedMirroring();
+  }
+
+  private releaseSharedMirroring(): void {
     if (this.mirrorAnimationId !== null) {
       cancelAnimationFrame(this.mirrorAnimationId);
       this.mirrorAnimationId = null;
     }
     if (this.mirrorVideo) {
       try {
+        this.mirrorVideo.onloadedmetadata = null;
         this.mirrorVideo.pause();
         this.mirrorVideo.srcObject = null;
       } catch {}
@@ -393,9 +425,12 @@ export class WebRTCService {
   }
 
   // Mirror video stream using canvas transformation
-  private async mirrorVideoStream(stream: MediaStream): Promise<MediaStream> {
-    // Clean up any previous mirroring
+  private async mirrorVideoStream(
+    stream: MediaStream,
+    signal?: AbortSignal,
+  ): Promise<MediaStream> {
     this.cleanupMirroring();
+    const generation = this.mirrorGeneration;
 
     const videoTrack = stream.getVideoTracks()[0];
     const audioTracks = stream.getAudioTracks();
@@ -413,41 +448,100 @@ export class WebRTCService {
     video.playsInline = true;
     this.mirrorVideo = video;
 
-    // Wait for video to be ready
-    await new Promise<void>((resolve) => {
-      video.onloadedmetadata = () => {
-        video.play().then(() => resolve()).catch(() => resolve());
-      };
-    });
+    try {
+      await this.waitForVideoMetadata(video, signal);
+      this.requireActiveMirror(generation, signal);
+      const canvas = document.createElement("canvas");
+      const context = this.prepareMirrorCanvas(canvas, video);
+      if (!context) return stream;
+      this.mirrorCanvas = canvas;
+      this.startMirrorLoop(generation, video, canvas, context, signal);
+      const mirroredTrack = canvas.captureStream(30).getVideoTracks()[0];
+      return new MediaStream([mirroredTrack, ...audioTracks]);
+    } catch (error) {
+      this.stopMediaStream(stream);
+      this.releaseMirrorAttempt(generation, video);
+      throw error;
+    } finally {
+      video.onloadedmetadata = null;
+    }
+  }
 
-    // Create canvas to mirror the video
-    const canvas = document.createElement("canvas");
+  private waitForVideoMetadata(
+    video: HTMLVideoElement,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", handleAbort);
+        error ? reject(error) : resolve();
+      };
+      const handleAbort = () => finish(new MediaCaptureCancelledError());
+      const timeout = setTimeout(
+        () => finish(new MediaMetadataTimeoutError()),
+        MIRROR_METADATA_TIMEOUT_MS,
+      );
+      video.onloadedmetadata = () => {
+        try { void video.play().catch(() => {}); } catch {}
+        finish();
+      };
+      if (signal?.aborted) return handleAbort();
+      signal?.addEventListener("abort", handleAbort, { once: true });
+    });
+  }
+
+  private requireActiveMirror(generation: number, signal?: AbortSignal): void {
+    if (signal?.aborted || generation !== this.mirrorGeneration) {
+      throw new MediaCaptureCancelledError();
+    }
+  }
+
+  private prepareMirrorCanvas(
+    canvas: HTMLCanvasElement,
+    video: HTMLVideoElement,
+  ): CanvasRenderingContext2D | null {
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) return stream;
-    this.mirrorCanvas = canvas;
+    return canvas.getContext("2d", { alpha: false });
+  }
 
-    // Start mirroring loop
+  private startMirrorLoop(
+    generation: number,
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    context: CanvasRenderingContext2D,
+    signal?: AbortSignal,
+  ): void {
     const mirror = () => {
+      if (generation !== this.mirrorGeneration || signal?.aborted) return;
       if (video.readyState >= video.HAVE_CURRENT_DATA) {
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-        ctx.restore();
+        context.save();
+        context.scale(-1, 1);
+        context.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+        context.restore();
       }
       this.mirrorAnimationId = requestAnimationFrame(mirror);
     };
     mirror();
+  }
 
-    // Capture the mirrored stream from canvas
-    const mirroredStream = canvas.captureStream(30);
-    const mirroredVideoTrack = mirroredStream.getVideoTracks()[0];
-    
-    // Create final stream with mirrored video and original audio
-    const finalStream = new MediaStream([mirroredVideoTrack, ...audioTracks]);
-    
-    return finalStream;
+  private releaseMirrorAttempt(
+    generation: number,
+    video: HTMLVideoElement,
+  ): void {
+    if (generation === this.mirrorGeneration) {
+      this.releaseSharedMirroring();
+      return;
+    }
+    try {
+      video.pause();
+      video.srcObject = null;
+    } catch {}
+  }
+
+  private stopMediaStream(stream: MediaStream): void {
+    try { stream.getTracks().forEach((track) => track.stop()); } catch {}
   }
  
   /** Build ICE servers:
@@ -484,11 +578,18 @@ export class WebRTCService {
   }
 
   /** Fetch ephemeral TURN creds from signaling server and cache */
-  private async fetchTurnAndCache(): Promise<void> {
+  private async fetchTurnAndCache(
+    lifecycleGeneration = this.lifecycleGeneration,
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
       const params = new URLSearchParams({ userId: this.userId || "", roomId: this.roomId || "" });
-      const r = await fetch(`${this.endpoint.replace(/\/$/, "")}/api/turn?${params.toString()}`, { credentials: "include" });
+      const r = await fetch(`${this.endpoint.replace(/\/$/, "")}/api/turn?${params.toString()}`, {
+        credentials: "include",
+        signal,
+      });
       const j = await r.json();
+      if (!this.isLifecycleCurrent(lifecycleGeneration) || signal?.aborted) return;
       if (j && j.username && j.credential && j.urls && Array.isArray(j.urls)) {
         this.turnIceServers = [{ urls: j.urls, username: j.username, credential: j.credential }];
         this.turnTtlSeconds = j.ttl || 0;
@@ -497,18 +598,26 @@ export class WebRTCService {
         if (this.turnRefreshTimer) clearTimeout(this.turnRefreshTimer);
         if (this.turnTtlSeconds > 0) {
           const refreshMs = this.turnTtlSeconds * 0.8 * 1000;
-          this.turnRefreshTimer = setTimeout(() => this.refreshTurnCredentials(), refreshMs);
+          this.turnRefreshTimer = setTimeout(
+            () => void this.refreshTurnCredentials(lifecycleGeneration),
+            refreshMs,
+          );
         }
       }
     } catch (e) {
+      if (!this.isLifecycleCurrent(lifecycleGeneration) || signal?.aborted) return;
       console.warn("[turn] fetch failed; falling back to env/localStorage TURN", e);
     }
   }
 
   /** Refresh TURN credentials and update existing peer connections */
-  private async refreshTurnCredentials(): Promise<void> {
+  private async refreshTurnCredentials(
+    lifecycleGeneration = this.lifecycleGeneration,
+  ): Promise<void> {
+    if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
     console.log("[turn] refreshing credentials");
-    await this.fetchTurnAndCache();
+    await this.fetchTurnAndCache(lifecycleGeneration);
+    if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
     const iceServers = this.getIceServers();
     for (const pc of this.pcs.values()) {
       try {
@@ -743,61 +852,68 @@ export class WebRTCService {
   }
 
   async join({ roomId, userId, displayName, password, quality }: JoinOptions) {
+    this.joinAbortController?.abort();
+    const controller = new AbortController();
+    this.joinAbortController = controller;
     const lifecycleGeneration = ++this.lifecycleGeneration;
     this.isTearingDown = false;
-    this.ensureSocket();
-    if (!this.socket) throw new Error("Socket not initialized");
-    this.roomId = roomId;
-    this.userId = userId;
-    this.displayName = displayName;
-    // Store for reconnection
-    this.password = password;
-    this.quality = quality;
-
-    // Pre-fetch ephemeral TURN credentials before any RTCPeerConnection is created
-    await this.fetchTurnAndCache();
-    if (!this.isJoinActive(lifecycleGeneration)) return;
-
-    let initial: MediaStream;
     try {
-      initial = await this.getCaptureStream(quality, "user");
-    } catch (error) {
+      this.ensureSocket();
+      if (!this.socket) throw new Error("Socket not initialized");
+      this.roomId = roomId;
+      this.userId = userId;
+      this.displayName = displayName;
+      this.password = password;
+      this.quality = quality;
+
+      await this.fetchTurnAndCache(lifecycleGeneration, controller.signal);
       if (!this.isJoinActive(lifecycleGeneration)) return;
-      throw error;
-    }
-    if (!this.isJoinActive(lifecycleGeneration)) {
-      this.discardCapturedStream(initial);
-      return;
-    }
-    if (!initial || initial.getTracks().length === 0) {
-      this.handlers.onError?.("NO_LOCAL_MEDIA", "Local media not available");
-      return;
-    }
-    // Assign localStream and ensure audio+video are enabled
-    this.localStream = initial;
-    try {
-      this.localStream.getTracks().forEach(t => (t.enabled = true));
-    } catch {}
 
-    const socket = this.socket;
-    if (!socket || !this.isJoinActive(lifecycleGeneration)) {
-      this.discardCapturedStream(initial);
-      this.localStream = null;
-      return;
+      let initial: MediaStream;
+      try {
+        initial = await this.getCaptureStream(quality, "user", controller.signal);
+      } catch (error) {
+        if (!this.isJoinActive(lifecycleGeneration)) return;
+        throw error;
+      }
+      if (!this.isJoinActive(lifecycleGeneration)) {
+        this.discardCapturedStream(initial);
+        return;
+      }
+      if (!initial || initial.getTracks().length === 0) {
+        this.handlers.onError?.("NO_LOCAL_MEDIA", "Local media not available");
+        return;
+      }
+      this.localStream = initial;
+      try {
+        this.localStream.getTracks().forEach(t => (t.enabled = true));
+      } catch {}
+
+      const socket = this.socket;
+      if (!socket || !this.isJoinActive(lifecycleGeneration)) {
+        this.discardCapturedStream(initial);
+        this.localStream = null;
+        return;
+      }
+      socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
+      this.hasJoined = true;
+      try { console.log("[join] emitted", { roomId, userId, quality }); } catch {}
+    } finally {
+      if (this.joinAbortController === controller) this.joinAbortController = null;
     }
-    socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
-    this.hasJoined = true;
-    try { console.log("[join] emitted", { roomId, userId, quality }); } catch {}
   }
 
   private isJoinActive(generation: number): boolean {
-    return !this.isTearingDown
-      && this.lifecycleGeneration === generation
+    return this.isLifecycleCurrent(generation)
       && this.socket !== null;
   }
 
+  private isLifecycleCurrent(generation: number): boolean {
+    return !this.isTearingDown && this.lifecycleGeneration === generation;
+  }
+
   private discardCapturedStream(stream: MediaStream): void {
-    try { stream.getTracks().forEach((track) => track.stop()); } catch {}
+    this.stopMediaStream(stream);
     this.cleanupMirroring();
   }
 
@@ -1281,6 +1397,8 @@ export class WebRTCService {
   }
  
   leave() {
+    this.joinAbortController?.abort();
+    this.joinAbortController = null;
     this.lifecycleGeneration += 1;
     this.isTearingDown = true;
     this.recovery.cancelAll();

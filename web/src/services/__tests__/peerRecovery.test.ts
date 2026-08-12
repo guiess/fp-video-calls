@@ -660,6 +660,102 @@ describe("review-gate regressions", () => {
     expect(socket.emit.mock.calls.filter((call) => call[0] === "join_room")).toHaveLength(0);
   });
 
+  it("cancels a pending mirror metadata wait and stops every raw track", async () => {
+    const { service, socket } = makeService();
+    const rawAudio = {
+      id: "raw-audio",
+      kind: "audio",
+      stop: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    const rawVideo = {
+      id: "raw-video",
+      kind: "video",
+      stop: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    const rawStream = {
+      getTracks: () => [rawAudio, rawVideo],
+      getAudioTracks: () => [rawAudio],
+      getVideoTracks: () => [rawVideo],
+    } as unknown as MediaStream;
+    class TestMediaStream {
+      constructor(private readonly tracks: MediaStreamTrack[] = []) {}
+      getTracks() { return this.tracks; }
+      getAudioTracks() { return this.tracks.filter((track) => track.kind === "audio"); }
+      getVideoTracks() { return this.tracks.filter((track) => track.kind === "video"); }
+    }
+    const video = {
+      onloadedmetadata: null as (() => void) | null,
+      srcObject: null as MediaStream | null,
+      autoplay: false,
+      muted: false,
+      playsInline: false,
+      pause: vi.fn(),
+      play: vi.fn(async () => {}),
+    };
+    vi.stubGlobal("MediaStream", TestMediaStream);
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => video),
+    });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => rawStream),
+      },
+    });
+    (service as any).ensureSocket = vi.fn();
+    (service as any).fetchTurnAndCache = vi.fn(async () => {});
+
+    const joining = service.join({
+      roomId: "room-1",
+      userId: "me",
+      displayName: "Me",
+      quality: "720p",
+    });
+    await flushPromises();
+    expect(video.onloadedmetadata).toBeTypeOf("function");
+
+    service.leave();
+
+    await expect(joining).resolves.toBeUndefined();
+    expect(rawAudio.stop).toHaveBeenCalled();
+    expect(rawVideo.stop).toHaveBeenCalled();
+    expect(video.onloadedmetadata).toBeNull();
+    expect(service.getLocalStream()).toBeNull();
+    expect(socket.emit.mock.calls.filter((call) => call[0] === "join_room")).toHaveLength(0);
+  });
+
+  it("ignores a TURN response that resolves after leave", async () => {
+    const { service } = makeService();
+    let resolveFetch: ((response: unknown) => void) | undefined;
+    const capture = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    })));
+    (service as any).ensureSocket = vi.fn();
+    (service as any).getCaptureStream = capture;
+
+    const joining = service.join({
+      roomId: "room-1",
+      userId: "me",
+      displayName: "Me",
+      quality: "720p",
+    });
+    await flushPromises();
+    service.leave();
+    resolveFetch?.({
+      json: async () => ({
+        username: "late-user",
+        credential: "late-credential",
+        urls: ["turn:late.example.test"],
+        ttl: 3600,
+      }),
+    });
+
+    await expect(joining).resolves.toBeUndefined();
+    expect(capture).not.toHaveBeenCalled();
+    expect((service as any).turnIceServers).toBeNull();
+    expect((service as any).turnRefreshTimer).toBeNull();
+  });
+
   it("explicitly accepts legacy signaling without a generation token", async () => {
     const { service } = makeService();
     const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
@@ -670,6 +766,7 @@ describe("review-gate regressions", () => {
     expect(service.getPeerGeneration(answer)).toBeUndefined();
     expect(service.getPeerGeneration(null)).toBeUndefined();
     expect(service.getPeerGeneration("not-an-object")).toBeUndefined();
+    expect(service.acceptRemoteOffer("peer-a", answer)).toBe(true);
     expect(await service.applyAnswer("peer-a", undefined, answer)).toBe(true);
     expect(await service.applyRemoteCandidate("peer-a", undefined, candidate)).toBe(true);
   });
@@ -681,6 +778,11 @@ describe("review-gate regressions", () => {
 
     for (const peerGeneration of invalidValues) {
       expect(service.getPeerGeneration({ peerGeneration })).toBeNull();
+      expect(service.acceptRemoteOffer("peer-a", {
+        type: "offer",
+        sdp: "invalid",
+        peerGeneration,
+      } as RTCSessionDescriptionInit)).toBe(false);
     }
     expect(await service.applyAnswer(
       "peer-a",
