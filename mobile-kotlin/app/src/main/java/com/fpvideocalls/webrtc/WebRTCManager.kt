@@ -3,9 +3,9 @@ package com.fpvideocalls.webrtc
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.SystemClock
 import android.util.Log
 import android.view.OrientationEventListener
-import com.fpvideocalls.data.CallApiService
 import com.fpvideocalls.model.JoinOptions
 import com.fpvideocalls.model.Participant
 import com.fpvideocalls.model.SignalingHandlers
@@ -25,7 +25,7 @@ import org.webrtc.*
 
 class WebRTCManager(
     private val context: Context,
-    private val callApiService: CallApiService,
+    private val turnCredentialProvider: TurnCredentialProvider,
     private val scope: CoroutineScope
 ) {
     companion object {
@@ -63,6 +63,17 @@ class WebRTCManager(
     private val peerConnections = java.util.concurrent.ConcurrentHashMap<String, PeerConnection>()
     private var signalingService: SignalingService? = null
     private var iceServers = STUN_SERVERS.toMutableList()
+    private val turnLeaseManager = TurnLeaseManager(
+        runtime = TurnLeaseRuntime(
+            scope = scope,
+            clock = MonotonicClock(SystemClock::elapsedRealtime),
+            jitterSource = JitterSource { kotlin.random.Random.nextDouble() }
+        ),
+        ports = TurnLeasePorts(
+            credentialProvider = turnCredentialProvider,
+            credentialInstaller = TurnCredentialInstaller(::installTurnCredentials)
+        )
+    )
     private var localUserId: String = ""
     private var statsPollerJob: kotlinx.coroutines.Job? = null
     private val prevBytesSent = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -131,6 +142,8 @@ class WebRTCManager(
     }
 
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
+        turnLeaseManager.stop()
+        iceServers = STUN_SERVERS.toMutableList()
         localUserId = userId
         localName = displayName
         telemetryRoomId = roomId
@@ -142,14 +155,9 @@ class WebRTCManager(
                 initWebRTC()
                 startLocalMedia()
 
-                // Fetch TURN credentials
-                val turn = callApiService.getTurnCredentials(userId, roomId)
-                if (turn != null) {
-                    val iceServer = PeerConnection.IceServer.builder(turn.urls)
-                        .setUsername(turn.username)
-                        .setPassword(turn.credential)
-                        .createIceServer()
-                    iceServers = (STUN_SERVERS + iceServer).toMutableList()
+                val hasTurnLease = turnLeaseManager.start(TurnLeaseRequest(userId, roomId))
+                if (!hasTurnLease) {
+                    Log.w(TAG, "[turn] initial fetch failed; retry scheduled")
                 }
 
                 // Initialize signaling
@@ -381,16 +389,49 @@ class WebRTCManager(
         }.also { it.enable() }
     }
 
+    private fun installTurnCredentials(credentials: TurnCredentials) {
+        val turnServer = PeerConnection.IceServer.builder(credentials.urls)
+            .setUsername(credentials.username)
+            .setPassword(credentials.credential)
+            .createIceServer()
+        val updatedServers = (STUN_SERVERS + turnServer).toMutableList()
+        iceServers = updatedServers
+
+        for (peerConnection in peerConnections.values.toList()) {
+            if (peerConnection.connectionState() == PeerConnection.PeerConnectionState.CLOSED) continue
+            try {
+                if (!peerConnection.setConfiguration(createRtcConfiguration(updatedServers))) {
+                    Log.w(TAG, "[turn] live peer rejected refreshed ICE configuration")
+                }
+            } catch (error: IllegalStateException) {
+                Log.w(TAG, "[turn] live peer could not apply refreshed ICE configuration", error)
+            }
+        }
+        Log.d(TAG, "[turn] credential lease installed ttl=${credentials.ttl}s")
+    }
+
+    private fun iceServersForNewPeer(): List<PeerConnection.IceServer> {
+        if (!turnLeaseManager.hasExpiredCredentials()) return iceServers
+        Log.w(TAG, "[turn] expired lease excluded from new peer configuration; refresh requested")
+        _signalingState.value = "connecting"
+        turnLeaseManager.requestRefresh()
+        return STUN_SERVERS
+    }
+
+    private fun createRtcConfiguration(
+        servers: List<PeerConnection.IceServer>
+    ): PeerConnection.RTCConfiguration = PeerConnection.RTCConfiguration(servers).apply {
+        sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+        continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+    }
+
     private fun createPeerConnection(targetId: String): PeerConnection {
         val existing = peerConnections[targetId]
         if (existing != null && existing.connectionState() != PeerConnection.PeerConnectionState.CLOSED) {
             return existing
         }
 
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-        }
+        val rtcConfig = createRtcConfiguration(iceServersForNewPeer())
 
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {
@@ -597,6 +638,9 @@ class WebRTCManager(
     }
 
     fun cleanup() {
+        turnLeaseManager.stop()
+        iceServers = STUN_SERVERS.toMutableList()
+
         // 1. Stop orientation listener
         orientationListener?.disable()
         orientationListener = null

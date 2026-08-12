@@ -1,33 +1,36 @@
 package com.fpvideocalls.data
 
 import com.fpvideocalls.util.Constants
+import com.fpvideocalls.webrtc.TurnCredentialProvider
+import com.fpvideocalls.webrtc.TurnCredentialPayloadPolicy
+import com.fpvideocalls.webrtc.TurnLeaseRequest
+import com.fpvideocalls.webrtc.TurnCredentials
+import com.fpvideocalls.webrtc.UntrustedTurnCredentialPayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.ResponseBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
 data class RoomCreateResult(val roomId: String)
 
-data class TurnCredentials(
-    val username: String,
-    val credential: String,
-    val urls: List<String>,
-    val ttl: Int
-)
-
 @Singleton
 class CallApiService @Inject constructor(
     private val client: OkHttpClient
-) {
+) : TurnCredentialProvider {
     companion object {
         private const val TAG = "CallApiService"
+        private const val MAX_TURN_RESPONSE_BYTES = 16_384L
     }
 
     private val baseUrl = Constants.SIGNALING_URL
@@ -65,32 +68,56 @@ class CallApiService @Inject constructor(
         RoomCreateResult(roomId = roomId)
     }
 
-    suspend fun getTurnCredentials(userId: String, roomId: String): TurnCredentials? = withContext(Dispatchers.IO) {
+    override suspend fun fetch(request: TurnLeaseRequest): TurnCredentials? = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder()
-                .url("$baseUrl/api/turn?userId=${userId}&roomId=${roomId}")
+            val url = "$baseUrl/api/turn".toHttpUrl().newBuilder()
+                .addQueryParameter("userId", request.userId)
+                .addQueryParameter("roomId", request.roomId)
+                .build()
+            val httpRequest = Request.Builder()
+                .url(url)
                 .get()
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
-            val result = JSONObject(response.body?.string() ?: return@withContext null)
-            if (result.has("username") && result.has("credential") && result.has("urls")) {
-                val urls = mutableListOf<String>()
-                val urlsArray = result.getJSONArray("urls")
-                for (i in 0 until urlsArray.length()) {
-                    urls.add(urlsArray.getString(i))
-                }
-                TurnCredentials(
-                    username = result.getString("username"),
-                    credential = result.getString("credential"),
-                    urls = urls,
-                    ttl = result.optInt("ttl", 300)
-                )
-            } else null
-        } catch (e: Exception) {
-            android.util.Log.w("CallApiService", "[turn] fetch failed", e)
+            client.newCall(httpRequest).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                parseTurnResponse(readBoundedBody(response.body) ?: return@withContext null)
+            }
+        } catch (error: IOException) {
+            logTurnFetchFailure(error.javaClass.simpleName)
+            null
+        } catch (error: JSONException) {
+            logTurnFetchFailure(error.javaClass.simpleName)
+            null
+        } catch (error: IllegalArgumentException) {
+            logTurnFetchFailure(error.javaClass.simpleName)
             null
         }
+    }
+
+    private fun readBoundedBody(body: ResponseBody?): String? {
+        val source = body?.source() ?: return null
+        source.request(MAX_TURN_RESPONSE_BYTES + 1)
+        if (source.buffer.size > MAX_TURN_RESPONSE_BYTES) return null
+        return source.readUtf8()
+    }
+
+    private fun parseTurnResponse(body: String): com.fpvideocalls.webrtc.TurnCredentials? {
+        val result = JSONObject(body)
+        val urlsArray = result.optJSONArray("urls") ?: return null
+        if (urlsArray.length() > TurnCredentialPayloadPolicy.MAX_URL_COUNT) return null
+        val urls = (0 until urlsArray.length()).map(urlsArray::opt)
+        return TurnCredentialPayloadPolicy.validate(
+            UntrustedTurnCredentialPayload(
+                username = result.opt("username"),
+                credential = result.opt("credential"),
+                urls = urls,
+                ttl = result.opt("ttl")
+            )
+        )
+    }
+
+    private fun logTurnFetchFailure(errorType: String) {
+        android.util.Log.w(TAG, "[turn] fetch failed: $errorType")
     }
 
     suspend fun sendCallInvite(

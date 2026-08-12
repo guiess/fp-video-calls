@@ -1,7 +1,7 @@
 package com.fpvideocalls.webrtc
 
-import com.fpvideocalls.data.TurnCredentials
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -9,9 +9,11 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TurnLeaseManagerTest {
 
     private val credentials = TurnCredentials(
@@ -52,6 +54,27 @@ class TurnLeaseManagerTest {
         assertEquals(300, TurnLeasePolicy.parseTtlSeconds("not-a-number"))
         assertEquals(120, TurnLeasePolicy.parseTtlSeconds(120))
         assertEquals(3_600, TurnLeasePolicy.parseTtlSeconds(Long.MAX_VALUE))
+    }
+
+    @Test
+    fun `credential payload validation rejects hostile fields and oversized collections`() {
+        val valid = UntrustedTurnCredentialPayload(
+            username = "user:expiry",
+            credential = "base64-secret",
+            urls = listOf("turn:example.test", "turns:example.test"),
+            ttl = 300
+        )
+        assertEquals(2, TurnCredentialPayloadPolicy.validate(valid)?.urls?.size)
+
+        assertNull(TurnCredentialPayloadPolicy.validate(valid.copy(username = "")))
+        assertNull(TurnCredentialPayloadPolicy.validate(valid.copy(credential = "bad\u0000secret")))
+        assertNull(TurnCredentialPayloadPolicy.validate(valid.copy(urls = listOf("https://example.test"))))
+        assertNull(TurnCredentialPayloadPolicy.validate(valid.copy(urls = List(9) { "turn:example.test" })))
+        assertNull(
+            TurnCredentialPayloadPolicy.validate(
+                valid.copy(credential = "x".repeat(4_097))
+            )
+        )
     }
 
     @Test
@@ -157,10 +180,14 @@ class TurnLeaseManagerTest {
     private fun kotlinx.coroutines.test.TestScope.manager(
         provider: suspend () -> TurnCredentials?
     ): TurnLeaseManager = TurnLeaseManager(
-        scope = backgroundScope,
-        clock = MonotonicClock { testScheduler.currentTime },
-        credentialProvider = TurnCredentialProvider { provider() },
-        credentialInstaller = TurnCredentialInstaller { },
-        jitterSource = JitterSource { 0.5 }
+        runtime = TurnLeaseRuntime(
+            scope = backgroundScope,
+            clock = MonotonicClock { testScheduler.currentTime },
+            jitterSource = JitterSource { 0.5 }
+        ),
+        ports = TurnLeasePorts(
+            credentialProvider = TurnCredentialProvider { provider() },
+            credentialInstaller = TurnCredentialInstaller { }
+        )
     )
 }
