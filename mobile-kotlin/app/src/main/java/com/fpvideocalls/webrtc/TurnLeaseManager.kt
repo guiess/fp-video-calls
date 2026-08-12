@@ -205,8 +205,10 @@ class TurnLeaseManager(
         if (timeoutMillis <= 0L) return false
         requestRefresh()
         return withTimeoutOrNull(timeoutMillis) {
-            currentLease.first(::isValidLease)
-            true
+            val state = readiness.first {
+                it == TurnReadiness.READY || it == TurnReadiness.STOPPED
+            }
+            state == TurnReadiness.READY && hasValidCredentials()
         } ?: false
     }
 

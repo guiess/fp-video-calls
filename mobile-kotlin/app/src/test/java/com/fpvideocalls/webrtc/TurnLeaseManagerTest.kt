@@ -186,6 +186,29 @@ class TurnLeaseManagerTest {
     }
 
     @Test
+    fun `stopping lease manager releases credential waiters immediately`() = runTest {
+        var elapsedRealtime = 0L
+        var fetchCount = 0
+        val manager = managerWithClock(
+            clock = { elapsedRealtime },
+            provider = {
+                fetchCount++
+                if (fetchCount == 1) credentials.copy(ttl = 1) else awaitCancellation()
+            }
+        )
+        manager.start(TurnLeaseRequest("user", "room"))
+        elapsedRealtime = 1_000L
+
+        val result = async { manager.awaitValidCredentials(10_000) }
+        runCurrent()
+        manager.stop()
+        runCurrent()
+
+        assertFalse(result.await())
+        assertEquals(0L, testScheduler.currentTime)
+    }
+
+    @Test
     fun `failed refresh retains valid lease and retries with bounded jittered backoff`() = runTest {
         var fetchCount = 0
         val manager = manager(

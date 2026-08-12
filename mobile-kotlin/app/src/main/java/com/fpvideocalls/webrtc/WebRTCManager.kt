@@ -464,6 +464,7 @@ class WebRTCManager(
     }
 
     private fun queuePendingPeerAction(targetId: String, action: PendingPeerAction) {
+        if (turnReadiness.value == TurnReadiness.STOPPED) return
         pendingPeerActions.merge(targetId, action, ::preferPendingAction)
         Log.w(TAG, "[turn] peer action deferred until credentials are ready")
         val canReplay = action is PendingPeerAction.Create || signalingService != null
