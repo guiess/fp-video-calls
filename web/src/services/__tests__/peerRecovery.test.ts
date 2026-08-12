@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DISCONNECT_GRACE_MS,
   ICE_RESTART_TIMEOUT_MS,
+  REBUILD_TIMEOUT_MS,
   RECOVERY_COOLDOWN_MS,
+  PeerRecoveryCoordinator,
   classifyPeerConnection,
 } from "../peerRecovery";
+import { replaceRemoteTrack, resetRemoteStream } from "../remoteMedia";
 import { WebRTCService } from "../webrtc";
 
 type Handler = (() => void) | null;
@@ -33,6 +36,8 @@ class FakePeerConnection {
     sdp: options?.iceRestart ? "restart" : "rebuild",
   }));
   setLocalDescription = vi.fn(async () => {});
+  setRemoteDescription = vi.fn(async () => {});
+  addIceCandidate = vi.fn(async () => {});
   addTrack = vi.fn((track: MediaStreamTrack) => {
     const sender = { track };
     this.senders.push(sender);
@@ -52,6 +57,10 @@ class FakePeerConnection {
 
   removeEventListener(event: string, handler: () => void) {
     this.listeners.get(event)?.delete(handler);
+  }
+
+  listenerCount(event: string) {
+    return this.listeners.get(event)?.size ?? 0;
   }
 
   emitIceState(state: RTCIceConnectionState) {
@@ -244,6 +253,20 @@ describe("WebRTCService recovery policy", () => {
     expect(peer.createOffer).toHaveBeenCalledTimes(1);
   });
 
+  it("allows a new recovery immediately after a successful ICE restart", async () => {
+    const { service } = makeService();
+    const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+
+    peer.emitConnectionState("failed");
+    await flushPromises();
+    peer.emitConnectionState("connected");
+    peer.emitConnectionState("failed");
+    await flushPromises();
+
+    expect(peer.createOffer).toHaveBeenCalledTimes(2);
+    expect(peer.createOffer).toHaveBeenLastCalledWith({ iceRestart: true });
+  });
+
   it("waits for stable signaling before sending a restart offer", async () => {
     const { service, socket } = makeService();
     const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
@@ -366,5 +389,333 @@ describe("WebRTCService recovery policy", () => {
     expect(peers).toHaveLength(1);
     expect(service.getPeerConnection("peer-a")).toBeNull();
     expect(socket.emit.mock.calls.filter((call) => call[0] === "offer")).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// QA Guardian — additional coverage (issue #7)
+// Added to close gaps found during the QA review: absolute-constant pinning,
+// cooldown expiry / budget reset, multi-peer isolation on rebuild, the
+// TURN-refresh rebuild path, and the deferred-signaling rejection/cleanup path.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("recovery timing constants", () => {
+  // [AC-2][AC-4][BOUNDARY] The behavioral tests import these symbols, so a
+  // changed numeric value would NOT fail them. Pin the absolute AC durations.
+  it("pins the acceptance-criteria durations to their exact values", () => {
+    expect(DISCONNECT_GRACE_MS).toBe(8_000);
+    expect(ICE_RESTART_TIMEOUT_MS).toBe(6_000);
+    expect(REBUILD_TIMEOUT_MS).toBe(6_000);
+    expect(RECOVERY_COOLDOWN_MS).toBe(30_000);
+  });
+});
+
+describe("review-gate regressions", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("resets remote media on replacement without changing the tile key", async () => {
+    const { service, peers } = makeService();
+    let staleBadgeUpdates = 0;
+    const oldAudio = {
+      id: "old-audio",
+      kind: "audio",
+      onmute: () => { staleBadgeUpdates += 1; },
+      onunmute: () => { staleBadgeUpdates += 1; },
+      onended: () => { staleBadgeUpdates += 1; },
+    } as unknown as MediaStreamTrack;
+    const oldVideo = { id: "old-video", kind: "video" } as MediaStreamTrack;
+    const makeStream = (initialTracks: MediaStreamTrack[] = []) => {
+      let tracks = [...initialTracks];
+      return {
+        getTracks: () => tracks,
+        addTrack: (track: MediaStreamTrack) => { tracks.push(track); },
+        removeTrack: (track: MediaStreamTrack) => {
+          tracks = tracks.filter((candidate) => candidate !== track);
+        },
+      } as unknown as MediaStream;
+    };
+    const remoteStreams: Record<string, MediaStream> = {
+      "peer-a": makeStream([oldAudio, oldVideo]),
+    };
+    const tileKeys = Object.keys(remoteStreams);
+    const first = service.ensurePeerConnection("peer-a", {
+      onPeerReplaced: () => {
+        remoteStreams["peer-a"] = resetRemoteStream(
+          remoteStreams["peer-a"],
+          () => makeStream(),
+        );
+      },
+      onTrack: ({ track }) => replaceRemoteTrack(remoteStreams["peer-a"], track),
+    }) as unknown as FakePeerConnection;
+
+    first.emitConnectionState("failed");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(ICE_RESTART_TIMEOUT_MS);
+    await flushPromises();
+
+    const replacement = peers[1];
+    const newAudio = { id: "new-audio", kind: "audio" } as MediaStreamTrack;
+    const newVideo = { id: "new-video", kind: "video" } as MediaStreamTrack;
+    replacement.ontrack?.({ track: newAudio } as RTCTrackEvent);
+    replacement.ontrack?.({ track: newVideo } as RTCTrackEvent);
+    oldAudio.onmute?.(new Event("mute"));
+    oldAudio.onunmute?.(new Event("unmute"));
+    oldAudio.onended?.(new Event("ended"));
+
+    expect(Object.keys(remoteStreams)).toEqual(tileKeys);
+    expect(remoteStreams["peer-a"].getTracks().map((track) => track.id)).toEqual([
+      "new-audio",
+      "new-video",
+    ]);
+    expect(oldAudio.onmute).toBeNull();
+    expect(oldAudio.onunmute).toBeNull();
+    expect(oldAudio.onended).toBeNull();
+    expect(staleBadgeUpdates).toBe(0);
+  });
+
+  it("bounds a hung rebuild and automatically re-evaluates the dead replacement", async () => {
+    let current = { generation: 1, state: "terminal" as const };
+    const restartIce = vi.fn(async () => {});
+    const rebuildPeer = vi.fn(() => new Promise<void>(() => {}));
+    const coordinator = new PeerRecoveryCoordinator({
+      isCurrent: (_targetId, generation) => generation === current.generation,
+      getCurrent: () => current,
+      restartIce,
+      rebuildPeer,
+    });
+
+    coordinator.observe("peer-a", 1, "terminal");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(ICE_RESTART_TIMEOUT_MS);
+    expect(coordinator.getState("peer-a")).toBe("rebuilding");
+
+    current = { generation: 2, state: "terminal" };
+    await vi.advanceTimersByTimeAsync(REBUILD_TIMEOUT_MS);
+    expect(coordinator.getState("peer-a")).toBe("cooldown");
+
+    await vi.advanceTimersByTimeAsync(RECOVERY_COOLDOWN_MS);
+    await flushPromises();
+    expect(restartIce).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a stale restart answer and candidate after rebuild generation changes", async () => {
+    const { service, peers, socket } = makeService();
+    const first = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+
+    service.sendOffer("peer-a", { type: "offer", sdp: "initial" });
+    const firstOfferCalls = socket.emit.mock.calls;
+    const firstOffer = firstOfferCalls[firstOfferCalls.length - 1]?.[1].offer;
+    expect(firstOffer.peerGeneration).toBe(1);
+
+    first.emitConnectionState("failed");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(ICE_RESTART_TIMEOUT_MS);
+    await flushPromises();
+
+    const replacement = peers[1];
+    replacement.signalingState = "have-local-offer";
+    const rebuildOffers = socket.emit.mock.calls.filter((call) => call[0] === "offer");
+    const rebuildOffer = rebuildOffers[rebuildOffers.length - 1]?.[1].offer;
+    expect(rebuildOffer.peerGeneration).toBe(2);
+
+    expect(await service.applyAnswer(
+      "peer-a",
+      1,
+      { type: "answer", sdp: "stale" },
+    )).toBe(false);
+    expect(await service.applyRemoteCandidate(
+      "peer-a",
+      1,
+      { candidate: "stale" },
+    )).toBe(false);
+    expect(replacement.setRemoteDescription).not.toHaveBeenCalled();
+    expect(replacement.addIceCandidate).not.toHaveBeenCalled();
+
+    expect(await service.applyAnswer(
+      "peer-a",
+      2,
+      { type: "answer", sdp: "current" },
+    )).toBe(true);
+    expect(await service.applyRemoteCandidate(
+      "peer-a",
+      2,
+      { candidate: "current" },
+    )).toBe(true);
+    expect(replacement.setRemoteDescription).toHaveBeenCalledTimes(1);
+    expect(replacement.addIceCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("echoes an accepted offer generation on answers and ICE candidates", () => {
+    const { service, socket } = makeService();
+    service.ensurePeerConnection("peer-a", {});
+    const remoteOffer = {
+      type: "offer" as RTCSdpType,
+      sdp: "remote",
+      peerGeneration: 9,
+    };
+
+    expect(service.acceptRemoteOffer("peer-a", remoteOffer)).toBe(true);
+    service.sendAnswer("peer-a", { type: "answer", sdp: "answer" });
+    service.sendIceCandidate("peer-a", { candidate: "candidate" });
+
+    expect(socket.emit).toHaveBeenCalledWith("answer", expect.objectContaining({
+      answer: expect.objectContaining({ peerGeneration: 9 }),
+    }));
+    expect(socket.emit).toHaveBeenCalledWith("ice_candidate", expect.objectContaining({
+      candidate: expect.objectContaining({ peerGeneration: 9 }),
+    }));
+    expect(service.acceptRemoteOffer("peer-a", {
+      ...remoteOffer,
+      peerGeneration: -1,
+    })).toBe(false);
+  });
+
+  it("adds receive transceivers when no local tracks exist", () => {
+    const { service } = makeService();
+    (service as any).localStream = { getTracks: () => [] };
+
+    const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+
+    expect(peer.addTrack).not.toHaveBeenCalled();
+    expect(peer.addTransceiver).toHaveBeenCalledTimes(2);
+    expect(peer.addTransceiver).toHaveBeenNthCalledWith(
+      1,
+      "audio",
+      { direction: "sendrecv" },
+    );
+    expect(peer.addTransceiver).toHaveBeenNthCalledWith(
+      2,
+      "video",
+      { direction: "sendrecv" },
+    );
+  });
+});
+
+describe("WebRTCService recovery — additional coverage", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("blocks recovery during cooldown then resumes after it expires", async () => {
+    // [AC-4][BOUNDARY] Cooldown suppresses recovery for exactly 30s; after it
+    // expires the attempt budget resets and a fresh failure recovers again.
+    const { service, peers, socket } = makeService();
+    const first = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+
+    first.emitConnectionState("failed");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(ICE_RESTART_TIMEOUT_MS); // restart times out → rebuild → cooldown
+    await flushPromises();
+
+    const replacement = peers[1];
+    const offersAfterRebuild = socket.emit.mock.calls.filter((c) => c[0] === "offer").length;
+    expect(offersAfterRebuild).toBe(2); // one restart offer + one rebuild offer
+
+    // While in cooldown, a fresh failure is ignored.
+    replacement.emitConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(DISCONNECT_GRACE_MS);
+    await flushPromises();
+    expect(socket.emit.mock.calls.filter((c) => c[0] === "offer")).toHaveLength(2);
+    expect(replacement.createOffer).toHaveBeenCalledTimes(1); // only the rebuild offer so far
+
+    // Let the 30s cooldown lapse, then fail again — recovery must resume.
+    await vi.advanceTimersByTimeAsync(RECOVERY_COOLDOWN_MS);
+    await flushPromises();
+    replacement.emitConnectionState("failed");
+    await flushPromises();
+
+    expect(replacement.createOffer).toHaveBeenCalledTimes(2); // rebuild + a new ICE restart
+    expect(replacement.createOffer).toHaveBeenLastCalledWith({ iceRestart: true });
+    expect(socket.emit.mock.calls.filter((c) => c[0] === "offer")).toHaveLength(3);
+  });
+
+  it("rebuilds one failed peer without disturbing a healthy peer", async () => {
+    // [AC-5][EDGE] Simultaneous-failure isolation / tile→user mapping: rebuilding
+    // peer-a must not close, re-offer, or re-track peer-b.
+    const { service, peers } = makeService();
+    const a = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+    const b = service.ensurePeerConnection("peer-b", {}) as unknown as FakePeerConnection;
+
+    a.emitConnectionState("failed");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(ICE_RESTART_TIMEOUT_MS);
+    await flushPromises();
+
+    expect(peers).toHaveLength(3);
+    const replacementA = peers[2];
+    expect(a.close).toHaveBeenCalledTimes(1);
+    expect(b.close).not.toHaveBeenCalled();
+    expect(b.createOffer).not.toHaveBeenCalled();
+    // Rebuilt peer keeps exactly its own two tracks — no cross-peer bleed, no dupes.
+    expect(replacementA.getSenders().map((s) => s.track?.id)).toEqual(["audio-1", "video-1"]);
+    expect(service.getPeerConnection("peer-b")).toBe(b as unknown as RTCPeerConnection);
+  });
+
+  it("rebuilds every peer through the TURN-refresh path without duplicating tracks", async () => {
+    // [COVERAGE][AC-5] applyUpdatedTurnSettings was rewritten onto the shared
+    // rebuild path and had no test. Verify old peers close and replacements
+    // reattach the same tracks exactly once.
+    const { service, peers } = makeService();
+    const a = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+    const b = service.ensurePeerConnection("peer-b", {}) as unknown as FakePeerConnection;
+
+    service.applyUpdatedTurnSettings();
+
+    expect(a.close).toHaveBeenCalledTimes(1);
+    expect(b.close).toHaveBeenCalledTimes(1);
+    expect(peers).toHaveLength(4);
+    const [newA, newB] = [peers[2], peers[3]];
+    expect(newA.addTrack).toHaveBeenCalledTimes(2);
+    expect(newB.addTrack).toHaveBeenCalledTimes(2);
+    expect(newA.getSenders().map((s) => s.track?.id)).toEqual(["audio-1", "video-1"]);
+    expect(newB.getSenders().map((s) => s.track?.id)).toEqual(["audio-1", "video-1"]);
+  });
+
+  it("escalates to a rebuild when signaling closes while waiting to restart", async () => {
+    // [EDGE][COVERAGE] Deferred-restart rejection path: a peer stuck mid-negotiation
+    // that then closes must reject the restart and escalate to a rebuild (not hang).
+    const { service, peers } = makeService();
+    const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+    peer.signalingState = "have-local-offer";
+
+    peer.emitConnectionState("failed"); // terminal → immediate restart attempt
+    await flushPromises();
+    expect(peer.createOffer).not.toHaveBeenCalled(); // still waiting for stable signaling
+    expect(peer.listenerCount("signalingstatechange")).toBe(1);
+
+    peer.emitSignalingState("closed"); // → reject restart → escalate → rebuild
+    await flushPromises();
+
+    expect(peer.close).toHaveBeenCalledTimes(1);
+    expect(peer.listenerCount("signalingstatechange")).toBe(0); // listener cleaned up
+    expect(peers).toHaveLength(2);
+    const replacement = peers[1];
+    expect(replacement.createOffer).toHaveBeenCalledTimes(1);
+    expect(replacement.createOffer).toHaveBeenCalledWith(); // plain rebuild offer, not iceRestart
+  });
+
+  it("removes the deferred signaling listener after a restart completes", async () => {
+    // [EDGE][COVERAGE] No listener leak: the signalingstatechange handler used to
+    // defer the restart offer must be removed once signaling reaches stable.
+    const { service } = makeService();
+    const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+    peer.signalingState = "have-local-offer";
+
+    peer.emitConnectionState("failed");
+    await flushPromises();
+    expect(peer.listenerCount("signalingstatechange")).toBe(1);
+
+    peer.emitSignalingState("stable");
+    await flushPromises();
+
+    expect(peer.createOffer).toHaveBeenCalledTimes(1);
+    expect(peer.createOffer).toHaveBeenCalledWith({ iceRestart: true });
+    expect(peer.listenerCount("signalingstatechange")).toBe(0);
   });
 });

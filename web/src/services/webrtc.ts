@@ -48,9 +48,12 @@ export type SignalingHandlers = {
 export type PeerMediaHandlers = {
   onTrack?: (event: RTCTrackEvent) => void;
   onConnected?: () => void;
+  onPeerReplaced?: (generation: number) => void;
 };
 
 const MAX_RECEIVED_TELEMETRY_SAMPLES = 100;
+const MAX_PEER_GENERATION = 1_000_000_000;
+const PEER_GENERATION_FIELD = "peerGeneration";
 
 export class PeerRecoveryCancelledError extends Error {
   constructor() {
@@ -77,10 +80,12 @@ export class WebRTCService {
   private socket: Socket | null = null;
   private pcs: Map<string, RTCPeerConnection> = new Map();
   private peerGenerations = new Map<string, number>();
+  private peerSignalGenerations = new Map<string, number>();
   private peerMediaHandlers = new Map<string, PeerMediaHandlers>();
   private isTearingDown = false;
   private recovery = new PeerRecoveryCoordinator({
     isCurrent: (targetId, generation) => this.isCurrentPeer(targetId, generation),
+    getCurrent: (targetId) => this.getCurrentPeerState(targetId),
     restartIce: (targetId, generation, signal) =>
       this.restartPeerIce(targetId, generation, signal),
     rebuildPeer: (targetId, generation, signal) =>
@@ -518,7 +523,7 @@ export class WebRTCService {
     const existing = this.pcs.get(targetId);
     if (existing && classifyPeerConnection(existing) !== "terminal") return existing;
     if (existing) this.removePeerInstance(targetId, existing, true);
-    return this.createPeerInstance(targetId);
+    return this.createPeerInstance(targetId, !!existing);
   }
 
   /** Registers UI media callbacks and returns the single live connection for a peer. */
@@ -534,17 +539,26 @@ export class WebRTCService {
   removePeerConnection(targetId: string): void {
     this.recovery.cancelPeer(targetId);
     this.peerMediaHandlers.delete(targetId);
+    this.peerSignalGenerations.delete(targetId);
     const peer = this.pcs.get(targetId);
     if (peer) this.removePeerInstance(targetId, peer, false);
   }
 
-  private createPeerInstance(targetId: string): RTCPeerConnection {
+  private createPeerInstance(
+    targetId: string,
+    isReplacement = false,
+  ): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: this.getIceServers() });
     const generation = (this.peerGenerations.get(targetId) ?? 0) + 1;
     this.peerGenerations.set(targetId, generation);
+    this.peerSignalGenerations.set(targetId, generation);
     this.pcs.set(targetId, pc);
+    if (isReplacement) {
+      this.peerMediaHandlers.get(targetId)?.onPeerReplaced?.(generation);
+    }
     this.attachPeerHandlers(targetId, pc, generation);
     this.attachLocalTracks(pc);
+    this.ensureReceiveTransceivers(pc);
     if (this.videoBitrateCap) setTimeout(() => this.applyBitrateCap(pc, targetId), 0);
     return pc;
   }
@@ -585,6 +599,21 @@ export class WebRTCService {
     }
   }
 
+  private ensureReceiveTransceivers(pc: RTCPeerConnection): void {
+    for (const kind of ["audio", "video"] as const) {
+      if (this.hasMediaKind(pc, kind)) continue;
+      pc.addTransceiver(kind, { direction: "sendrecv" });
+    }
+  }
+
+  private hasMediaKind(pc: RTCPeerConnection, kind: "audio" | "video"): boolean {
+    if (pc.getSenders().some((sender) => sender.track?.kind === kind)) return true;
+    return pc.getTransceivers().some((transceiver) =>
+      transceiver.sender.track?.kind === kind
+      || transceiver.receiver?.track?.kind === kind
+    );
+  }
+
   private observePeerState(
     targetId: string,
     generation: number,
@@ -598,6 +627,13 @@ export class WebRTCService {
     return !this.isTearingDown
       && this.peerGenerations.get(targetId) === generation
       && this.pcs.has(targetId);
+  }
+
+  private getCurrentPeerState(targetId: string) {
+    const pc = this.pcs.get(targetId);
+    const generation = this.peerGenerations.get(targetId);
+    if (!pc || generation === undefined || this.isTearingDown) return null;
+    return { generation, state: classifyPeerConnection(pc) };
   }
 
   private async restartPeerIce(
@@ -622,7 +658,7 @@ export class WebRTCService {
   ): Promise<void> {
     const oldPeer = this.requireCurrentPeer(targetId, generation, signal);
     this.removePeerInstance(targetId, oldPeer, false);
-    const replacement = this.createPeerInstance(targetId);
+    const replacement = this.createPeerInstance(targetId, true);
     const replacementGeneration = this.peerGenerations.get(targetId)!;
     const offer = await replacement.createOffer();
     this.requireCurrentPeer(targetId, replacementGeneration, signal);
@@ -726,17 +762,102 @@ export class WebRTCService {
     // Skip if target mapping is stale/closed; caller should recreate PC first
     const pc = this.getPeerConnection(targetId);
     if (pc && pc.signalingState === "closed") return;
-    this.socket?.emit("offer", { roomId: this.roomId, targetId, offer });
+    const generation = this.peerGenerations.get(targetId);
+    if (generation === undefined) return;
+    this.peerSignalGenerations.set(targetId, generation);
+    this.socket?.emit("offer", {
+      roomId: this.roomId,
+      targetId,
+      offer: this.withPeerGeneration(offer, generation),
+    });
   }
   sendAnswer(targetId: string, answer: RTCSessionDescriptionInit) {
     const pc = this.getPeerConnection(targetId);
     if (pc && pc.signalingState === "closed") return;
-    this.socket?.emit("answer", { roomId: this.roomId, targetId, answer });
+    const generation = this.peerSignalGenerations.get(targetId);
+    this.socket?.emit("answer", {
+      roomId: this.roomId,
+      targetId,
+      answer: this.withPeerGeneration(answer, generation),
+    });
   }
   sendIceCandidate(targetId: string, candidate: RTCIceCandidateInit) {
     const pc = this.getPeerConnection(targetId);
     if (pc && pc.signalingState === "closed") return;
-    this.socket?.emit("ice_candidate", { roomId: this.roomId, targetId, candidate });
+    const generation = this.peerSignalGenerations.get(targetId);
+    this.socket?.emit("ice_candidate", {
+      roomId: this.roomId,
+      targetId,
+      candidate: this.withPeerGeneration(candidate, generation),
+    });
+  }
+
+  /** Stores the generation token that answers and candidates must echo. */
+  acceptRemoteOffer(targetId: string, offer: RTCSessionDescriptionInit): boolean {
+    const generation = this.getPeerGeneration(offer);
+    if (generation === null) return false;
+    if (generation !== undefined) this.peerSignalGenerations.set(targetId, generation);
+    return true;
+  }
+
+  /** Applies an answer only when it belongs to the active local negotiation. */
+  async applyAnswer(
+    targetId: string,
+    generation: number | null | undefined,
+    answer: RTCSessionDescriptionInit,
+  ): Promise<boolean> {
+    if (!this.matchesSignalGeneration(targetId, generation)) return false;
+    const pc = this.getPeerConnection(targetId);
+    if (!pc || pc.signalingState !== "have-local-offer") return false;
+    await pc.setRemoteDescription(this.withoutPeerGeneration(answer));
+    return true;
+  }
+
+  /** Applies a candidate only when it belongs to the active negotiation. */
+  async applyRemoteCandidate(
+    targetId: string,
+    generation: number | null | undefined,
+    candidate: RTCIceCandidateInit,
+  ): Promise<boolean> {
+    if (!this.matchesSignalGeneration(targetId, generation)) return false;
+    const pc = this.getPeerConnection(targetId);
+    if (!pc) return false;
+    await pc.addIceCandidate(this.withoutPeerGeneration(candidate));
+    return true;
+  }
+
+  /** Reads the additive web-only generation token from a signaling payload. */
+  getPeerGeneration(payload: unknown): number | null | undefined {
+    if (!payload || typeof payload !== "object") return undefined;
+    const record = payload as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, PEER_GENERATION_FIELD)) return undefined;
+    const generation = record[PEER_GENERATION_FIELD];
+    if (!Number.isInteger(generation) || (generation as number) < 1) return null;
+    if ((generation as number) > MAX_PEER_GENERATION) return null;
+    return generation as number;
+  }
+
+  private withPeerGeneration<T extends object>(
+    payload: T,
+    generation: number | undefined,
+  ): T {
+    if (generation === undefined) return payload;
+    return { ...payload, [PEER_GENERATION_FIELD]: generation };
+  }
+
+  private matchesSignalGeneration(
+    targetId: string,
+    generation: number | null | undefined,
+  ): boolean {
+    if (generation === null) return false;
+    if (generation === undefined) return true;
+    return this.peerSignalGenerations.get(targetId) === generation;
+  }
+
+  private withoutPeerGeneration<T extends object>(payload: T): T {
+    const { [PEER_GENERATION_FIELD]: _generation, ...clean } =
+      payload as T & Record<string, unknown>;
+    return clean as T;
   }
   // Mic state helper
   sendMicState(muted: boolean) {
@@ -1107,7 +1228,7 @@ export class WebRTCService {
     for (const [targetId, oldPc] of [...this.pcs.entries()]) {
       try {
         this.removePeerInstance(targetId, oldPc, true);
-        this.createPeerInstance(targetId);
+        this.createPeerInstance(targetId, true);
       } catch (e) {
         console.warn("[turn] apply settings failed", e);
       }
@@ -1143,6 +1264,8 @@ export class WebRTCService {
       }
     } catch {}
     this.pcs.clear();
+    this.peerGenerations.clear();
+    this.peerSignalGenerations.clear();
     this.peerMediaHandlers.clear();
     this.localStream = null;
     this.receivedTelemetry = [];

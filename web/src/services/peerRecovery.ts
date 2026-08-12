@@ -1,5 +1,6 @@
 export const DISCONNECT_GRACE_MS = 8_000;
 export const ICE_RESTART_TIMEOUT_MS = 6_000;
+export const REBUILD_TIMEOUT_MS = 6_000;
 export const RECOVERY_COOLDOWN_MS = 30_000;
 
 export type PeerRegistryState = "connected" | "disconnected" | "terminal" | "usable";
@@ -35,6 +36,7 @@ function isTerminalState(peer: PeerConnectionStateView): boolean {
 /** Port implemented by the peer registry that performs transport recovery actions. */
 export interface PeerRecoveryActions {
   isCurrent(targetId: string, generation: number): boolean;
+  getCurrent(targetId: string): { generation: number; state: PeerRegistryState } | null;
   restartIce(targetId: string, generation: number, signal: AbortSignal): Promise<void>;
   rebuildPeer(targetId: string, generation: number, signal: AbortSignal): Promise<void>;
 }
@@ -44,7 +46,12 @@ type RecoveryJob = {
   state: "grace" | "restarting" | "rebuilding";
   controller: AbortController;
   timer: ReturnType<typeof setTimeout> | null;
-  isRestartOfferSent: boolean;
+  hasSuppressedFailure: boolean;
+};
+
+type Cooldown = {
+  timer: ReturnType<typeof setTimeout>;
+  hasSuppressedFailure: boolean;
 };
 
 /**
@@ -53,7 +60,7 @@ type RecoveryJob = {
  */
 export class PeerRecoveryCoordinator {
   private jobs = new Map<string, RecoveryJob>();
-  private cooldowns = new Map<string, ReturnType<typeof setTimeout>>();
+  private cooldowns = new Map<string, Cooldown>();
 
   constructor(private readonly actions: PeerRecoveryActions) {}
 
@@ -61,7 +68,11 @@ export class PeerRecoveryCoordinator {
   observe(targetId: string, generation: number, state: PeerRegistryState): void {
     if (!this.actions.isCurrent(targetId, generation)) return;
     if (state === "connected") return this.handleConnected(targetId);
-    if (this.cooldowns.has(targetId) || state === "usable") return;
+    const cooldown = this.cooldowns.get(targetId);
+    if (cooldown) return this.recordCooldownState(cooldown, state);
+    const job = this.jobs.get(targetId);
+    if (job?.state === "rebuilding") return this.recordRebuildState(job, state);
+    if (state === "usable") return;
     if (state === "disconnected") return this.scheduleGrace(targetId, generation);
     this.handleTerminalState(targetId, generation);
   }
@@ -70,14 +81,14 @@ export class PeerRecoveryCoordinator {
   cancelPeer(targetId: string): void {
     this.clearJob(targetId);
     const cooldown = this.cooldowns.get(targetId);
-    if (cooldown) clearTimeout(cooldown);
+    if (cooldown) clearTimeout(cooldown.timer);
     this.cooldowns.delete(targetId);
   }
 
   /** Cancels every peer recovery during room teardown. */
   cancelAll(): void {
     [...this.jobs.keys()].forEach((targetId) => this.clearJob(targetId));
-    this.cooldowns.forEach((timer) => clearTimeout(timer));
+    this.cooldowns.forEach(({ timer }) => clearTimeout(timer));
     this.cooldowns.clear();
   }
 
@@ -98,7 +109,6 @@ export class PeerRecoveryCoordinator {
     const job = this.jobs.get(targetId);
     if (!job) return this.startRestart(targetId, this.createJob(generation, "restarting"));
     if (job.state === "grace") return this.startRestart(targetId, job);
-    if (job.state === "restarting" && job.isRestartOfferSent) void this.escalate(targetId, job);
   }
 
   private startRestart(targetId: string, job: RecoveryJob): void {
@@ -107,36 +117,66 @@ export class PeerRecoveryCoordinator {
     this.jobs.set(targetId, job);
     job.timer = setTimeout(() => void this.escalate(targetId, job), ICE_RESTART_TIMEOUT_MS);
     void this.actions.restartIce(targetId, job.generation, job.controller.signal)
-      .then(() => { job.isRestartOfferSent = true; })
       .catch(() => {
         if (!job.controller.signal.aborted) void this.escalate(targetId, job);
       });
   }
 
-  private async escalate(targetId: string, job: RecoveryJob): Promise<void> {
+  private escalate(targetId: string, job: RecoveryJob): void {
     if (this.jobs.get(targetId) !== job || job.state !== "restarting") return;
     this.clearTimer(job);
     job.controller.abort();
     job.controller = new AbortController();
     job.state = "rebuilding";
-    try {
-      await this.actions.rebuildPeer(targetId, job.generation, job.controller.signal);
-    } finally {
-      if (this.jobs.get(targetId) === job) this.startCooldown(targetId);
-    }
+    job.timer = setTimeout(
+      () => this.handleRebuildTimeout(targetId, job),
+      REBUILD_TIMEOUT_MS,
+    );
+    void this.actions.rebuildPeer(targetId, job.generation, job.controller.signal)
+      .catch(() => {
+        if (this.jobs.get(targetId) === job) this.startCooldown(targetId, true);
+      });
   }
 
   private handleConnected(targetId: string): void {
     const job = this.jobs.get(targetId);
     if (!job) return;
-    if (job.state === "grace") return this.clearJob(targetId);
-    this.startCooldown(targetId);
+    if (job.state !== "rebuilding") return this.clearJob(targetId);
+    this.startCooldown(targetId, false);
   }
 
-  private startCooldown(targetId: string): void {
+  private startCooldown(targetId: string, hasSuppressedFailure: boolean): void {
     this.clearJob(targetId);
-    const timer = setTimeout(() => this.cooldowns.delete(targetId), RECOVERY_COOLDOWN_MS);
-    this.cooldowns.set(targetId, timer);
+    const timer = setTimeout(() => this.expireCooldown(targetId), RECOVERY_COOLDOWN_MS);
+    this.cooldowns.set(targetId, { timer, hasSuppressedFailure });
+  }
+
+  private expireCooldown(targetId: string): void {
+    const cooldown = this.cooldowns.get(targetId);
+    this.cooldowns.delete(targetId);
+    const current = this.actions.getCurrent(targetId);
+    if (!cooldown || !current) return;
+    const state = cooldown.hasSuppressedFailure && current.state === "usable"
+      ? "terminal"
+      : current.state;
+    this.observe(targetId, current.generation, state);
+  }
+
+  private handleRebuildTimeout(targetId: string, job: RecoveryJob): void {
+    if (this.jobs.get(targetId) !== job || job.state !== "rebuilding") return;
+    this.startCooldown(targetId, true);
+  }
+
+  private recordCooldownState(cooldown: Cooldown, state: PeerRegistryState): void {
+    if (state === "terminal" || state === "disconnected") {
+      cooldown.hasSuppressedFailure = true;
+    }
+  }
+
+  private recordRebuildState(job: RecoveryJob, state: PeerRegistryState): void {
+    if (state === "terminal" || state === "disconnected") {
+      job.hasSuppressedFailure = true;
+    }
   }
 
   private clearJob(targetId: string): void {
@@ -161,7 +201,7 @@ export class PeerRecoveryCoordinator {
       state,
       controller: new AbortController(),
       timer: null,
-      isRestartOfferSent: false,
+      hasSuppressedFailure: false,
     };
   }
 }
