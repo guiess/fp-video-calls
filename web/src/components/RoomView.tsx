@@ -8,6 +8,11 @@ import {
 } from "react-icons/fi";
 import VideoGrid from "./VideoGrid";
 import { useLanguage } from "../i18n/LanguageContext";
+import {
+  clearRemoteStream,
+  replaceRemoteTrack,
+  resetRemoteStream,
+} from "../services/remoteMedia";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -96,12 +101,22 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
 
   function ensurePeerConnection(svc: WebRTCService, targetId: string) {
     return svc.ensurePeerConnection(targetId, {
+      onPeerReplaced: () => {
+        setRemoteStreams((prev) => ({
+          ...prev,
+          [targetId]: resetRemoteStream(prev[targetId]),
+        }));
+        setRemoteAudioMuted((prev) => {
+          const next = { ...prev };
+          delete next[targetId];
+          return next;
+        });
+      },
       onTrack: (e) => {
         setRemoteStreams((prev) => {
           const existing = prev[targetId];
           const stream = existing ?? new MediaStream();
-          const already = stream.getTracks().some((t) => t.id === e.track.id);
-          if (!already) stream.addTrack(e.track);
+          replaceRemoteTrack(stream, e.track);
           return { ...prev, [targetId]: stream };
         });
         if (e.track.kind === "audio") {
@@ -196,6 +211,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         setRemoteStreams((prev) => {
           const next = { ...prev };
           const removed = next[uid];
+          clearRemoteStream(removed);
           delete next[uid];
           const current = remoteVideoRef.current?.srcObject as MediaStream | null;
           if (current && removed && current.id === removed.id && remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
@@ -210,6 +226,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         if (pc.signalingState !== "stable" && !isPolite) return;
         if (pc.signalingState !== "stable") { try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {} }
         try {
+          if (!svc.acceptRemoteOffer(fromId, offer)) return;
           await pc.setRemoteDescription(offer);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -219,14 +236,23 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
 
       onAnswer: async (fromId, answer) => {
         const svc = svcRef.current!;
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc || pc.signalingState !== "have-local-offer") return;
-        try { await pc.setRemoteDescription(answer); } catch (err) { console.error("[onAnswer] setRemoteDescription failed", err); }
+        try {
+          await svc.applyAnswer(fromId, svc.getPeerGeneration(answer), answer);
+        } catch (err) {
+          console.error("[onAnswer] setRemoteDescription failed", err);
+        }
       },
 
       onIceCandidate: async (fromId, candidate) => {
-        const pc = svcRef.current?.getPeerConnection(fromId);
-        if (pc) try { await pc.addIceCandidate(candidate); } catch {}
+        const svc = svcRef.current;
+        if (!svc) return;
+        try {
+          await svc.applyRemoteCandidate(
+            fromId,
+            svc.getPeerGeneration(candidate),
+            candidate,
+          );
+        } catch {}
       },
 
       onError: (code, message) => {

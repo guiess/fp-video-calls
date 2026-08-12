@@ -7,6 +7,11 @@ import { createRoom, sendCallInvite, cancelCall } from "../services/callService"
 import { saveCallRecord } from "../services/callHistoryService";
 import { subscribeChatEvents } from "../services/chatSocket";
 import VideoGrid, { RemoteTile } from "../components/VideoGrid";
+import {
+  clearRemoteStream,
+  replaceRemoteTrack,
+  resetRemoteStream,
+} from "../services/remoteMedia";
 
 function safeRandomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -161,6 +166,7 @@ export default function ActiveCallScreen() {
         try { svc.removePeerConnection(uid); } catch {}
         setRemoteStreams(prev => {
           const next = { ...prev };
+          clearRemoteStream(next[uid]);
           delete next[uid];
           return next;
         });
@@ -175,6 +181,7 @@ export default function ActiveCallScreen() {
           try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {}
         }
         try {
+          if (!svc.acceptRemoteOffer(fromId, offer)) return;
           await pc.setRemoteDescription(offer);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -184,15 +191,21 @@ export default function ActiveCallScreen() {
 
       onAnswer: async (fromId, answer) => {
         const svc = svcRef.current!;
-        const pc = svc.getPeerConnection(fromId);
-        if (!pc || pc.signalingState !== "have-local-offer") return;
-        try { await pc.setRemoteDescription(answer); } catch {}
+        try {
+          await svc.applyAnswer(fromId, svc.getPeerGeneration(answer), answer);
+        } catch {}
       },
 
       onIceCandidate: async (fromId, candidate) => {
-        const pc = svcRef.current?.getPeerConnection(fromId);
-        if (!pc) return;
-        try { await pc.addIceCandidate(candidate); } catch {}
+        const svc = svcRef.current;
+        if (!svc) return;
+        try {
+          await svc.applyRemoteCandidate(
+            fromId,
+            svc.getPeerGeneration(candidate),
+            candidate,
+          );
+        } catch {}
       },
 
       onError: (code, message) => {
@@ -208,12 +221,16 @@ export default function ActiveCallScreen() {
 
   function ensurePeerConnection(svc: WebRTCService, targetId: string) {
     return svc.ensurePeerConnection(targetId, {
+      onPeerReplaced: () => {
+        setRemoteStreams(prev => ({
+          ...prev,
+          [targetId]: resetRemoteStream(prev[targetId]),
+        }));
+      },
       onTrack: (e) => {
         setRemoteStreams(prev => {
           const stream = prev[targetId] ?? new MediaStream();
-          if (!stream.getTracks().some(t => t.id === e.track.id)) {
-            stream.addTrack(e.track);
-          }
+          replaceRemoteTrack(stream, e.track);
           return { ...prev, [targetId]: stream };
         });
       },
@@ -254,6 +271,10 @@ export default function ActiveCallScreen() {
           password: passwordRef.current || undefined,
           quality,
         });
+        if (cancelled) {
+          svc.leave();
+          return;
+        }
         // Disable camera if answering audio-only
         if (startWithCamOff) {
           const ls = svc.getLocalStream();
@@ -311,7 +332,10 @@ export default function ActiveCallScreen() {
           password: room.password,
           quality,
         });
-        if (cancelled) return;
+        if (cancelled) {
+          svc.leave();
+          return;
+        }
 
         // Bind local video for preview during ringing
         const ls = svc.getLocalStream();
@@ -341,6 +365,8 @@ export default function ActiveCallScreen() {
     return () => {
       cancelled = true;
       if (timerRef.current) clearTimeout(timerRef.current);
+      try { svcRef.current?.leave(); } catch {}
+      svcRef.current = null;
     };
   }, []);
 
