@@ -11,6 +11,7 @@ export type RemoteTile = {
   primary?: boolean;
   hidden?: boolean;
   camOff?: boolean;
+  disconnected?: boolean;
 };
 
 type Props = {
@@ -70,7 +71,7 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
       height: "100%",
       alignContent: singleTile ? undefined : "start",
     }}>
-      {tiles.map(({ userId, displayName, stream, muted, fullscreen, primary, hidden, camOff }) => {
+      {tiles.map(({ userId, displayName, stream, muted, fullscreen, primary, hidden, camOff, disconnected }) => {
         const tileEl = getTileEl?.(userId) || null;
         const fsActive = !!fullscreen;
         return (
@@ -150,6 +151,19 @@ export default function VideoGrid({ tiles, isFullscreen, getTileEl, setTileEl, o
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <FiVideoOff size={16} /> Camera off
                 </span>
+              </div>
+            )}
+            {disconnected && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  position: "absolute", inset: 0, zIndex: 4,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "#1e293b", color: "#f8fafc", fontSize: 14,
+                }}
+              >
+                Connection lost
               </div>
             )}
             {/*

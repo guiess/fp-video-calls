@@ -69,6 +69,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
   const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
   const [telemetryOn, setTelemetryOn] = useState(false);
   const [remoteCamOff, setRemoteCamOff] = useState<Set<string>>(new Set());
+  const [terminalPeers, setTerminalPeers] = useState<Set<string>>(new Set());
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [isSharing, setIsSharing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -101,6 +102,13 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
 
   function ensurePeerConnection(svc: WebRTCService, targetId: string) {
     return svc.ensurePeerConnection(targetId, {
+      onRecoveryStateChange: (state) => {
+        setTerminalPeers((prev) => {
+          const next = new Set(prev);
+          if (state === "terminal") next.add(targetId); else next.delete(targetId);
+          return next;
+        });
+      },
       onPeerReplaced: () => {
         setRemoteStreams((prev) => ({
           ...prev,
@@ -206,6 +214,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         setParticipants((prev) => prev.filter((p) => p.userId !== uid));
         setHiddenRemotes((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
         setRemoteCamOff((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
+        setTerminalPeers((prev) => { const next = new Set(prev); next.delete(uid); return next; });
         if (peerId === uid) { setPeerId(null); peerIdRef.current = null; }
         try { svcRef.current?.removePeerConnection(uid); } catch {}
         setRemoteStreams((prev) => {
@@ -227,7 +236,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         if (pc.signalingState !== "stable") { try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {} }
         try {
           if (!svc.acceptRemoteOffer(fromId, offer)) return;
-          await pc.setRemoteDescription(offer);
+          await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           svc.sendAnswer(fromId, answer);
@@ -259,6 +268,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         if (code === "AUTH_FAILED" || code === "AUTH_REQUIRED" || code === "ROOM_CLOSED") {
           try { svcRef.current?.leave(); } catch {}
           setParticipants([]); setPeerId(null); peerIdRef.current = null; setRemoteStreams({});
+          setTerminalPeers(new Set());
           try { if (localVideoRef.current) localVideoRef.current.srcObject = null; } catch {}
           try { if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null; } catch {}
           setTimeout(() => alert(`Error: ${code}${message ? ` - ${message}` : ""}`), 0);
@@ -826,6 +836,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
                 primary: primaryUserId === uid,
                 hidden: hiddenRemotes.has(uid),
                 camOff: remoteCamOff.has(uid),
+                disconnected: terminalPeers.has(uid),
               };
             })}
             isFullscreen={isFullscreen}

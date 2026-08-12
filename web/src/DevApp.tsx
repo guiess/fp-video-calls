@@ -47,6 +47,7 @@ export default function App() {
   const [camEnabled, setCamEnabled] = useState<boolean>(true);
   // Track remote peers' audio mute state (best-effort based on track events)
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<Record<string, boolean>>({});
+  const [terminalPeers, setTerminalPeers] = useState<Set<string>>(new Set());
   // Camera facing mode toggle (user = front, environment = back)
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   // Screen sharing state
@@ -74,6 +75,13 @@ export default function App() {
 
   function ensurePeerConnection(svc: WebRTCService, targetId: string) {
     return svc.ensurePeerConnection(targetId, {
+      onRecoveryStateChange: (state) => {
+        setTerminalPeers((prev) => {
+          const next = new Set(prev);
+          if (state === "terminal") next.add(targetId); else next.delete(targetId);
+          return next;
+        });
+      },
       onPeerReplaced: () => {
         setRemoteStreams((prev) => {
           return {
@@ -183,6 +191,11 @@ export default function App() {
         }
 
         try { svcRef.current?.removePeerConnection(uid); } catch {}
+        setTerminalPeers((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
 
         // Remove the remote stream tile and clear single preview if it matches
         setRemoteStreams((prev) => {
@@ -212,14 +225,14 @@ export default function App() {
         }
 
         try {
-          await pc.setRemoteDescription(offer);
+          await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
         } catch (err) {
           console.warn("[onOffer] setRemoteDescription failed; recreating PC", err);
           try {
             svc.removePeerConnection(fromId);
             pc = ensurePeerConnection(svc, fromId);
             if (!svc.acceptRemoteOffer(fromId, offer)) return;
-            await pc.setRemoteDescription(offer);
+            await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
           } catch (err2) {
             console.error("[onOffer] SRD failed after recreate", err2);
             return;
@@ -252,6 +265,7 @@ export default function App() {
           setPeerId(null);
           peerIdRef.current = null;
           setRemoteStreams({});
+          setTerminalPeers(new Set());
           try { if (localVideoRef.current) localVideoRef.current.srcObject = null; } catch {}
           try { if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null; } catch {}
           setTimeout(() => {
@@ -492,6 +506,7 @@ export default function App() {
     setPeerId(null);
     peerIdRef.current = null;
     setRemoteStreams({});
+    setTerminalPeers(new Set());
     autoJoinTriggeredRef.current = false;
 
     // Recreate service and rebind handlers so subsequent joins have fresh signaling + PCs
@@ -545,6 +560,11 @@ export default function App() {
           peerIdRef.current = null;
         }
         try { svc.removePeerConnection(uid); } catch {}
+        setTerminalPeers((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
         setRemoteStreams((prev) => {
           const next = { ...prev };
           const removed = next[uid] as MediaStream | undefined;
@@ -563,7 +583,7 @@ export default function App() {
         if (pc.signalingState !== "stable") {
           try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {}
         }
-        await pc.setRemoteDescription(offer);
+        await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         svc.sendAnswer(fromId, answer);
@@ -922,7 +942,8 @@ export default function App() {
                 stream,
                 muted: !!(remoteAudioMuted[uid] || p?.micMuted),
                 // Consider fullscreen active if the tile container OR a descendant (e.g., video) is fullscreen
-                fullscreen: isTileFs
+                fullscreen: isTileFs,
+                disconnected: terminalPeers.has(uid),
               };
             })}
             isFullscreen={isFullscreen}

@@ -44,6 +44,7 @@ export default function ActiveCallScreen() {
   const [hiddenRemotes, setHiddenRemotes] = useState<Set<string>>(new Set());
   const [telemetryOn, setTelemetryOn] = useState(false);
   const [remoteCamOff, setRemoteCamOff] = useState<Set<string>>(new Set());
+  const [terminalPeers, setTerminalPeers] = useState<Set<string>>(new Set());
 
   const svcRef = useRef<WebRTCService | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -164,6 +165,11 @@ export default function ActiveCallScreen() {
         });
         const svc = svcRef.current!;
         try { svc.removePeerConnection(uid); } catch {}
+        setTerminalPeers(prev => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
         setRemoteStreams(prev => {
           const next = { ...prev };
           clearRemoteStream(next[uid]);
@@ -182,7 +188,7 @@ export default function ActiveCallScreen() {
         }
         try {
           if (!svc.acceptRemoteOffer(fromId, offer)) return;
-          await pc.setRemoteDescription(offer);
+          await pc.setRemoteDescription(svc.stripPeerGeneration(offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           svc.sendAnswer(fromId, answer);
@@ -221,6 +227,13 @@ export default function ActiveCallScreen() {
 
   function ensurePeerConnection(svc: WebRTCService, targetId: string) {
     return svc.ensurePeerConnection(targetId, {
+      onRecoveryStateChange: (state) => {
+        setTerminalPeers(prev => {
+          const next = new Set(prev);
+          if (state === "terminal") next.add(targetId); else next.delete(targetId);
+          return next;
+        });
+      },
       onPeerReplaced: () => {
         setRemoteStreams(prev => ({
           ...prev,
@@ -476,6 +489,7 @@ export default function ActiveCallScreen() {
         primary: primaryUserId === p.userId,
         hidden: hiddenRemotes.has(p.userId),
         camOff: remoteCamOff.has(p.userId),
+        disconnected: terminalPeers.has(p.userId),
       };
     });
 
