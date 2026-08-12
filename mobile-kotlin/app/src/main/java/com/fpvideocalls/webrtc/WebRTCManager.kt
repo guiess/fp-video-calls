@@ -3,6 +3,8 @@ package com.fpvideocalls.webrtc
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.SystemClock
 import android.util.Log
 import android.view.OrientationEventListener
@@ -10,6 +12,7 @@ import com.fpvideocalls.model.JoinOptions
 import com.fpvideocalls.model.Participant
 import com.fpvideocalls.model.SignalingHandlers
 import com.fpvideocalls.service.SignalingService
+import com.fpvideocalls.util.AppLifecycle
 import com.fpvideocalls.util.Constants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +53,7 @@ class WebRTCManager(
         private const val MULTI_CAPTURE_W = 960
         private const val MULTI_CAPTURE_H = 540
         private const val MULTI_CAPTURE_FPS = 24
+        private const val PEER_CREATION_TURN_WAIT_MILLIS = 10_000L
     }
 
     private var factory: PeerConnectionFactory? = null
@@ -74,6 +78,12 @@ class WebRTCManager(
             credentialInstaller = TurnCredentialInstaller(::installTurnCredentials)
         )
     )
+    /** TURN credential readiness, independent from signaling connectivity. */
+    val turnReadiness: StateFlow<TurnReadiness> = turnLeaseManager.readiness
+    private val pendingPeerActions =
+        java.util.concurrent.ConcurrentHashMap<String, PendingPeerAction>()
+    private val turnResumeListener = { turnLeaseManager.reconcileDeadline() }
+    private var turnNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var localUserId: String = ""
     private var statsPollerJob: kotlinx.coroutines.Job? = null
     private val prevBytesSent = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -82,6 +92,17 @@ class WebRTCManager(
     private var currentCaptureMode: CaptureMode = CaptureMode.SOLO
 
     private enum class CaptureMode { SOLO, MULTI }
+
+    private sealed class PeerConnectionResult {
+        data class Ready(val peerConnection: PeerConnection) : PeerConnectionResult()
+        object Retryable : PeerConnectionResult()
+    }
+
+    private sealed class PendingPeerAction {
+        object Create : PendingPeerAction()
+        object Offer : PendingPeerAction()
+        data class Answer(val offerData: Any) : PendingPeerAction()
+    }
 
     /** Lightweight 3-level quality classification per remote peer. */
     enum class QualityLevel { GOOD, OK, POOR }
@@ -144,6 +165,7 @@ class WebRTCManager(
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
+        registerTurnRefreshTriggers()
         localUserId = userId
         localName = displayName
         telemetryRoomId = roomId
@@ -163,6 +185,7 @@ class WebRTCManager(
                 // Initialize signaling
                 val signaling = SignalingService(Constants.SIGNALING_URL)
                 signalingService = signaling
+                replayPendingPeerActions()
 
                 signaling.init(SignalingHandlers(
                     onSignalingStateChange = { state ->
@@ -187,13 +210,13 @@ class WebRTCManager(
                         // lower userId is the canonical offerer (matches web client).
                         for (p in existingParticipants) {
                             if (p.userId == userId) continue
-                            // Always create the peer connection so we can receive offers
-                            createPeerConnection(p.userId)
                             val shouldOffer = userId < p.userId
                             Log.d(TAG, "Peer ${p.userId}: shouldOffer=$shouldOffer (me=$userId)")
-                            if (shouldOffer) {
-                                scope.launch(Dispatchers.Main) {
+                            scope.launch(Dispatchers.Main) {
+                                if (shouldOffer) {
                                     createAndSendOffer(p.userId, signaling)
+                                } else {
+                                    ensurePeerConnection(p.userId)
                                 }
                             }
                         }
@@ -207,14 +230,13 @@ class WebRTCManager(
                         // Announce our current camera state so the new peer can
                         // render a placeholder if our camera is already off.
                         if (!_camEnabled.value) signaling.sendCameraState(true)
-                        // Always create peer connection; only send offer if we are
-                        // the canonical offerer (lower userId), matching web client.
-                        createPeerConnection(joinedId)
                         val shouldOffer = userId < joinedId
                         Log.d(TAG, "user_joined peer $joinedId: shouldOffer=$shouldOffer")
-                        if (shouldOffer) {
-                            scope.launch(Dispatchers.Main) {
+                        scope.launch(Dispatchers.Main) {
+                            if (shouldOffer) {
                                 createAndSendOffer(joinedId, signaling)
+                            } else {
+                                ensurePeerConnection(joinedId)
                             }
                         }
                     },
@@ -228,6 +250,7 @@ class WebRTCManager(
                         prevBytesSent.remove(leftId)
                         prevStatsAt.remove(leftId)
                         prevNackPliFir.remove(leftId)
+                        pendingPeerActions.remove(leftId)
                         peerConnections[leftId]?.let { pc ->
                             try { pc.close() } catch (_: Exception) {}
                         }
@@ -408,14 +431,29 @@ class WebRTCManager(
             }
         }
         Log.d(TAG, "[turn] credential lease installed ttl=${credentials.ttl}s")
+        replayPendingPeerActions()
     }
 
-    private fun iceServersForNewPeer(): List<PeerConnection.IceServer> {
-        if (!turnLeaseManager.hasExpiredCredentials()) return iceServers
-        Log.w(TAG, "[turn] expired lease excluded from new peer configuration; refresh requested")
-        _signalingState.value = "connecting"
-        turnLeaseManager.requestRefresh()
-        return STUN_SERVERS
+    private suspend fun getOrCreatePeerConnection(targetId: String): PeerConnectionResult {
+        existingPeerConnection(targetId)?.let { return PeerConnectionResult.Ready(it) }
+        if (turnLeaseManager.hasExpiredCredentials()) {
+            val isReady = turnLeaseManager.awaitValidCredentials(
+                PEER_CREATION_TURN_WAIT_MILLIS
+            )
+            if (!isReady) return PeerConnectionResult.Retryable
+        }
+        return PeerConnectionResult.Ready(createPeerConnectionNow(targetId))
+    }
+
+    private fun existingPeerConnection(targetId: String): PeerConnection? =
+        peerConnections[targetId]?.takeIf {
+            it.connectionState() != PeerConnection.PeerConnectionState.CLOSED
+        }
+
+    private suspend fun ensurePeerConnection(targetId: String) {
+        if (getOrCreatePeerConnection(targetId) is PeerConnectionResult.Retryable) {
+            queuePendingPeerAction(targetId, PendingPeerAction.Create)
+        }
     }
 
     private fun createRtcConfiguration(
@@ -425,13 +463,79 @@ class WebRTCManager(
         continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
     }
 
-    private fun createPeerConnection(targetId: String): PeerConnection {
-        val existing = peerConnections[targetId]
-        if (existing != null && existing.connectionState() != PeerConnection.PeerConnectionState.CLOSED) {
-            return existing
-        }
+    private fun queuePendingPeerAction(targetId: String, action: PendingPeerAction) {
+        pendingPeerActions.merge(targetId, action, ::preferPendingAction)
+        Log.w(TAG, "[turn] peer action deferred until credentials are ready")
+        val canReplay = action is PendingPeerAction.Create || signalingService != null
+        if (canReplay && turnLeaseManager.hasValidCredentials()) replayPendingPeerActions()
+    }
 
-        val rtcConfig = createRtcConfiguration(iceServersForNewPeer())
+    private fun preferPendingAction(
+        current: PendingPeerAction,
+        incoming: PendingPeerAction
+    ): PendingPeerAction = when {
+        incoming is PendingPeerAction.Answer -> incoming
+        current is PendingPeerAction.Answer -> current
+        incoming is PendingPeerAction.Offer -> incoming
+        else -> current
+    }
+
+    private fun replayPendingPeerActions() {
+        for ((targetId, action) in pendingPeerActions.toMap()) {
+            if (!pendingPeerActions.remove(targetId, action)) continue
+            scope.launch(Dispatchers.Main) {
+                executePendingPeerAction(targetId, action)
+            }
+        }
+    }
+
+    private suspend fun executePendingPeerAction(
+        targetId: String,
+        action: PendingPeerAction
+    ) {
+        val signaling = signalingService
+        when {
+            action is PendingPeerAction.Create -> ensurePeerConnection(targetId)
+            signaling == null -> queuePendingPeerAction(targetId, action)
+            action is PendingPeerAction.Offer -> createAndSendOffer(targetId, signaling)
+            action is PendingPeerAction.Answer -> handleOffer(targetId, action.offerData, signaling)
+        }
+    }
+
+    private fun registerTurnRefreshTriggers() {
+        unregisterTurnRefreshTriggers()
+        AppLifecycle.addOnStartListener(turnResumeListener)
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+            as ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                turnLeaseManager.reconcileDeadline()
+            }
+        }
+        try {
+            connectivity.registerDefaultNetworkCallback(callback)
+            turnNetworkCallback = callback
+        } catch (error: SecurityException) {
+            Log.w(TAG, "[turn] connectivity refresh trigger unavailable", error)
+        }
+    }
+
+    private fun unregisterTurnRefreshTriggers() {
+        AppLifecycle.removeOnStartListener(turnResumeListener)
+        val callback = turnNetworkCallback ?: return
+        turnNetworkCallback = null
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+            as ConnectivityManager
+        try {
+            connectivity.unregisterNetworkCallback(callback)
+        } catch (_: IllegalArgumentException) {
+            // Callback was already unregistered by the platform.
+        }
+    }
+
+    private fun createPeerConnectionNow(targetId: String): PeerConnection {
+        existingPeerConnection(targetId)?.let { return it }
+        val rtcConfig = createRtcConfiguration(iceServers)
 
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {
@@ -490,7 +594,12 @@ class WebRTCManager(
     }
 
     private suspend fun createAndSendOffer(targetId: String, signaling: SignalingService) {
-        val pc = createPeerConnection(targetId)
+        val result = getOrCreatePeerConnection(targetId)
+        if (result is PeerConnectionResult.Retryable) {
+            queuePendingPeerAction(targetId, PendingPeerAction.Offer)
+            return
+        }
+        val pc = (result as PeerConnectionResult.Ready).peerConnection
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
@@ -516,7 +625,12 @@ class WebRTCManager(
     private suspend fun handleOffer(fromId: String, offerData: Any, signaling: SignalingService) {
         Log.d(TAG, "Received offer from $fromId")
         val offerJson = offerData as? JSONObject ?: return
-        val pc = createPeerConnection(fromId)
+        val result = getOrCreatePeerConnection(fromId)
+        if (result is PeerConnectionResult.Retryable) {
+            queuePendingPeerAction(fromId, PendingPeerAction.Answer(offerData))
+            return
+        }
+        val pc = (result as PeerConnectionResult.Ready).peerConnection
 
         val sdp = SessionDescription(
             SessionDescription.Type.OFFER,
@@ -638,8 +752,10 @@ class WebRTCManager(
     }
 
     fun cleanup() {
+        unregisterTurnRefreshTriggers()
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
+        pendingPeerActions.clear()
 
         // 1. Stop orientation listener
         orientationListener?.disable()

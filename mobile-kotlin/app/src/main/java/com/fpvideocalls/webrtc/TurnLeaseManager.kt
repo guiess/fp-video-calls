@@ -7,6 +7,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -96,8 +100,16 @@ data class TurnLeaseRuntime(
 data class TurnLease(
     val credentials: TurnCredentials,
     val installedAtElapsedMillis: Long,
+    val refreshAtElapsedMillis: Long,
     val expiresAtElapsedMillis: Long
 )
+
+enum class TurnReadiness {
+    READY,
+    WAITING,
+    UNAVAILABLE,
+    STOPPED
+}
 
 /** Pure TURN lease scheduling, validation, and retry decisions. */
 object TurnLeasePolicy {
@@ -107,7 +119,7 @@ object TurnLeasePolicy {
     private const val REFRESH_PERCENT = 80L
     private const val PERCENT_BASE = 100L
     private const val INITIAL_RETRY_MILLIS = 1_000L
-    private const val MAX_RETRY_MILLIS = 5_000L
+    private const val MAX_RETRY_BASE_MILLIS = 4_000L
     private const val JITTER_SPREAD = 0.2
 
     fun parseTtlSeconds(value: Any?): Int {
@@ -121,9 +133,10 @@ object TurnLeasePolicy {
 
     fun retryDelayMillis(attempt: Int, jitterUnit: Double): Long {
         val exponent = (attempt - 1).coerceIn(0, 30)
-        val base = INITIAL_RETRY_MILLIS * 2.0.pow(exponent)
+        val base = (INITIAL_RETRY_MILLIS * 2.0.pow(exponent))
+            .coerceAtMost(MAX_RETRY_BASE_MILLIS.toDouble())
         val jitter = 1.0 + ((jitterUnit.coerceIn(0.0, 1.0) * 2.0) - 1.0) * JITTER_SPREAD
-        return (base * jitter).toLong().coerceAtMost(MAX_RETRY_MILLIS)
+        return (base * jitter).toLong()
     }
 
     fun expiresAtMillis(installedAtMillis: Long, ttlSeconds: Int): Long =
@@ -153,9 +166,9 @@ class TurnLeaseManager(
     private val stateLock = Any()
     private var refreshJob: Job? = null
     private var refreshSignals: Channel<Unit>? = null
-
-    @Volatile
-    private var currentLease: TurnLease? = null
+    private val currentLease = MutableStateFlow<TurnLease?>(null)
+    private val _readiness = MutableStateFlow(TurnReadiness.STOPPED)
+    val readiness: StateFlow<TurnReadiness> = _readiness.asStateFlow()
 
     suspend fun start(request: TurnLeaseRequest): Boolean {
         stop()
@@ -169,34 +182,54 @@ class TurnLeaseManager(
             refreshSignals = signals
             refreshJob = job
         }
+        _readiness.value = TurnReadiness.WAITING
         job.start()
         return firstAttempt.await()
     }
 
     fun requestRefresh() {
-        synchronized(stateLock) { refreshSignals }?.trySend(Unit)
+        val signals = synchronized(stateLock) { refreshSignals } ?: return
+        if (!hasValidCredentials()) _readiness.value = TurnReadiness.WAITING
+        signals.trySend(Unit)
+    }
+
+    fun reconcileDeadline() {
+        val lease = currentLease.value
+        val isOverdue = lease == null ||
+            clock.elapsedRealtimeMillis() >= lease.refreshAtElapsedMillis
+        if (isOverdue) requestRefresh()
+    }
+
+    suspend fun awaitValidCredentials(timeoutMillis: Long): Boolean {
+        if (hasValidCredentials()) return true
+        if (timeoutMillis <= 0L) return false
+        requestRefresh()
+        return withTimeoutOrNull(timeoutMillis) {
+            currentLease.first(::isValidLease)
+            true
+        } ?: false
     }
 
     fun hasValidCredentials(): Boolean {
-        val lease = currentLease ?: return false
-        return clock.elapsedRealtimeMillis() < lease.expiresAtElapsedMillis
+        return currentLease.value?.let(::isValidLease) == true
     }
 
     fun hasExpiredCredentials(): Boolean {
-        val lease = currentLease ?: return false
+        val lease = currentLease.value ?: return false
         return clock.elapsedRealtimeMillis() >= lease.expiresAtElapsedMillis
     }
 
-    fun currentCredentials(): TurnCredentials? = currentLease?.credentials
+    fun currentCredentials(): TurnCredentials? = currentLease.value?.credentials
 
     fun stop() {
         val state = synchronized(stateLock) {
             val captured = refreshJob to refreshSignals
             refreshJob = null
             refreshSignals = null
-            currentLease = null
+            currentLease.value = null
             captured
         }
+        _readiness.value = TurnReadiness.STOPPED
         state.first?.cancel()
     }
 
@@ -216,6 +249,11 @@ class TurnLeaseManager(
             if (!wasInstalled) {
                 retryAttempt++
                 nextDelayMillis = retryDelay(retryAttempt)
+                _readiness.value = if (hasValidCredentials()) {
+                    TurnReadiness.READY
+                } else {
+                    TurnReadiness.UNAVAILABLE
+                }
             } else {
                 retryAttempt = 0
                 nextDelayMillis = TurnLeasePolicy.refreshDelayMillis(requireNotNull(credentials).ttl)
@@ -242,11 +280,14 @@ class TurnLeaseManager(
     private fun install(credentials: TurnCredentials): Boolean = try {
         credentialInstaller.install(credentials)
         val installedAt = clock.elapsedRealtimeMillis()
-        currentLease = TurnLease(
+        currentLease.value = TurnLease(
             credentials = credentials,
             installedAtElapsedMillis = installedAt,
+            refreshAtElapsedMillis = installedAt +
+                TurnLeasePolicy.refreshDelayMillis(credentials.ttl),
             expiresAtElapsedMillis = TurnLeasePolicy.expiresAtMillis(installedAt, credentials.ttl)
         )
+        _readiness.value = TurnReadiness.READY
         true
     } catch (_: RuntimeException) {
         false
@@ -254,6 +295,9 @@ class TurnLeaseManager(
 
     private fun retryDelay(attempt: Int): Long =
         TurnLeasePolicy.retryDelayMillis(attempt, jitterSource.nextUnit())
+
+    private fun isValidLease(lease: TurnLease?): Boolean =
+        lease != null && clock.elapsedRealtimeMillis() < lease.expiresAtElapsedMillis
 
     private fun drainSignals(signals: Channel<Unit>) {
         while (signals.tryReceive().isSuccess) {

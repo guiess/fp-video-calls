@@ -3,6 +3,7 @@ package com.fpvideocalls.webrtc
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -104,6 +105,87 @@ class TurnLeaseManagerTest {
     }
 
     @Test
+    fun `deadline reconciliation refreshes when monotonic clock advances during scheduler sleep`() = runTest {
+        var elapsedRealtime = 0L
+        var fetchCount = 0
+        val manager = TurnLeaseManager(
+            runtime = TurnLeaseRuntime(
+                scope = backgroundScope,
+                clock = MonotonicClock { elapsedRealtime },
+                jitterSource = JitterSource { 0.5 }
+            ),
+            ports = TurnLeasePorts(
+                credentialProvider = TurnCredentialProvider {
+                    fetchCount++
+                    credentials
+                },
+                credentialInstaller = TurnCredentialInstaller { }
+            )
+        )
+        manager.start(TurnLeaseRequest("user", "room"))
+
+        elapsedRealtime = 80_000L
+        manager.reconcileDeadline()
+        runCurrent()
+
+        assertEquals(2, fetchCount)
+        assertEquals(0L, testScheduler.currentTime)
+        manager.stop()
+    }
+
+    @Test
+    fun `expired lease waiters share one refresh and resume with fresh credentials`() = runTest {
+        var elapsedRealtime = 0L
+        var fetchCount = 0
+        val refreshed = CompletableDeferred<TurnCredentials?>()
+        val manager = managerWithClock(
+            clock = { elapsedRealtime },
+            provider = {
+                fetchCount++
+                if (fetchCount == 1) credentials.copy(ttl = 1) else refreshed.await()
+            }
+        )
+        manager.start(TurnLeaseRequest("user", "room"))
+        elapsedRealtime = 1_000L
+
+        val first = async { manager.awaitValidCredentials(5_000) }
+        val second = async { manager.awaitValidCredentials(5_000) }
+        runCurrent()
+        assertEquals(2, fetchCount)
+
+        refreshed.complete(credentials)
+        runCurrent()
+
+        assertTrue(first.await())
+        assertTrue(second.await())
+        manager.stop()
+    }
+
+    @Test
+    fun `expired lease wait is bounded when refresh cannot complete`() = runTest {
+        var elapsedRealtime = 0L
+        var fetchCount = 0
+        val manager = managerWithClock(
+            clock = { elapsedRealtime },
+            provider = {
+                fetchCount++
+                if (fetchCount == 1) credentials.copy(ttl = 1) else awaitCancellation()
+            }
+        )
+        manager.start(TurnLeaseRequest("user", "room"))
+        elapsedRealtime = 1_000L
+
+        val result = async { manager.awaitValidCredentials(1_000) }
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertFalse(result.await())
+        assertEquals(2, fetchCount)
+        manager.stop()
+    }
+
+    @Test
     fun `failed refresh retains valid lease and retries with bounded jittered backoff`() = runTest {
         var fetchCount = 0
         val manager = manager(
@@ -132,6 +214,10 @@ class TurnLeaseManagerTest {
         assertEquals(1_000, TurnLeasePolicy.retryDelayMillis(1, 0.5))
         assertEquals(1_200, TurnLeasePolicy.retryDelayMillis(1, 1.0))
         assertTrue(TurnLeasePolicy.retryDelayMillis(100, 1.0) <= 5_000)
+        assertEquals(
+            listOf(3_200L, 4_000L, 4_800L),
+            listOf(0.0, 0.5, 1.0).map { TurnLeasePolicy.retryDelayMillis(100, it) }
+        )
         manager.stop()
     }
 
@@ -179,10 +265,18 @@ class TurnLeaseManagerTest {
 
     private fun kotlinx.coroutines.test.TestScope.manager(
         provider: suspend () -> TurnCredentials?
+    ): TurnLeaseManager = managerWithClock(
+        clock = { testScheduler.currentTime },
+        provider = provider
+    )
+
+    private fun kotlinx.coroutines.test.TestScope.managerWithClock(
+        clock: () -> Long,
+        provider: suspend () -> TurnCredentials?
     ): TurnLeaseManager = TurnLeaseManager(
         runtime = TurnLeaseRuntime(
             scope = backgroundScope,
-            clock = MonotonicClock { testScheduler.currentTime },
+            clock = MonotonicClock(clock),
             jitterSource = JitterSource { 0.5 }
         ),
         ports = TurnLeasePorts(
