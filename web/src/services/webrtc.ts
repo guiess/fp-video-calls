@@ -1,4 +1,8 @@
 import io, { Socket } from "socket.io-client";
+import {
+  PeerRecoveryCoordinator,
+  classifyPeerConnection,
+} from "./peerRecovery";
 
 export type JoinOptions = {
   roomId: string;
@@ -41,11 +45,47 @@ export type SignalingHandlers = {
   onTelemetryData?: (sample: TelemetrySample) => void;
 };
 
+export type PeerMediaHandlers = {
+  onTrack?: (event: RTCTrackEvent) => void;
+  onConnected?: () => void;
+};
+
 const MAX_RECEIVED_TELEMETRY_SAMPLES = 100;
+
+export class PeerRecoveryCancelledError extends Error {
+  constructor() {
+    super("Peer recovery was cancelled because the connection is no longer current");
+    this.name = "PeerRecoveryCancelledError";
+  }
+}
+
+export class PeerRecoveryStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PeerRecoveryStateError";
+  }
+}
+
+export class PeerConnectionLifecycleError extends Error {
+  constructor() {
+    super("Cannot create a peer connection while the room is tearing down");
+    this.name = "PeerConnectionLifecycleError";
+  }
+}
 
 export class WebRTCService {
   private socket: Socket | null = null;
   private pcs: Map<string, RTCPeerConnection> = new Map();
+  private peerGenerations = new Map<string, number>();
+  private peerMediaHandlers = new Map<string, PeerMediaHandlers>();
+  private isTearingDown = false;
+  private recovery = new PeerRecoveryCoordinator({
+    isCurrent: (targetId, generation) => this.isCurrentPeer(targetId, generation),
+    restartIce: (targetId, generation, signal) =>
+      this.restartPeerIce(targetId, generation, signal),
+    rebuildPeer: (targetId, generation, signal) =>
+      this.rebuildPeer(targetId, generation, signal),
+  });
   private localStream: MediaStream | null = null;
   private roomId: string = "";
   private userId: string = "";
@@ -469,28 +509,190 @@ export class WebRTCService {
     }
   }
  
-  createPeerConnection(targetId: string) {
+  /**
+   * Returns the reusable peer for a remote user, replacing terminal cache entries.
+   * UI callbacks are registered separately through ensurePeerConnection().
+   */
+  createPeerConnection(targetId: string): RTCPeerConnection {
+    if (this.isTearingDown) throw new PeerConnectionLifecycleError();
     const existing = this.pcs.get(targetId);
-    if (existing) return existing;
+    if (existing && classifyPeerConnection(existing) !== "terminal") return existing;
+    if (existing) this.removePeerInstance(targetId, existing, true);
+    return this.createPeerInstance(targetId);
+  }
 
+  /** Registers UI media callbacks and returns the single live connection for a peer. */
+  ensurePeerConnection(
+    targetId: string,
+    handlers: PeerMediaHandlers,
+  ): RTCPeerConnection {
+    this.peerMediaHandlers.set(targetId, handlers);
+    return this.createPeerConnection(targetId);
+  }
+
+  /** Stops recovery and removes a remote peer without affecting other participants. */
+  removePeerConnection(targetId: string): void {
+    this.recovery.cancelPeer(targetId);
+    this.peerMediaHandlers.delete(targetId);
+    const peer = this.pcs.get(targetId);
+    if (peer) this.removePeerInstance(targetId, peer, false);
+  }
+
+  private createPeerInstance(targetId: string): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: this.getIceServers() });
-    // Let App bind per-peer handlers and onicecandidate routing
-    pc.onicecandidate = null;
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((t) => {
-        pc.addTrack(t, this.localStream!);
-      });
-    }
+    const generation = (this.peerGenerations.get(targetId) ?? 0) + 1;
+    this.peerGenerations.set(targetId, generation);
     this.pcs.set(targetId, pc);
-    // Apply bitrate cap after tracks are added
-    if (this.videoBitrateCap) {
-      // Defer to allow transceiver setup to complete
-      setTimeout(() => this.applyBitrateCap(pc, targetId), 0);
-    }
+    this.attachPeerHandlers(targetId, pc, generation);
+    this.attachLocalTracks(pc);
+    if (this.videoBitrateCap) setTimeout(() => this.applyBitrateCap(pc, targetId), 0);
     return pc;
   }
 
+  private attachPeerHandlers(
+    targetId: string,
+    pc: RTCPeerConnection,
+    generation: number,
+  ): void {
+    pc.ontrack = (event) => {
+      if (this.isCurrentPeer(targetId, generation)) {
+        this.peerMediaHandlers.get(targetId)?.onTrack?.(event);
+      }
+    };
+    pc.onicecandidate = (event) => {
+      if (event.candidate && this.isCurrentPeer(targetId, generation)) {
+        this.sendIceCandidate(targetId, event.candidate.toJSON());
+      }
+    };
+    pc.oniceconnectionstatechange = () => this.observePeerState(targetId, generation, pc);
+    pc.onconnectionstatechange = () => {
+      this.observePeerState(targetId, generation, pc);
+      if (this.isCurrentPeer(targetId, generation)
+        && classifyPeerConnection(pc) === "connected") {
+        this.peerMediaHandlers.get(targetId)?.onConnected?.();
+      }
+    };
+    pc.onnegotiationneeded = () => {};
+  }
+
+  private attachLocalTracks(pc: RTCPeerConnection): void {
+    const stream = this.localStream;
+    if (!stream) return;
+    for (const track of stream.getTracks()) {
+      if (!pc.getSenders().some((sender) => sender.track?.id === track.id)) {
+        pc.addTrack(track, stream);
+      }
+    }
+  }
+
+  private observePeerState(
+    targetId: string,
+    generation: number,
+    pc: RTCPeerConnection,
+  ): void {
+    if (!this.isCurrentPeer(targetId, generation)) return;
+    this.recovery.observe(targetId, generation, classifyPeerConnection(pc));
+  }
+
+  private isCurrentPeer(targetId: string, generation: number): boolean {
+    return !this.isTearingDown
+      && this.peerGenerations.get(targetId) === generation
+      && this.pcs.has(targetId);
+  }
+
+  private async restartPeerIce(
+    targetId: string,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const pc = this.requireCurrentPeer(targetId, generation, signal);
+    pc.setConfiguration({ iceServers: this.getIceServers() });
+    await this.waitForStableSignaling(targetId, generation, pc, signal);
+    const offer = await pc.createOffer({ iceRestart: true });
+    this.requireCurrentPeer(targetId, generation, signal);
+    await pc.setLocalDescription(offer);
+    this.requireCurrentPeer(targetId, generation, signal);
+    this.sendOffer(targetId, offer);
+  }
+
+  private async rebuildPeer(
+    targetId: string,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const oldPeer = this.requireCurrentPeer(targetId, generation, signal);
+    this.removePeerInstance(targetId, oldPeer, false);
+    const replacement = this.createPeerInstance(targetId);
+    const replacementGeneration = this.peerGenerations.get(targetId)!;
+    const offer = await replacement.createOffer();
+    this.requireCurrentPeer(targetId, replacementGeneration, signal);
+    await replacement.setLocalDescription(offer);
+    this.requireCurrentPeer(targetId, replacementGeneration, signal);
+    this.sendOffer(targetId, offer);
+  }
+
+  private requireCurrentPeer(
+    targetId: string,
+    generation: number,
+    signal: AbortSignal,
+  ): RTCPeerConnection {
+    if (signal.aborted || !this.isCurrentPeer(targetId, generation)) {
+      throw new PeerRecoveryCancelledError();
+    }
+    return this.pcs.get(targetId)!;
+  }
+
+  private waitForStableSignaling(
+    targetId: string,
+    generation: number,
+    pc: RTCPeerConnection,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (pc.signalingState === "stable") return Promise.resolve();
+    if (pc.signalingState === "closed") {
+      return Promise.reject(new PeerRecoveryStateError("Cannot restart ICE on a closed peer connection"));
+    }
+    return new Promise((resolve, reject) => {
+      const finish = (error?: Error) => {
+        pc.removeEventListener("signalingstatechange", handleStateChange);
+        signal.removeEventListener("abort", handleAbort);
+        error ? reject(error) : resolve();
+      };
+      const handleAbort = () => finish(new PeerRecoveryCancelledError());
+      const handleStateChange = () => {
+        if (!this.isCurrentPeer(targetId, generation)) return handleAbort();
+        if (pc.signalingState === "stable") finish();
+        if (pc.signalingState === "closed") {
+          finish(new PeerRecoveryStateError("Peer connection closed while waiting to restart ICE"));
+        }
+      };
+      pc.addEventListener("signalingstatechange", handleStateChange);
+      signal.addEventListener("abort", handleAbort, { once: true });
+    });
+  }
+
+  private removePeerInstance(
+    targetId: string,
+    pc: RTCPeerConnection,
+    cancelRecovery: boolean,
+  ): void {
+    if (cancelRecovery) this.recovery.cancelPeer(targetId);
+    if (this.pcs.get(targetId) === pc) this.pcs.delete(targetId);
+    this.detachPeerHandlers(pc);
+    try { pc.close(); } catch {}
+  }
+
+  private detachPeerHandlers(pc: RTCPeerConnection): void {
+    pc.ontrack = null;
+    pc.onicecandidate = null;
+    pc.oniceconnectionstatechange = null;
+    pc.onconnectionstatechange = null;
+    pc.onsignalingstatechange = null;
+    pc.onnegotiationneeded = null;
+  }
+
   async join({ roomId, userId, displayName, password, quality }: JoinOptions) {
+    this.isTearingDown = false;
     this.ensureSocket();
     if (!this.socket) throw new Error("Socket not initialized");
     this.roomId = roomId;
@@ -561,10 +763,8 @@ export class WebRTCService {
 
   getPeerConnection(targetId: string) {
     const pc = this.pcs.get(targetId) || null;
-    if (pc && pc.signalingState === "closed") {
-      try {
-        this.pcs.delete(targetId);
-      } catch {}
+    if (pc && this.isClosedPeer(pc)) {
+      this.removePeerInstance(targetId, pc, true);
       return null;
     }
     return pc;
@@ -574,6 +774,12 @@ export class WebRTCService {
   }
   getUserId() {
     return this.userId;
+  }
+
+  private isClosedPeer(pc: RTCPeerConnection): boolean {
+    return pc.connectionState === "closed"
+      || pc.iceConnectionState === "closed"
+      || pc.signalingState === "closed";
   }
 
   // ── Telemetry collector (opt-in, light) ────────────────────────────
@@ -898,19 +1104,10 @@ export class WebRTCService {
  
   /** Recreate peer connections to apply updated TURN settings from localStorage */
   applyUpdatedTurnSettings() {
-    for (const [targetId, oldPc] of this.pcs.entries()) {
+    for (const [targetId, oldPc] of [...this.pcs.entries()]) {
       try {
-        // Preserve senders and local tracks by creating a new PC and re-attaching
-        const newPc = new RTCPeerConnection({ iceServers: this.getIceServers() });
-        // Move handlers to be bound by App
-        newPc.onicecandidate = oldPc.onicecandidate;
-        // Re-add local tracks
-        this.localStream?.getTracks().forEach(t => { try { newPc.addTrack(t, this.localStream!); } catch {} });
-        // Replace map entry and close old
-        this.pcs.set(targetId, newPc);
-        // Apply bitrate cap to new PC
-        if (this.videoBitrateCap) setTimeout(() => this.applyBitrateCap(newPc, targetId), 0);
-        try { oldPc.close(); } catch {}
+        this.removePeerInstance(targetId, oldPc, true);
+        this.createPeerInstance(targetId);
       } catch (e) {
         console.warn("[turn] apply settings failed", e);
       }
@@ -918,6 +1115,8 @@ export class WebRTCService {
   }
  
   leave() {
+    this.isTearingDown = true;
+    this.recovery.cancelAll();
     // Stop telemetry collection
     this.setTelemetryEnabled(false);
     // Clean up mirroring resources
@@ -939,11 +1138,12 @@ export class WebRTCService {
     try {
       this.localStream?.getTracks()?.forEach((t) => t.stop());
       for (const pc of this.pcs.values()) {
-        try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {}
+        try { this.detachPeerHandlers(pc); } catch {}
         try { pc.close(); } catch {}
       }
     } catch {}
     this.pcs.clear();
+    this.peerMediaHandlers.clear();
     this.localStream = null;
     this.receivedTelemetry = [];
     // Reset room id; userId persists externally in App for stable identity
