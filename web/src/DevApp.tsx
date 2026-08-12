@@ -77,6 +77,8 @@ export default function App() {
     return svc.ensurePeerConnection(targetId, {
       onRecoveryStateChange: (state) => {
         setTerminalPeers((prev) => {
+          if (state === "terminal" && prev.has(targetId)) return prev;
+          if (state !== "terminal" && !prev.has(targetId)) return prev;
           const next = new Set(prev);
           if (state === "terminal") next.add(targetId); else next.delete(targetId);
           return next;
