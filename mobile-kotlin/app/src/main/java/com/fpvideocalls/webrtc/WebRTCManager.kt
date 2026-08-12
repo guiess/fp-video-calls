@@ -54,6 +54,7 @@ class WebRTCManager(
         private const val MULTI_CAPTURE_H = 540
         private const val MULTI_CAPTURE_FPS = 24
         private const val PEER_CREATION_TURN_WAIT_MILLIS = 10_000L
+        private const val MAX_PENDING_ICE_CANDIDATES_PER_PEER = 64
     }
 
     private var factory: PeerConnectionFactory? = null
@@ -82,6 +83,11 @@ class WebRTCManager(
     val turnReadiness: StateFlow<TurnReadiness> = turnLeaseManager.readiness
     private val pendingPeerActions =
         java.util.concurrent.ConcurrentHashMap<String, PendingPeerAction>()
+    private val pendingIceCandidates =
+        PendingIceCandidateBuffer<IceCandidate>(MAX_PENDING_ICE_CANDIDATES_PER_PEER)
+    private val remoteDescriptionReadyPeers =
+        java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val peerCallFence = CallGenerationFence()
     private val turnResumeListener = { turnLeaseManager.reconcileDeadline() }
     private var turnNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var localUserId: String = ""
@@ -165,6 +171,10 @@ class WebRTCManager(
     fun setup(roomId: String, userId: String, displayName: String, password: String? = null) {
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
+        peerCallFence.start()
+        pendingPeerActions.clear()
+        pendingIceCandidates.start()
+        remoteDescriptionReadyPeers.clear()
         registerTurnRefreshTriggers()
         localUserId = userId
         localName = displayName
@@ -251,6 +261,8 @@ class WebRTCManager(
                         prevStatsAt.remove(leftId)
                         prevNackPliFir.remove(leftId)
                         pendingPeerActions.remove(leftId)
+                        pendingIceCandidates.clear(leftId)
+                        remoteDescriptionReadyPeers.remove(leftId)
                         peerConnections[leftId]?.let { pc ->
                             try { pc.close() } catch (_: Exception) {}
                         }
@@ -435,6 +447,7 @@ class WebRTCManager(
     }
 
     private suspend fun getOrCreatePeerConnection(targetId: String): PeerConnectionResult {
+        val generation = peerCallFence.current() ?: return PeerConnectionResult.Retryable
         existingPeerConnection(targetId)?.let { return PeerConnectionResult.Ready(it) }
         if (turnLeaseManager.hasExpiredCredentials()) {
             val isReady = turnLeaseManager.awaitValidCredentials(
@@ -442,7 +455,10 @@ class WebRTCManager(
             )
             if (!isReady) return PeerConnectionResult.Retryable
         }
-        return PeerConnectionResult.Ready(createPeerConnectionNow(targetId))
+        if (!peerCallFence.isCurrent(generation)) return PeerConnectionResult.Retryable
+        val peerConnection = createPeerConnectionNow(targetId, generation)
+            ?: return PeerConnectionResult.Retryable
+        return PeerConnectionResult.Ready(peerConnection)
     }
 
     private fun existingPeerConnection(targetId: String): PeerConnection? =
@@ -464,6 +480,7 @@ class WebRTCManager(
     }
 
     private fun queuePendingPeerAction(targetId: String, action: PendingPeerAction) {
+        if (peerCallFence.current() == null) return
         if (turnReadiness.value == TurnReadiness.STOPPED) return
         pendingPeerActions.merge(targetId, action, ::preferPendingAction)
         Log.w(TAG, "[turn] peer action deferred until credentials are ready")
@@ -482,18 +499,21 @@ class WebRTCManager(
     }
 
     private fun replayPendingPeerActions() {
+        val generation = peerCallFence.current() ?: return
         for ((targetId, action) in pendingPeerActions.toMap()) {
             if (!pendingPeerActions.remove(targetId, action)) continue
             scope.launch(Dispatchers.Main) {
-                executePendingPeerAction(targetId, action)
+                executePendingPeerAction(targetId, action, generation)
             }
         }
     }
 
     private suspend fun executePendingPeerAction(
         targetId: String,
-        action: PendingPeerAction
+        action: PendingPeerAction,
+        generation: Long
     ) {
+        if (!peerCallFence.isCurrent(generation)) return
         val signaling = signalingService
         when {
             action is PendingPeerAction.Create -> ensurePeerConnection(targetId)
@@ -534,8 +554,17 @@ class WebRTCManager(
         }
     }
 
-    private fun createPeerConnectionNow(targetId: String): PeerConnection {
+    private fun createPeerConnectionNow(
+        targetId: String,
+        generation: Long
+    ): PeerConnection? {
+        if (!peerCallFence.isCurrent(generation)) return null
         existingPeerConnection(targetId)?.let { return it }
+        val activeFactory = factory
+        if (activeFactory == null) {
+            Log.w(TAG, "[turn] peer creation skipped because call resources are unavailable")
+            return null
+        }
         val rtcConfig = createRtcConfiguration(iceServers)
 
         val observer = object : PeerConnection.Observer {
@@ -584,7 +613,12 @@ class WebRTCManager(
             }
         }
 
-        val pc = factory!!.createPeerConnection(rtcConfig, observer)!!
+        val pc = activeFactory.createPeerConnection(rtcConfig, observer)
+        if (pc == null) {
+            Log.w(TAG, "[turn] peer connection factory rejected creation")
+            return null
+        }
+        remoteDescriptionReadyPeers.remove(targetId)
 
         // Add local tracks
         localAudioTrack?.let { pc.addTrack(it, listOf("stream0")) }
@@ -658,6 +692,8 @@ class WebRTCManager(
         val setRemote = SdpObserverAdapter()
         pc.setRemoteDescription(setRemote, sdp)
         setRemote.await()
+        remoteDescriptionReadyPeers.add(fromId)
+        flushPendingIceCandidates(fromId, pc)
 
         val answerObserver = SdpObserverAdapter()
         pc.createAnswer(answerObserver, MediaConstraints())
@@ -695,18 +731,50 @@ class WebRTCManager(
         val observer = SdpObserverAdapter()
         pc.setRemoteDescription(observer, sdp)
         observer.await()
+        remoteDescriptionReadyPeers.add(fromId)
+        flushPendingIceCandidates(fromId, pc)
     }
 
     private fun handleIceCandidate(fromId: String, candidateData: Any) {
         val candidateJson = candidateData as? JSONObject ?: return
-        val pc = peerConnections[fromId] ?: return
-
         val candidate = IceCandidate(
             candidateJson.optString("sdpMid", ""),
             candidateJson.optInt("sdpMLineIndex", 0),
             candidateJson.optString("candidate", "")
         )
-        pc.addIceCandidate(candidate)
+        val peerConnection = existingPeerConnection(fromId)
+        if (peerConnection != null && fromId in remoteDescriptionReadyPeers) {
+            addIceCandidate(peerConnection, candidate)
+            return
+        }
+        when (pendingIceCandidates.add(fromId, candidate)) {
+            CandidateBufferResult.DROPPED_OLDEST ->
+                Log.w(TAG, "[ice] pending candidate limit reached; oldest candidate dropped")
+            CandidateBufferResult.BUFFERED,
+            CandidateBufferResult.STOPPED -> Unit
+        }
+    }
+
+    private fun flushPendingIceCandidates(
+        peerId: String,
+        peerConnection: PeerConnection
+    ) {
+        for (candidate in pendingIceCandidates.drain(peerId)) {
+            addIceCandidate(peerConnection, candidate)
+        }
+    }
+
+    private fun addIceCandidate(
+        peerConnection: PeerConnection,
+        candidate: IceCandidate
+    ) {
+        try {
+            if (!peerConnection.addIceCandidate(candidate)) {
+                Log.w(TAG, "[ice] peer rejected a buffered candidate")
+            }
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "[ice] candidate could not be applied", error)
+        }
     }
 
     fun toggleMic() {
@@ -753,6 +821,9 @@ class WebRTCManager(
     }
 
     fun cleanup() {
+        peerCallFence.stop()
+        pendingIceCandidates.stop()
+        remoteDescriptionReadyPeers.clear()
         unregisterTurnRefreshTriggers()
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
