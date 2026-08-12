@@ -67,20 +67,7 @@ export default function ActiveCallScreen() {
         setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
 
         others.forEach(({ userId: uid }) => {
-          const pc = svc.createPeerConnection(uid);
-          wirePeerHandlers(pc, svc, uid);
-          try {
-            if (pc.getTransceivers().length === 0) {
-              pc.addTransceiver("audio", { direction: "sendrecv" });
-              pc.addTransceiver("video", { direction: "sendrecv" });
-            }
-          } catch {}
-          try {
-            const ls = svc.getLocalStream();
-            if (ls) ls.getTracks().forEach(t => {
-              if (!pc.getSenders().some(s => s.track?.id === t.id)) pc.addTrack(t, ls);
-            });
-          } catch {}
+          ensurePeerConnection(svc, uid);
         });
 
         const myId = svc.getUserId();
@@ -114,21 +101,7 @@ export default function ActiveCallScreen() {
         hadRemoteRef.current = true;
         setParticipants(prev => prev.some(p => p.userId === uid) ? prev : [...prev, { userId: uid, displayName: name, micMuted: !!micMuted }]);
         const svc = svcRef.current!;
-        const pc = svc.createPeerConnection(uid);
-        wirePeerHandlers(pc, svc, uid);
-
-        try {
-          if (pc.getTransceivers().length === 0) {
-            pc.addTransceiver("audio", { direction: "sendrecv" });
-            pc.addTransceiver("video", { direction: "sendrecv" });
-          }
-        } catch {}
-        try {
-          const ls = svc.getLocalStream();
-          if (ls) ls.getTracks().forEach(t => {
-            if (!pc.getSenders().some(s => s.track?.id === t.id)) pc.addTrack(t, ls);
-          });
-        } catch {}
+        const pc = ensurePeerConnection(svc, uid);
 
         if (svc.getUserId() < uid && pc.signalingState === "stable") {
           pc.createOffer().then(async offer => {
@@ -185,10 +158,7 @@ export default function ActiveCallScreen() {
           return updated;
         });
         const svc = svcRef.current!;
-        try {
-          const pc = svc.getPeerConnection(uid);
-          if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.close(); }
-        } catch {}
+        try { svc.removePeerConnection(uid); } catch {}
         setRemoteStreams(prev => {
           const next = { ...prev };
           delete next[uid];
@@ -198,11 +168,7 @@ export default function ActiveCallScreen() {
 
       onOffer: async (fromId, offer) => {
         const svc = svcRef.current!;
-        let pc = svc.getPeerConnection(fromId);
-        if (!pc || pc.signalingState === "closed") {
-          pc = svc.createPeerConnection(fromId);
-          wirePeerHandlers(pc, svc, fromId);
-        }
+        const pc = ensurePeerConnection(svc, fromId);
         const isPolite = svc.getUserId() > fromId;
         if (pc.signalingState !== "stable" && !isPolite) return;
         if (pc.signalingState !== "stable") {
@@ -210,10 +176,6 @@ export default function ActiveCallScreen() {
         }
         try {
           await pc.setRemoteDescription(offer);
-          const ls = svc.getLocalStream();
-          if (ls) ls.getTracks().forEach(t => {
-            if (!pc.getSenders().some(s => s.track?.id === t.id)) pc.addTrack(t, ls);
-          });
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           svc.sendAnswer(fromId, answer);
@@ -244,36 +206,24 @@ export default function ActiveCallScreen() {
     };
   }, [phase]);
 
-  function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string) {
-    pc.ontrack = (e) => {
-      setRemoteStreams(prev => {
-        const stream = prev[targetId] ?? new MediaStream();
-        if (!stream.getTracks().some(t => t.id === e.track.id)) {
-          stream.addTrack(e.track);
-        }
-        return { ...prev, [targetId]: stream };
-      });
-    };
-    pc.onicecandidate = (e) => {
-      if (e.candidate) svc.sendIceCandidate(targetId, e.candidate.toJSON());
-    };
-    pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
-        pc.createOffer({ iceRestart: true }).then(async offer => {
-          await pc.setLocalDescription(offer);
-          svc.sendOffer(targetId, offer);
-        }).catch(() => {});
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
+  function ensurePeerConnection(svc: WebRTCService, targetId: string) {
+    return svc.ensurePeerConnection(targetId, {
+      onTrack: (e) => {
+        setRemoteStreams(prev => {
+          const stream = prev[targetId] ?? new MediaStream();
+          if (!stream.getTracks().some(t => t.id === e.track.id)) {
+            stream.addTrack(e.track);
+          }
+          return { ...prev, [targetId]: stream };
+        });
+      },
+      onConnected: () => {
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls && localVideoRef.current.srcObject !== ls) {
           localVideoRef.current.srcObject = ls;
         }
-      }
-    };
-    pc.onnegotiationneeded = () => {};
+      },
+    });
   }
 
   // Initialize WebRTC and start call flow

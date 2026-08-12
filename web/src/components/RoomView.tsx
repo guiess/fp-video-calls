@@ -94,42 +94,28 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
   /*  WebRTC peer handlers                                             */
   /* ---------------------------------------------------------------- */
 
-  function wirePeerHandlers(pc: RTCPeerConnection, svc: WebRTCService, targetId: string | null) {
-    pc.ontrack = (e) => {
-      if (!targetId) { console.error("[ontrack] targetId is null!"); return; }
-      setRemoteStreams((prev) => {
-        const existing = prev[targetId];
-        const stream = existing ?? new MediaStream();
-        const already = stream.getTracks().some((t) => t.id === e.track.id);
-        if (!already) stream.addTrack(e.track);
-        return { ...prev, [targetId]: stream };
-      });
-      if (e.track.kind === "audio") {
-        setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !e.track.enabled }));
-        e.track.onmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
-        e.track.onunmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
-        e.track.onended = () => setRemoteAudioMuted((prev) => { const n = { ...prev }; delete n[targetId]; return n; });
-      }
-    };
-    pc.onicecandidate = (e) => {
-      const target = targetId ?? peerIdRef.current;
-      if (e.candidate && target) svc.sendIceCandidate(target, e.candidate.toJSON());
-    };
-    pc.oniceconnectionstatechange = () => {
-      const st = pc.iceConnectionState;
-      if ((st === "failed" || st === "disconnected") && targetId) {
-        pc.createOffer({ iceRestart: true })
-          .then(async (offer) => { await pc.setLocalDescription(offer); svc.sendOffer(targetId, offer); })
-          .catch((err) => console.warn("[ice] ICE restart failed", err));
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
+  function ensurePeerConnection(svc: WebRTCService, targetId: string) {
+    return svc.ensurePeerConnection(targetId, {
+      onTrack: (e) => {
+        setRemoteStreams((prev) => {
+          const existing = prev[targetId];
+          const stream = existing ?? new MediaStream();
+          const already = stream.getTracks().some((t) => t.id === e.track.id);
+          if (!already) stream.addTrack(e.track);
+          return { ...prev, [targetId]: stream };
+        });
+        if (e.track.kind === "audio") {
+          setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: !e.track.enabled }));
+          e.track.onmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: true }));
+          e.track.onunmute = () => setRemoteAudioMuted((prev) => ({ ...prev, [targetId]: false }));
+          e.track.onended = () => setRemoteAudioMuted((prev) => { const n = { ...prev }; delete n[targetId]; return n; });
+        }
+      },
+      onConnected: () => {
         const ls = svc.getLocalStream();
         if (localVideoRef.current && ls && localVideoRef.current.srcObject !== ls) localVideoRef.current.srcObject = ls;
-      }
-    };
-    pc.onnegotiationneeded = async () => { /* ignored — manual offers only */ };
+      },
+    });
   }
 
   /* ---------------------------------------------------------------- */
@@ -160,10 +146,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         const others = existing.filter((p: any) => p.userId !== svc.getUserId());
         setRemoteCamOff(new Set(others.filter((p) => p.cameraOff).map((p) => p.userId)));
         others.forEach(({ userId: uid }: any) => {
-          const pc = svc.createPeerConnection(uid);
-          wirePeerHandlers(pc, svc, uid);
-          try { if (pc.getTransceivers().length === 0) { pc.addTransceiver("audio", { direction: "sendrecv" }); pc.addTransceiver("video", { direction: "sendrecv" }); } } catch {}
-          try { const ls = svc.getLocalStream(); if (ls) ls.getTracks().forEach((t) => { if (!pc.getSenders().some((s) => s.track?.id === t.id)) pc.addTrack(t, ls); }); } catch {}
+          ensurePeerConnection(svc, uid);
         });
         const myId = svc.getUserId();
         others.forEach(({ userId: uid }: any) => {
@@ -181,10 +164,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
       onUserJoined: (uid, _name, micMuted) => {
         setParticipants((prev) => prev.some((p) => p.userId === uid) ? prev : [...prev, { userId: uid, displayName: _name, micMuted: !!micMuted }]);
         const svc = svcRef.current!;
-        const pc = svc.createPeerConnection(uid);
-        wirePeerHandlers(pc, svc, uid);
-        try { if (pc.getTransceivers().length === 0) { pc.addTransceiver("audio", { direction: "sendrecv" }); pc.addTransceiver("video", { direction: "sendrecv" }); } } catch {}
-        try { const ls = svc.getLocalStream(); if (ls) ls.getTracks().forEach((t) => { if (!pc.getSenders().some((s) => s.track?.id === t.id)) pc.addTrack(t, ls); }); } catch {}
+        const pc = ensurePeerConnection(svc, uid);
         const shouldOffer = svc.getUserId() < uid;
         if (shouldOffer && pc.signalingState === "stable") {
           pc.createOffer().then(async (offer) => { await pc.setLocalDescription(offer); svc.sendOffer(uid, offer); }).catch(() => {});
@@ -212,7 +192,7 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
         setHiddenRemotes((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
         setRemoteCamOff((prev) => { if (!prev.has(uid)) return prev; const n = new Set(prev); n.delete(uid); return n; });
         if (peerId === uid) { setPeerId(null); peerIdRef.current = null; }
-        try { const svc = svcRef.current!; const pc = svc.getPeerConnection(uid); if (pc) { try { pc.ontrack = null; pc.onicecandidate = null; pc.onnegotiationneeded = null; } catch {} try { pc.close(); } catch {} } } catch {}
+        try { svcRef.current?.removePeerConnection(uid); } catch {}
         setRemoteStreams((prev) => {
           const next = { ...prev };
           const removed = next[uid];
@@ -225,14 +205,12 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
 
       onOffer: async (fromId, offer) => {
         const svc = svcRef.current!;
-        let pc = svc.getPeerConnection(fromId);
-        if (!pc || pc.signalingState === "closed") { pc = svc.createPeerConnection(fromId); wirePeerHandlers(pc, svc, fromId); }
+        const pc = ensurePeerConnection(svc, fromId);
         const isPolite = svc.getUserId() > fromId;
         if (pc.signalingState !== "stable" && !isPolite) return;
         if (pc.signalingState !== "stable") { try { await pc.setLocalDescription({ type: "rollback" } as any); } catch {} }
         try {
           await pc.setRemoteDescription(offer);
-          try { const ls = svc.getLocalStream(); if (ls) ls.getTracks().forEach((t) => { if (!pc.getSenders().some((s) => s.track?.id === t.id)) pc.addTrack(t, ls); }); } catch {}
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           svc.sendAnswer(fromId, answer);
