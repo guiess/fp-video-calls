@@ -59,7 +59,8 @@ class WebRTCManager(
             PeerRecoveryStatus.DISCONNECT_GRACE,
             PeerRecoveryStatus.RESTARTING,
             PeerRecoveryStatus.REPLACING,
-            PeerRecoveryStatus.COOLDOWN
+            PeerRecoveryStatus.COOLDOWN,
+            PeerRecoveryStatus.TERMINAL
         )
         private val SERIALIZED_RECOVERY_STATES = setOf(
             PeerRecoveryStatus.RESTARTING,
@@ -120,6 +121,7 @@ class WebRTCManager(
         PendingIceCandidateBuffer<IceCandidate>(MAX_PENDING_ICE_CANDIDATES_PER_PEER)
     private val remoteDescriptionReadyPeers =
         java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val peerGenerationEchoes = PeerGenerationEchoRegistry()
     private val peerCallFence = CallGenerationFence()
     private val turnResumeListener = { turnLeaseManager.reconcileDeadline() }
     private var turnNetworkCallback: ConnectivityManager.NetworkCallback? = null
@@ -209,6 +211,7 @@ class WebRTCManager(
         pendingPeerActions.clear()
         pendingIceCandidates.start()
         remoteDescriptionReadyPeers.clear()
+        peerGenerationEchoes.clearAll()
         registerTurnRefreshTriggers()
         localUserId = userId
         localName = displayName
@@ -716,6 +719,7 @@ class WebRTCManager(
                     put("sdpMLineIndex", candidate.sdpMLineIndex)
                     put("sdpMid", candidate.sdpMid)
                     put("candidate", candidate.sdp)
+                    echoPeerGeneration(targetId, this)
                 }
                 signalingService?.sendIceCandidate(targetId, json)
             }
@@ -778,6 +782,7 @@ class WebRTCManager(
         if (peerConnection.signalingState() != PeerConnection.SignalingState.STABLE) {
             return false
         }
+        peerGenerationEchoes.clear(context.peerId)
         val offer = createLocalOffer(peerConnection, isIceRestart = true) ?: return false
         if (!isRecoveryContextCurrent(context)) return false
         if (!installLocalOffer(peerConnection, offer, context.peerId)) return false
@@ -830,6 +835,7 @@ class WebRTCManager(
             return
         }
         val pc = (result as PeerConnectionResult.Ready).peerConnection
+        peerGenerationEchoes.clear(targetId)
         val offer = createLocalOffer(pc, isIceRestart = false) ?: return
         if (!installLocalOffer(pc, offer, targetId)) return
         signalOffer(targetId, offer, signaling)
@@ -914,6 +920,11 @@ class WebRTCManager(
                 return
             }
         }
+        val peerGeneration = offerJson
+            .takeIf { it.has(PeerGenerationEchoRegistry.FIELD_NAME) }
+            ?.opt(PeerGenerationEchoRegistry.FIELD_NAME)
+            ?.takeUnless { it == JSONObject.NULL }
+        peerGenerationEchoes.rememberOffer(fromId, peerGeneration)
 
         val setRemote = SdpObserverAdapter()
         pc.setRemoteDescription(setRemote, sdp)
@@ -933,6 +944,7 @@ class WebRTCManager(
         val answerJson = JSONObject().apply {
             put("type", answer.type.canonicalForm())
             put("sdp", answer.description)
+            echoPeerGeneration(fromId, this)
         }
         Log.d(TAG, "Sending answer to $fromId")
         signaling.sendAnswer(fromId, answerJson)
@@ -1041,7 +1053,14 @@ class WebRTCManager(
     private fun clearPeerConnectionState(peerId: String) {
         pendingIceCandidates.clear(peerId)
         remoteDescriptionReadyPeers.remove(peerId)
+        peerGenerationEchoes.clear(peerId)
         _remoteVideoTracks.update { it - peerId }
+    }
+
+    private fun echoPeerGeneration(peerId: String, payload: JSONObject) {
+        val fields = mutableMapOf<String, Any?>()
+        peerGenerationEchoes.decoratePayload(peerId, fields)
+        fields.forEach { (key, value) -> payload.put(key, value) }
     }
 
     fun toggleMic() {
@@ -1092,6 +1111,7 @@ class WebRTCManager(
         iceRecoveryCoordinator.stop()
         pendingIceCandidates.stop()
         remoteDescriptionReadyPeers.clear()
+        peerGenerationEchoes.clearAll()
         unregisterTurnRefreshTriggers()
         turnLeaseManager.stop()
         iceServers = STUN_SERVERS.toMutableList()
