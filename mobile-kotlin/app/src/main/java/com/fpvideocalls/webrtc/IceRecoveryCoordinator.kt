@@ -30,7 +30,8 @@ enum class PeerRecoveryStatus {
     DISCONNECT_GRACE,
     RESTARTING,
     REPLACING,
-    COOLDOWN
+    COOLDOWN,
+    TERMINAL
 }
 
 /** Action for a cached peer connection at a create-or-reuse boundary. */
@@ -134,8 +135,9 @@ object IceRecoveryPolicy {
     const val CREDENTIAL_BACKOFF_MILLIS = 500L
     const val NOT_SENT_BACKOFF_MILLIS = 250L
     const val DEFERRED_WAKEUP_MILLIS = 100L
-    const val TURN_PREPARATION_TIMEOUT_MILLIS = 3_000L
+    const val TURN_PREPARATION_TIMEOUT_MILLIS = 1_500L
     const val MAX_RESTARTS_PER_WINDOW = 1
+    const val MAX_REPLACEMENT_CYCLES = 2
 
     fun nextBudgetAction(
         nowMillis: Long,
@@ -167,7 +169,8 @@ object IceRecoveryPolicy {
         PeerRecoveryStatus.DISCONNECT_GRACE -> CachedPeerDisposition.REUSE
         PeerRecoveryStatus.RESTARTING,
         PeerRecoveryStatus.REPLACING,
-        PeerRecoveryStatus.COOLDOWN -> CachedPeerDisposition.WAIT_FOR_RECOVERY
+        PeerRecoveryStatus.COOLDOWN,
+        PeerRecoveryStatus.TERMINAL -> CachedPeerDisposition.WAIT_FOR_RECOVERY
         PeerRecoveryStatus.IDLE,
         null -> CachedPeerDisposition.REBUILD
     }
@@ -253,6 +256,9 @@ class IceRecoveryCoordinator(
     fun activeJobCount(): Int =
         synchronized(stateLock) { peers.values.count { it.job?.isActive == true } }
 
+    fun replacementCycleCount(peerId: String): Int =
+        synchronized(stateLock) { peers[peerId]?.replacementCycles ?: 0 }
+
     private fun observeLocked(
         context: PeerRecoveryContext,
         transportState: RecoveryTransportState
@@ -271,7 +277,7 @@ class IceRecoveryCoordinator(
     private fun handleConnectedLocked(peer: PeerState): JobEffects {
         peer.connectionSignal?.complete(Unit)
         if (peer.status !in CONNECTED_CANCELLABLE_STATES) return JobEffects()
-        val event = if (peer.status == PeerRecoveryStatus.COOLDOWN) {
+        val event = if (peer.status in TERMINAL_RECOVERY_STATES) {
             eventLocked(peer, RecoveryOutcome.RECOVERED)
         } else {
             null
@@ -279,7 +285,7 @@ class IceRecoveryCoordinator(
         val job = peer.job
         peer.connectionSignal = null
         setStatusLocked(peer, PeerRecoveryStatus.IDLE)
-        resetRecoveryLocked(peer)
+        resetRecoveryAfterConnectLocked(peer)
         return JobEffects(job, event = event, notifyPeerId = peer.context.peerId)
     }
 
@@ -510,20 +516,28 @@ class IceRecoveryCoordinator(
         context: PeerRecoveryContext,
         outcome: RecoveryOutcome
     ) {
-        val entered = synchronized(stateLock) {
-            val peer = currentPeerLocked(context) ?: return@synchronized false
+        val isTerminal = synchronized(stateLock) {
+            val peer = currentPeerLocked(context) ?: return@synchronized null
             peer.connectionSignal = null
-            setStatusLocked(peer, PeerRecoveryStatus.COOLDOWN)
-            true
-        }
-        if (!entered) return
+            peer.replacementCycles++
+            val reachedLimit =
+                peer.replacementCycles >= IceRecoveryPolicy.MAX_REPLACEMENT_CYCLES
+            val status = if (reachedLimit) {
+                PeerRecoveryStatus.TERMINAL
+            } else {
+                PeerRecoveryStatus.COOLDOWN
+            }
+            setStatusLocked(peer, status)
+            reachedLimit
+        } ?: return
         recordCurrentEvent(context, outcome)
+        if (isTerminal) return
         delay(IceRecoveryPolicy.COOLDOWN_MILLIS)
         val shouldRearm = synchronized(stateLock) {
             val peer = currentPeerLocked(context) ?: return@synchronized false
             setStatusLocked(peer, PeerRecoveryStatus.IDLE)
             val isStillFailed = peer.transportState in RECOVERY_REQUIRED_STATES
-            resetRecoveryLocked(peer)
+            clearRecoveryTimingLocked(peer)
             isStillFailed
         }
         notifyCompletionSafely(context.peerId)
@@ -553,7 +567,7 @@ class IceRecoveryCoordinator(
             peer.connectionSignal = null
             setStatusLocked(peer, PeerRecoveryStatus.IDLE)
             eventLocked(peer, RecoveryOutcome.RECOVERED).also {
-                resetRecoveryLocked(peer)
+                resetRecoveryAfterConnectLocked(peer)
             }
         }
         recordEventSafely(event)
@@ -668,9 +682,14 @@ class IceRecoveryCoordinator(
         return (clock.elapsedRealtimeMillis() - started).coerceAtLeast(0L)
     }
 
-    private fun resetRecoveryLocked(peer: PeerState) {
+    private fun clearRecoveryTimingLocked(peer: PeerState) {
         peer.trigger = null
         peer.recoveryStartedAtMillis = null
+    }
+
+    private fun resetRecoveryAfterConnectLocked(peer: PeerState) {
+        clearRecoveryTimingLocked(peer)
+        peer.replacementCycles = 0
     }
 
     private fun recordEventSafely(recorded: RecordedEvent) {
@@ -740,6 +759,7 @@ class IceRecoveryCoordinator(
         var transportState: RecoveryTransportState = RecoveryTransportState.NEW,
         var trigger: RecoveryTrigger? = null,
         var recoveryStartedAtMillis: Long? = null,
+        var replacementCycles: Int = 0,
         val restartTimesMillis: ArrayDeque<Long> = ArrayDeque(),
         var connectionSignal: CompletableDeferred<Unit>? = null,
         var job: Job? = null
@@ -781,7 +801,12 @@ class IceRecoveryCoordinator(
         )
         val CONNECTED_CANCELLABLE_STATES = setOf(
             PeerRecoveryStatus.DISCONNECT_GRACE,
-            PeerRecoveryStatus.COOLDOWN
+            PeerRecoveryStatus.COOLDOWN,
+            PeerRecoveryStatus.TERMINAL
+        )
+        val TERMINAL_RECOVERY_STATES = setOf(
+            PeerRecoveryStatus.COOLDOWN,
+            PeerRecoveryStatus.TERMINAL
         )
         val RECOVERY_REQUIRED_STATES = setOf(
             RecoveryTransportState.DISCONNECTED,

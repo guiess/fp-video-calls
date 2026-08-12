@@ -3,6 +3,7 @@ package com.fpvideocalls.webrtc
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -21,9 +22,11 @@ class IceRecoveryCoordinatorTest {
         assertEquals(4_000L, IceRecoveryPolicy.RESTART_ATTEMPT_TIMEOUT_MILLIS)
         assertEquals(3_000L, IceRecoveryPolicy.REPLACEMENT_ATTEMPT_TIMEOUT_MILLIS)
         assertEquals(15_000L, IceRecoveryPolicy.TOTAL_RECOVERY_RTO_MILLIS)
+        assertEquals(1_500L, IceRecoveryPolicy.TURN_PREPARATION_TIMEOUT_MILLIS)
         assertEquals(60_000L, IceRecoveryPolicy.RETRY_WINDOW_MILLIS)
         assertEquals(60_000L, IceRecoveryPolicy.COOLDOWN_MILLIS)
         assertEquals(1, IceRecoveryPolicy.MAX_RESTARTS_PER_WINDOW)
+        assertEquals(2, IceRecoveryPolicy.MAX_REPLACEMENT_CYCLES)
     }
 
     @Test
@@ -327,6 +330,37 @@ class IceRecoveryCoordinatorTest {
     }
 
     @Test
+    fun `slow successful preparation leaves handshake time inside restart stage`() = runTest {
+        val harness = RecoveryHarness(
+            prepareResult = {
+                delay(1_500L)
+                true
+            }
+        )
+        val coordinator = harness.coordinator(backgroundScope) { testScheduler.currentTime }
+        val context = coordinator.startAndAttach()
+
+        coordinator.observe(context, RecoveryTransportState.FAILED)
+        runCurrent()
+        advanceTimeBy(1_499L)
+        runCurrent()
+        assertTrue(harness.restartContexts.isEmpty())
+
+        advanceTimeBy(1L)
+        runCurrent()
+        assertEquals(1, harness.restartContexts.size)
+
+        advanceTimeBy(2_499L)
+        runCurrent()
+        assertTrue(harness.replacementContexts.isEmpty())
+
+        advanceTimeBy(1L)
+        runCurrent()
+        assertEquals(PeerRecoveryStatus.REPLACING, coordinator.status(PEER_ID))
+        assertEquals(4_000L, testScheduler.currentTime)
+    }
+
+    @Test
     fun `restart glare does not consume the sent-offer budget`() = runTest {
         var sendCount = 0
         val harness = RecoveryHarness(
@@ -421,6 +455,58 @@ class IceRecoveryCoordinatorTest {
         runCurrent()
 
         assertTrue(harness.wakeupPeerIds.contains(PEER_ID))
+    }
+
+    @Test
+    fun `two exhausted cycles open terminal circuit breaker without further work`() = runTest {
+        val harness = RecoveryHarness()
+        val coordinator = harness.coordinator(backgroundScope) { testScheduler.currentTime }
+        val context = coordinator.startAndAttach()
+
+        coordinator.observe(context, RecoveryTransportState.FAILED)
+        runCurrent()
+        advanceTimeBy(7_000L)
+        runCurrent()
+        assertEquals(1, coordinator.replacementCycleCount(PEER_ID))
+
+        advanceTimeBy(60_000L)
+        runCurrent()
+        advanceTimeBy(100L)
+        runCurrent()
+        advanceTimeBy(7_000L)
+        runCurrent()
+
+        assertEquals(PeerRecoveryStatus.TERMINAL, coordinator.status(PEER_ID))
+        assertEquals(2, coordinator.replacementCycleCount(PEER_ID))
+        assertEquals(2, harness.restartContexts.size)
+        assertEquals(2, harness.replacementContexts.size)
+
+        advanceTimeBy(180_000L)
+        runCurrent()
+
+        assertEquals(2, harness.restartContexts.size)
+        assertEquals(2, harness.replacementContexts.size)
+        assertEquals(PeerRecoveryStatus.TERMINAL, coordinator.statuses.value[PEER_ID])
+    }
+
+    @Test
+    fun `successful connection resets replacement cycle budget`() = runTest {
+        val harness = RecoveryHarness()
+        val coordinator = harness.coordinator(backgroundScope) { testScheduler.currentTime }
+        val context = coordinator.startAndAttach()
+
+        coordinator.observe(context, RecoveryTransportState.FAILED)
+        runCurrent()
+        advanceTimeBy(7_000L)
+        runCurrent()
+        val replacement = harness.replacementContexts.single()
+        assertEquals(1, coordinator.replacementCycleCount(PEER_ID))
+
+        coordinator.observe(replacement, RecoveryTransportState.CONNECTED)
+        runCurrent()
+
+        assertEquals(PeerRecoveryStatus.IDLE, coordinator.status(PEER_ID))
+        assertEquals(0, coordinator.replacementCycleCount(PEER_ID))
     }
 
     @Test

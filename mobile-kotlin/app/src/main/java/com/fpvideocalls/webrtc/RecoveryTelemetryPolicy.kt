@@ -8,12 +8,12 @@ object RecoveryTelemetryPolicy {
 
     fun format(event: RecoveryEvent, networkType: String): String {
         val safeNetworkType = networkType.takeIf(ALLOWED_NETWORK_TYPES::contains) ?: "other"
-        return "recovery " +
+        return ("recovery " +
             "state=${event.state} " +
             "trigger=${event.trigger} " +
             "attempt=${event.attempt.coerceAtLeast(0)} " +
             "durationMs=${event.durationMillis.coerceAtLeast(0L)} " +
             "outcome=${event.outcome} " +
-            "net=$safeNetworkType"
+            "net=$safeNetworkType").take(MAX_INFO_LENGTH)
     }
 }
