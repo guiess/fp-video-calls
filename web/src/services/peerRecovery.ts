@@ -2,9 +2,11 @@ export const DISCONNECT_GRACE_MS = 8_000;
 export const ICE_RESTART_TIMEOUT_MS = 6_000;
 export const REBUILD_TIMEOUT_MS = 6_000;
 export const RECOVERY_COOLDOWN_MS = 30_000;
+export const MAX_RECOVERY_CYCLES = 2;
 
 export type PeerRegistryState = "connected" | "disconnected" | "terminal" | "usable";
-export type PeerRecoveryState = "idle" | "grace" | "restarting" | "rebuilding" | "cooldown";
+export type PeerRecoveryState =
+  "idle" | "grace" | "restarting" | "rebuilding" | "cooldown" | "terminal";
 
 export type PeerConnectionStateView = Pick<
   RTCPeerConnection,
@@ -39,6 +41,7 @@ export interface PeerRecoveryActions {
   getCurrent(targetId: string): { generation: number; state: PeerRegistryState } | null;
   restartIce(targetId: string, generation: number, signal: AbortSignal): Promise<void>;
   rebuildPeer(targetId: string, generation: number, signal: AbortSignal): Promise<void>;
+  onTerminal?: (targetId: string) => void;
 }
 
 type RecoveryJob = {
@@ -46,7 +49,6 @@ type RecoveryJob = {
   state: "grace" | "restarting" | "rebuilding";
   controller: AbortController;
   timer: ReturnType<typeof setTimeout> | null;
-  hasSuppressedFailure: boolean;
 };
 
 type Cooldown = {
@@ -61,6 +63,8 @@ type Cooldown = {
 export class PeerRecoveryCoordinator {
   private jobs = new Map<string, RecoveryJob>();
   private cooldowns = new Map<string, Cooldown>();
+  private recoveryCycles = new Map<string, number>();
+  private terminalPeers = new Set<string>();
 
   constructor(private readonly actions: PeerRecoveryActions) {}
 
@@ -68,10 +72,11 @@ export class PeerRecoveryCoordinator {
   observe(targetId: string, generation: number, state: PeerRegistryState): void {
     if (!this.actions.isCurrent(targetId, generation)) return;
     if (state === "connected") return this.handleConnected(targetId);
+    if (this.terminalPeers.has(targetId)) return;
     const cooldown = this.cooldowns.get(targetId);
     if (cooldown) return this.recordCooldownState(cooldown, state);
     const job = this.jobs.get(targetId);
-    if (job?.state === "rebuilding") return this.recordRebuildState(job, state);
+    if (job?.state === "rebuilding") return;
     if (state === "usable") return;
     if (state === "disconnected") return this.scheduleGrace(targetId, generation);
     this.handleTerminalState(targetId, generation);
@@ -83,6 +88,8 @@ export class PeerRecoveryCoordinator {
     const cooldown = this.cooldowns.get(targetId);
     if (cooldown) clearTimeout(cooldown.timer);
     this.cooldowns.delete(targetId);
+    this.recoveryCycles.delete(targetId);
+    this.terminalPeers.delete(targetId);
   }
 
   /** Cancels every peer recovery during room teardown. */
@@ -90,10 +97,13 @@ export class PeerRecoveryCoordinator {
     [...this.jobs.keys()].forEach((targetId) => this.clearJob(targetId));
     this.cooldowns.forEach(({ timer }) => clearTimeout(timer));
     this.cooldowns.clear();
+    this.recoveryCycles.clear();
+    this.terminalPeers.clear();
   }
 
   /** Exposes coarse state for deterministic unit tests and diagnostics adapters. */
   getState(targetId: string): PeerRecoveryState {
+    if (this.terminalPeers.has(targetId)) return "terminal";
     if (this.cooldowns.has(targetId)) return "cooldown";
     return this.jobs.get(targetId)?.state ?? "idle";
   }
@@ -112,6 +122,7 @@ export class PeerRecoveryCoordinator {
   }
 
   private startRestart(targetId: string, job: RecoveryJob): void {
+    if (!this.consumeRecoveryCycle(targetId)) return;
     this.clearTimer(job);
     job.state = "restarting";
     this.jobs.set(targetId, job);
@@ -139,6 +150,8 @@ export class PeerRecoveryCoordinator {
   }
 
   private handleConnected(targetId: string): void {
+    this.recoveryCycles.delete(targetId);
+    this.terminalPeers.delete(targetId);
     const job = this.jobs.get(targetId);
     if (!job) return;
     if (job.state !== "rebuilding") return this.clearJob(targetId);
@@ -173,10 +186,23 @@ export class PeerRecoveryCoordinator {
     }
   }
 
-  private recordRebuildState(job: RecoveryJob, state: PeerRegistryState): void {
-    if (state === "terminal" || state === "disconnected") {
-      job.hasSuppressedFailure = true;
+  private consumeRecoveryCycle(targetId: string): boolean {
+    const cycles = this.recoveryCycles.get(targetId) ?? 0;
+    if (cycles >= MAX_RECOVERY_CYCLES) {
+      this.enterTerminal(targetId);
+      return false;
     }
+    this.recoveryCycles.set(targetId, cycles + 1);
+    return true;
+  }
+
+  private enterTerminal(targetId: string): void {
+    this.clearJob(targetId);
+    const cooldown = this.cooldowns.get(targetId);
+    if (cooldown) clearTimeout(cooldown.timer);
+    this.cooldowns.delete(targetId);
+    this.terminalPeers.add(targetId);
+    this.actions.onTerminal?.(targetId);
   }
 
   private clearJob(targetId: string): void {
@@ -201,7 +227,6 @@ export class PeerRecoveryCoordinator {
       state,
       controller: new AbortController(),
       timer: null,
-      hasSuppressedFailure: false,
     };
   }
 }

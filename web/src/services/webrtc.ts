@@ -1,6 +1,7 @@
 import io, { Socket } from "socket.io-client";
 import {
   PeerRecoveryCoordinator,
+  PeerRecoveryState,
   classifyPeerConnection,
 } from "./peerRecovery";
 
@@ -49,6 +50,7 @@ export type PeerMediaHandlers = {
   onTrack?: (event: RTCTrackEvent) => void;
   onConnected?: () => void;
   onPeerReplaced?: (generation: number) => void;
+  onRecoveryStateChange?: (state: "connected" | "recovering" | "terminal") => void;
 };
 
 const MAX_RECEIVED_TELEMETRY_SAMPLES = 100;
@@ -83,6 +85,7 @@ export class WebRTCService {
   private peerSignalGenerations = new Map<string, number>();
   private peerMediaHandlers = new Map<string, PeerMediaHandlers>();
   private isTearingDown = false;
+  private lifecycleGeneration = 0;
   private recovery = new PeerRecoveryCoordinator({
     isCurrent: (targetId, generation) => this.isCurrentPeer(targetId, generation),
     getCurrent: (targetId) => this.getCurrentPeerState(targetId),
@@ -90,6 +93,8 @@ export class WebRTCService {
       this.restartPeerIce(targetId, generation, signal),
     rebuildPeer: (targetId, generation, signal) =>
       this.rebuildPeer(targetId, generation, signal),
+    onTerminal: (targetId) =>
+      this.peerMediaHandlers.get(targetId)?.onRecoveryStateChange?.("terminal"),
   });
   private localStream: MediaStream | null = null;
   private roomId: string = "";
@@ -554,6 +559,7 @@ export class WebRTCService {
     this.peerSignalGenerations.set(targetId, generation);
     this.pcs.set(targetId, pc);
     if (isReplacement) {
+      this.peerMediaHandlers.get(targetId)?.onRecoveryStateChange?.("recovering");
       this.peerMediaHandlers.get(targetId)?.onPeerReplaced?.(generation);
     }
     this.attachPeerHandlers(targetId, pc, generation);
@@ -620,7 +626,16 @@ export class WebRTCService {
     pc: RTCPeerConnection,
   ): void {
     if (!this.isCurrentPeer(targetId, generation)) return;
-    this.recovery.observe(targetId, generation, classifyPeerConnection(pc));
+    const state = classifyPeerConnection(pc);
+    if (state === "connected") {
+      this.peerMediaHandlers.get(targetId)?.onRecoveryStateChange?.("connected");
+    }
+    this.recovery.observe(targetId, generation, state);
+  }
+
+  /** Returns the coordinator state used by UI and diagnostic adapters. */
+  getPeerRecoveryState(targetId: string): PeerRecoveryState {
+    return this.recovery.getState(targetId);
   }
 
   private isCurrentPeer(targetId: string, generation: number): boolean {
@@ -728,6 +743,7 @@ export class WebRTCService {
   }
 
   async join({ roomId, userId, displayName, password, quality }: JoinOptions) {
+    const lifecycleGeneration = ++this.lifecycleGeneration;
     this.isTearingDown = false;
     this.ensureSocket();
     if (!this.socket) throw new Error("Socket not initialized");
@@ -740,8 +756,19 @@ export class WebRTCService {
 
     // Pre-fetch ephemeral TURN credentials before any RTCPeerConnection is created
     await this.fetchTurnAndCache();
+    if (!this.isJoinActive(lifecycleGeneration)) return;
 
-    const initial = await this.getCaptureStream(quality, "user");
+    let initial: MediaStream;
+    try {
+      initial = await this.getCaptureStream(quality, "user");
+    } catch (error) {
+      if (!this.isJoinActive(lifecycleGeneration)) return;
+      throw error;
+    }
+    if (!this.isJoinActive(lifecycleGeneration)) {
+      this.discardCapturedStream(initial);
+      return;
+    }
     if (!initial || initial.getTracks().length === 0) {
       this.handlers.onError?.("NO_LOCAL_MEDIA", "Local media not available");
       return;
@@ -752,9 +779,26 @@ export class WebRTCService {
       this.localStream.getTracks().forEach(t => (t.enabled = true));
     } catch {}
 
-    this.socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
+    const socket = this.socket;
+    if (!socket || !this.isJoinActive(lifecycleGeneration)) {
+      this.discardCapturedStream(initial);
+      this.localStream = null;
+      return;
+    }
+    socket.emit("join_room", { roomId, userId, displayName, password, videoQuality: quality });
     this.hasJoined = true;
     try { console.log("[join] emitted", { roomId, userId, quality }); } catch {}
+  }
+
+  private isJoinActive(generation: number): boolean {
+    return !this.isTearingDown
+      && this.lifecycleGeneration === generation
+      && this.socket !== null;
+  }
+
+  private discardCapturedStream(stream: MediaStream): void {
+    try { stream.getTracks().forEach((track) => track.stop()); } catch {}
+    this.cleanupMirroring();
   }
 
   // Signaling helpers
@@ -809,7 +853,7 @@ export class WebRTCService {
     if (!this.matchesSignalGeneration(targetId, generation)) return false;
     const pc = this.getPeerConnection(targetId);
     if (!pc || pc.signalingState !== "have-local-offer") return false;
-    await pc.setRemoteDescription(this.withoutPeerGeneration(answer));
+    await pc.setRemoteDescription(this.stripPeerGeneration(answer));
     return true;
   }
 
@@ -822,7 +866,7 @@ export class WebRTCService {
     if (!this.matchesSignalGeneration(targetId, generation)) return false;
     const pc = this.getPeerConnection(targetId);
     if (!pc) return false;
-    await pc.addIceCandidate(this.withoutPeerGeneration(candidate));
+    await pc.addIceCandidate(this.stripPeerGeneration(candidate));
     return true;
   }
 
@@ -854,7 +898,8 @@ export class WebRTCService {
     return this.peerSignalGenerations.get(targetId) === generation;
   }
 
-  private withoutPeerGeneration<T extends object>(payload: T): T {
+  /** Removes the additive web generation field before passing data to WebRTC. */
+  stripPeerGeneration<T extends object>(payload: T): T {
     const { [PEER_GENERATION_FIELD]: _generation, ...clean } =
       payload as T & Record<string, unknown>;
     return clean as T;
@@ -1236,6 +1281,7 @@ export class WebRTCService {
   }
  
   leave() {
+    this.lifecycleGeneration += 1;
     this.isTearingDown = true;
     this.recovery.cancelAll();
     // Stop telemetry collection

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DISCONNECT_GRACE_MS,
   ICE_RESTART_TIMEOUT_MS,
+  MAX_RECOVERY_CYCLES,
   REBUILD_TIMEOUT_MS,
   RECOVERY_COOLDOWN_MS,
   PeerRecoveryCoordinator,
@@ -104,7 +105,7 @@ function makeService() {
   vi.stubGlobal("localStorage", { getItem: vi.fn(() => null) });
 
   const service = new WebRTCService();
-  const socket = { emit: vi.fn() };
+  const socket = { emit: vi.fn(), connected: true };
   const internal = service as any;
   internal.socket = socket;
   internal.roomId = "room-1";
@@ -407,6 +408,7 @@ describe("recovery timing constants", () => {
     expect(ICE_RESTART_TIMEOUT_MS).toBe(6_000);
     expect(REBUILD_TIMEOUT_MS).toBe(6_000);
     expect(RECOVERY_COOLDOWN_MS).toBe(30_000);
+    expect(MAX_RECOVERY_CYCLES).toBe(2);
   });
 });
 
@@ -593,6 +595,103 @@ describe("review-gate regressions", () => {
       "video",
       { direction: "sendrecv" },
     );
+  });
+
+  it("opens the terminal circuit after a finite number of recovery cycles", async () => {
+    let current = { generation: 1, state: "terminal" as const };
+    const restartIce = vi.fn(async () => {});
+    const rebuildPeer = vi.fn(async () => {
+      current = { generation: current.generation + 1, state: "terminal" };
+    });
+    const onTerminal = vi.fn();
+    const coordinator = new PeerRecoveryCoordinator({
+      isCurrent: (_targetId, generation) => generation === current.generation,
+      getCurrent: () => current,
+      restartIce,
+      rebuildPeer,
+      onTerminal,
+    });
+
+    coordinator.observe("peer-a", 1, "terminal");
+    for (let cycle = 0; cycle < MAX_RECOVERY_CYCLES; cycle += 1) {
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(ICE_RESTART_TIMEOUT_MS);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(REBUILD_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(RECOVERY_COOLDOWN_MS);
+    }
+    await flushPromises();
+
+    expect(restartIce).toHaveBeenCalledTimes(MAX_RECOVERY_CYCLES);
+    expect(rebuildPeer).toHaveBeenCalledTimes(MAX_RECOVERY_CYCLES);
+    expect(coordinator.getState("peer-a")).toBe("terminal");
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(RECOVERY_COOLDOWN_MS * 5);
+    expect(restartIce).toHaveBeenCalledTimes(MAX_RECOVERY_CYCLES);
+  });
+
+  it("stops media acquired after leave cancels an in-flight join", async () => {
+    const { service, socket } = makeService();
+    const capturedTrack = { stop: vi.fn(), enabled: true } as unknown as MediaStreamTrack;
+    const capturedStream = {
+      getTracks: () => [capturedTrack],
+    } as unknown as MediaStream;
+    let resolveCapture: ((stream: MediaStream) => void) | undefined;
+    (service as any).ensureSocket = vi.fn();
+    (service as any).fetchTurnAndCache = vi.fn(async () => {});
+    (service as any).getCaptureStream = vi.fn(() => new Promise<MediaStream>((resolve) => {
+      resolveCapture = resolve;
+    }));
+
+    const joining = service.join({
+      roomId: "room-1",
+      userId: "me",
+      displayName: "Me",
+      quality: "720p",
+    });
+    await flushPromises();
+    service.leave();
+    resolveCapture?.(capturedStream);
+
+    await expect(joining).resolves.toBeUndefined();
+    expect(capturedTrack.stop).toHaveBeenCalledTimes(1);
+    expect(service.getLocalStream()).toBeNull();
+    expect(socket.emit.mock.calls.filter((call) => call[0] === "join_room")).toHaveLength(0);
+  });
+
+  it("explicitly accepts legacy signaling without a generation token", async () => {
+    const { service } = makeService();
+    const peer = service.ensurePeerConnection("peer-a", {}) as unknown as FakePeerConnection;
+    peer.signalingState = "have-local-offer";
+    const answer = { type: "answer" as RTCSdpType, sdp: "legacy" };
+    const candidate = { candidate: "legacy" };
+
+    expect(service.getPeerGeneration(answer)).toBeUndefined();
+    expect(service.getPeerGeneration(null)).toBeUndefined();
+    expect(service.getPeerGeneration("not-an-object")).toBeUndefined();
+    expect(await service.applyAnswer("peer-a", undefined, answer)).toBe(true);
+    expect(await service.applyRemoteCandidate("peer-a", undefined, candidate)).toBe(true);
+  });
+
+  it("rejects every explicit invalid generation token", async () => {
+    const { service } = makeService();
+    service.ensurePeerConnection("peer-a", {});
+    const invalidValues = [null, "1", Number.NaN, 0, -1, 1_000_000_001];
+
+    for (const peerGeneration of invalidValues) {
+      expect(service.getPeerGeneration({ peerGeneration })).toBeNull();
+    }
+    expect(await service.applyAnswer(
+      "peer-a",
+      null,
+      { type: "answer", sdp: "invalid" },
+    )).toBe(false);
+    expect(await service.applyRemoteCandidate(
+      "peer-a",
+      null,
+      { candidate: "invalid" },
+    )).toBe(false);
   });
 });
 
