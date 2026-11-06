@@ -5,8 +5,9 @@ WebRTC audio/video calls, persistent messaging, contacts, files, call history,
 and location sharing. The app is under active development and is intentionally
 not production-ready.
 
-> **Safety notice:** Until the known authorization issues are resolved, do not use sensitive conversations, sensitive files, or real location data.
-> Known authorization and privacy limitations are documented in
+> **Safety notice:** Private socket identity, room/call authorization, and file-access
+> controls still need hardening. Do not use sensitive conversations or confidential files.
+> Remaining authorization and privacy limitations are documented in
 > [SECURITY.md](SECURITY.md).
 
 ## Availability
@@ -92,9 +93,14 @@ and [server call routes](server/index.js).
 
 Android can collect current and historical location, run a foreground location
 service, restore configured behavior after boot, and publish data to Firestore.
-Web and Android surfaces can view current locations and location history.
-See [Security and privacy](SECURITY.md) for location-sharing access controls
-and data-retention limitations.
+Web and Android can view current location and history, readable only by the
+signed-in owner or selected recipients. Recipients must exactly match a UID in
+`locationSharing.sharedWith` in `users/{ownerUid}/private/userData`; missing or
+malformed settings deny nonowner access. Writes remain owner-only.
+Stopping tracking stops new updates but selected recipients retain access to
+stored current/history data. Removing a recipient stops future authorized server
+reads, not access to downloaded or cached copies.
+See [Security and privacy](SECURITY.md#location-authorization) for details.
 
 Implementation:
 [location service](mobile-kotlin/app/src/main/java/com/fpvideocalls/service/LocationTrackingService.kt),
@@ -154,8 +160,8 @@ Implementation:
   with empty encrypted-key maps. Base64 encoding is not end-to-end encryption;
   cryptographic helpers exist but are not the universal active send path.
 - Known access-control gaps include token-optional private Socket.IO identity,
-  missing enforcement of location-sharing selections, unchecked room controls,
-  and call identity/ownership checks. Attachment access depends on the storage
+  unchecked room controls, and call identity/ownership checks.
+  Attachment access depends on the storage
   mode. Account-free guest calling, temporary download links, and guest TURN
   credentials are design choices, with access and abuse controls described in
   [SECURITY.md](SECURITY.md).

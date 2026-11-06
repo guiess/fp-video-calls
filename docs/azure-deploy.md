@@ -16,7 +16,7 @@ modify live infrastructure.
 | Classification | Meaning | Current examples |
 |---|---|---|
 | Repository-verified | Directly supported by tracked source/configuration | Tracked SWA deployment file, App Service start command, runtime `config.js`, Blob/local adapter, Firebase rules, TURN endpoint |
-| Live-verified | Observed against a public endpoint on a recorded date | Web entry point and `/health` responded during specification research |
+| Live-verified | Observed endpoint or authorized configuration read-back on a recorded date | Web entry point and `/health` responded; deployed Firestore rules were verified on 2026-11-06 |
 | Operator-reported | Requires Azure/Firebase/VM owner confirmation | Resource names, SKUs, deployed source revision, active settings, backups |
 | Proposed | Recommended future hardening, not current fact | IaC, readiness probes, measured recovery objectives, monitoring/alerts |
 | Unknown | Evidence was unavailable | Active Blob mode, TURN listeners/firewalls, retention, cost alerts, live revision |
@@ -31,8 +31,8 @@ authorization.
 |---|---|---|
 | Azure Static Web Apps | Hosts `web/dist` | Public URL was reachable; deployed revision is unknown |
 | Azure App Service | Runs `node index.js` from `server` | `/health` was reachable; SKU/settings/revision are unknown |
-| Firebase Auth | Authenticated application identity | Project/config revision not recorded here |
-| Firestore | Profiles, contacts, histories, location, private device data | Rules are tracked; deployed rules revision is unknown |
+| Firebase Auth | Authenticated application identity | Project `fp-video-calls`; provider settings are not verified |
+| Firestore | Profiles, contacts, histories, location, private device data | Project `fp-video-calls`, database `(default)`, `nam5`; location authorization deployed |
 | FCM | Android call notifications | Delivery health is unknown |
 | Azure Blob Storage | Preferred server attachment store when configured | Active mode is unknown |
 | Local filesystem | Attachment fallback and SQLite | Persistence/backup behavior is operator-dependent |
@@ -189,15 +189,25 @@ Tracked Firebase surfaces:
 - [firestore.indexes.json](../firestore.indexes.json)
 - [storage.rules](../storage.rules)
 
-Before deployment, compare the targeted Firebase project ID and current deployed
-rules with the reviewed files. Use the Firebase CLI's authenticated project
-selection and dry-run/review facilities; do not infer the target from a personal
-default. Rules deployment changes authorization and is outside an ordinary web
-static deployment.
+Deployed Firestore rules restrict both current location and history reads to the
+signed-in owner or selected recipients with an exact UID match in
+`locationSharing.sharedWith` in `users/{ownerUid}/private/userData`.
+Writes and deletes remain owner-only; missing or malformed settings deny
+nonowner access. Stopping tracking retains selected recipients' access to stored
+current/history data. Removing a recipient stops future authorized server reads,
+not access to downloaded or cached copies.
+See [location authorization](../SECURITY.md#location-authorization).
 
-Known reviewed limitations include authenticated-wide location reads and broad
-authenticated Storage reads. Deploying the tracked rules does not remediate
-those limitations.
+Before any future rules deployment, explicitly target `--project fp-video-calls`,
+retain the current deployed rules for rollback, compare for unexpected drift,
+and run the [isolated rules tests](../BUILD_INSTRUCTIONS.md#firestore-location-authorization).
+Use `--only firestore:rules` for a rules-only change and verify the active source
+after deployment. Do not infer the target from a personal default or deploy
+Storage, indexes, functions, or hosting as part of this command.
+
+Firebase Storage rules still allow broad authenticated reads and writes to chat objects.
+The location policy does not change those Storage permissions or the
+Blob/local attachment access described below.
 
 ## Blob and local attachment storage
 

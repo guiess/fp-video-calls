@@ -22,7 +22,7 @@ flowchart LR
     direction TB
     subgraph Firebase["Firebase provider boundary"]
       Auth["Firebase Authentication"]:::service
-      Firestore[("Firestore\nprofiles, contacts, location,\nhistory and private device data")]:::store
+      Firestore[("Firestore\nprofiles, contacts, history,\nand private device data\nlocation current/history:\nreads: owner/selected; writes: owner")]:::store
       FCM["Firebase Cloud Messaging"]:::service
       Storage[("Firebase Storage\npresent/configured;\nnot verified primary upload path")]:::risk
     end

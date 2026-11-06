@@ -3,6 +3,18 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function hasLocationRecipient(sharing) {
+      return sharing is map
+             && sharing.get('sharedWith', []) is list
+             && request.auth.uid in sharing.get('sharedWith', []);
+    }
+
+    function isSharedLocationRecipient(userId) {
+      let settingsPath = /databases/$(database)/documents/users/$(userId)/private/userData;
+      return exists(settingsPath)
+             && hasLocationRecipient(get(settingsPath).data.get('locationSharing', {}));
+    }
+
     // User profiles — any authenticated user can read (for contact search),
     // only the owner can write.
     match /users/{userId} {
@@ -45,13 +57,15 @@ service cloud.firestore {
       // Location current — owner writes, shared contacts can read
       match /location/{docId} {
         allow write: if request.auth != null && request.auth.uid == userId;
-        allow read: if request.auth != null;
+        allow read: if request.auth != null
+                    && (request.auth.uid == userId || isSharedLocationRecipient(userId));
       }
 
       // Location history — owner writes, shared contacts can read
       match /locationHistory/{docId} {
         allow write: if request.auth != null && request.auth.uid == userId;
-        allow read: if request.auth != null;
+        allow read: if request.auth != null
+                    && (request.auth.uid == userId || isSharedLocationRecipient(userId));
       }
 
       // Admin-only subcollection — server uses Admin SDK, clients denied

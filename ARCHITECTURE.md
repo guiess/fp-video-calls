@@ -99,8 +99,10 @@ capacity guarantees.
 | Attachment route | Authenticated upload API; local download route has no auth | Files and bearer/SAS URLs depending on storage mode |
 
 Data inventory and retention evidence are maintained in
-[SECURITY.md](SECURITY.md). Reviewed Firestore rules allow any authenticated user
-to read stored location current/history. Storage rules allow broad authenticated
+[SECURITY.md](SECURITY.md). Deployed Firestore rules restrict current location
+and history reads to the signed-in owner or selected recipients, with owner-only
+writes and deletes. The private recipient settings and tracking lifecycle are
+described below. Storage rules allow broad authenticated
 reads under chat paths. The server upload adapter uses Blob or filesystem
 storage; Blob downloads use expiring bearer links, while filesystem links do
 not expire. These storage modes have different access-control requirements.
@@ -147,6 +149,18 @@ writes current/history documents, and may resume configured behavior after boot.
 Clients read and merge history for display. Cleanup is client-triggered; no
 server-enforced physical retention deadline is configured.
 
+Location reads require the signed-in owner or an exact UID match in
+`locationSharing.sharedWith` from `users/{ownerUid}/private/userData`, not the
+public profile. Missing or malformed settings deny nonowner access; the owner
+retains access. Writes and deletes remain owner-only. The rules read this
+document internally without granting recipients access to private account/device
+fields. Both clients use owner-scoped current-document listeners and
+history queries ordered by `timestamp`.
+Android's tracking toggle remains local-only: stopping updates retains selected
+recipients' access to stored current location and history.
+Removing a recipient stops future authorized server reads, not access to
+previously downloaded or cached copies. `[OWASP]`
+
 ### Telemetry lifecycle
 
 Telemetry is off unless a participant opts in. Joined room members subscribe and
@@ -167,6 +181,7 @@ local disk, and memory.
 
 | Area | Present | Current gaps |
 |---|---|---|
+| Firestore emulator | Location owner/recipient boundary, private settings isolation, malformed settings, revocation | Device/cross-client behavior beyond the emulator |
 | Web unit tests | Config, encryption format/display, location, recovery, telemetry | Browser E2E and current cross-device interop |
 | Server tests | Storage, image processing, previews, quotas, TURN, telemetry | Complete authorization and live dependency integration |
 | Android unit tests | Calls, chat models, location, notifications, recovery, TURN lease, telemetry | Device/UI suite and cross-device integration |

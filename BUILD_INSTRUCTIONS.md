@@ -8,7 +8,7 @@ They do not require production credentials.
 
 - Git
 - Node.js 22.x and npm with lockfile support
-- JDK 17
+- JDK 17 for Android; JDK 21 or newer for the Firestore emulator
 - Android SDK 34 with Android build tools required by AGP 8.2.2
 - Bash or PowerShell
 
@@ -36,6 +36,34 @@ node scripts/validate-release-manifest.mjs docs/releases/mobile-v1.0-receipt.jso
 
 The scripts use only Node built-ins. Validation errors go to stderr and return
 exit code `2`; usage errors return `64`; unexpected runtime failures return `1`.
+
+## Firestore location authorization
+
+From `tests/firestore`:
+
+```bash
+npm ci
+npm test
+```
+
+Use Node.js 22.22.2+ within 22.x (or 24.15.0+ within 24.x) and put JDK 21 or
+newer's `bin` directory on `PATH` for this command (Android still uses JDK 17).
+On PowerShell, if `JAVA_HOME` points to
+JDK 21, run `$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"` first.
+
+The isolated test package pins the Firebase CLI, rules test SDK, and client SDK;
+the first run downloads the official Firestore emulator. No Firebase login,
+service-account key, Android config, or production data is required. The test
+command uses `firebase.test.json`, loopback ports 8087/4407/4507, and the
+non-live `demo-location-auth` project. It starts/stops the emulator and returns
+nonzero on failures. Do not change the test project to a live project.
+
+Coverage includes owner/selected-recipient reads, ordered queries and listeners,
+owner-only writes/deletes, malformed/missing private settings, private-document
+isolation, recipient removal/re-addition, and retained-data toggle semantics.
+These tests validate repository rules, not live permissions. See the
+[Firebase deployment guidance](docs/azure-deploy.md#firebase) for explicit
+targeting, rules-only deployment, and rollback precautions.
 
 ## Web
 
