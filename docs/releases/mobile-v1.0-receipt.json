@@ -1,0 +1,76 @@
+{
+  "$schema": "./release-manifest.schema.json",
+  "schemaVersion": 1,
+  "profile": "legacy",
+  "canonicalProductName": "M² Calls",
+  "historicalProductName": "M2 Video Calls",
+  "repository": "guiess/fp-video-calls",
+  "release": "mobile-v1.0",
+  "tagCommit": "c8a900b3ddea020a2ae4e9a36eb49b9a27ed9483",
+  "buildSourceCommit": null,
+  "buildSourceStatus": "unknown-original-build-evidence-not-recovered",
+  "artifact": {
+    "filename": "m2-video-calls-v1.0-debug.apk",
+    "sizeBytes": 44386062,
+    "sha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
+    "digestSource": "github-release-metadata"
+  },
+  "tagRelationshipToBaseline": {
+    "baselineCommit": "482a83a83db50d75792610fc009f0fb87d24971d",
+    "mainOnlyCommits": 45,
+    "tagSideCommits": 15,
+    "source": "specification research record",
+    "verificationStatus": "not-recomputed-in-this-receipt"
+  },
+  "observations": [
+    {
+      "observedOn": "2026-11-06",
+      "kind": "release-metadata",
+      "status": "recorded",
+      "detail": "Filename, byte size, GitHub-recorded SHA-256, tag commit, and historical branding were transcribed from the approved specification.",
+      "limitation": "Specification research did not independently verify the bytes."
+    },
+    {
+      "observedOn": "2026-11-06",
+      "kind": "independent-download-and-hash",
+      "status": "verified",
+      "detail": "The exact GitHub release asset was downloaded with gh. Independent size was 44386062 bytes and SHA-256 was 0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6.",
+      "limitation": "Matching bytes prove artifact identity only, not source authorship or build process."
+    },
+    {
+      "observedOn": "2026-11-06",
+      "kind": "android-package-inspection",
+      "status": "verified",
+      "detail": "aapt reported package com.fpvideocalls, versionCode 1, versionName 1.0, minSdk 26, targetSdk 34, compileSdk 34, debuggable state, and native ABIs arm64-v8a plus armeabi-v7a.",
+      "limitation": "These are observations from the exact APK, not recovered original build provenance."
+    },
+    {
+      "observedOn": "2026-11-06",
+      "kind": "android-signature-inspection",
+      "status": "verified",
+      "detail": "apksigner verified one v2 signer with certificate DN CN=Android Debug, O=Android, C=US and certificate SHA-256 68f4e7af7bc06efa5669ec26886237f15d607ef205f49554777c3a12b6775b63.",
+      "limitation": "A debug certificate identifies the signer certificate of these bytes; it does not establish trusted release ownership."
+    },
+    {
+      "observedOn": "2026-11-06",
+      "kind": "emulator-smoke-test",
+      "status": "limited-pass",
+      "detail": "The exact APK installed successfully on an Android API 36 x86_64 emulator, cold-launched, displayed the launch screen, accepted guest navigation, and rendered synthetic guest-room values.",
+      "limitation": "Camera, microphone, authentication, Firebase, signaling, current services, media, files, notifications, and location interoperability were not tested."
+    }
+  ],
+  "unknowns": [
+    {
+      "field": "buildSourceCommit",
+      "reason": "The original build source and build process were not recovered from release evidence."
+    },
+    {
+      "field": "signer",
+      "reason": "The exact-byte signer certificate is observed, but its original custody and release authorization are unknown."
+    },
+    {
+      "field": "currentServiceCompatibility",
+      "reason": "Compatibility between the historical APK and current live services has not been established."
+    }
+  ]
+}
