@@ -19,10 +19,10 @@ capture fixtures, public screenshots, and machine-readable provenance.
 
 ## Screenshot fixture
 
-[fixtures/v1.json](fixtures/v1.json) defines the approved synthetic identities,
-messages, file labels, and simulated coordinates. It contains no real person,
-conversation, face, voice, address, workplace, credential, token, signed URL,
-or production record.
+[fixtures/sanitized-v2.json](fixtures/sanitized-v2.json) records the approved
+privacy-redacted capture package. Redacted identity, message, file-label, map,
+and coordinate values are intentionally not retained in repository metadata and
+must not be reconstructed.
 
 ## Screenshot provenance
 
@@ -30,42 +30,41 @@ or production record.
 record for every public PNG. Each entry binds a filename to:
 
 - canonical or historical product identity;
-- source commit or installed APK digest;
+- live URL/revision status or installed APK digest;
 - platform and capture environment;
 - date, operator, fixture version, and scenario;
 - dimensions, byte size, and SHA-256;
 - crop/mask/annotation history;
-- OCR, PNG metadata, and human review status;
+- privacy-redaction, PNG metadata, and human review status;
 - caption, alt text, and evidence limitation.
 
-The capture set includes at least two web and two Android images. Historical APK
-images retain the M2 Video Calls identity and are not represented as current M²
-Calls source builds.
+The capture set contains five web app-viewport images from
+`https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app` and six Android
+images from the exact historical `mobile-v1.0` debug APK. The web deployment
+revision is unknown. Historical Android images are not represented as
+current-main output.
 
-The captured surfaces show call setup and transient communication UI. A safe
-location screenshot is blocked: the public web location surface requires an
-authenticated account, while the historical APK would require Firebase-backed
-identity/location setup. No owner-approved authenticated fixture or simulated
-location injection was available. Real location data was not used. This
-limitation is recorded instead of presenting a mockup as runtime evidence.
+Both platforms show chats, a conversation, contacts, rooms, and a joined room
+with two participants displayed. Android additionally shows the contact-location
+surface with map detail and coordinate data obscured. The web location capture
+was intentionally skipped.
 
 ## Review procedure
 
-1. Run only the approved synthetic scenario.
+1. Use only the owner-approved sanitized capture package.
 2. Capture the actual application UI; generated mockups are not runtime
    evidence.
 3. Keep the raw capture outside the repository.
-4. Crop only to remove operating-system chrome; record every transformation.
-5. Inspect OCR output for personal data, credentials, tokens, private URLs,
-   notifications, and real coordinates.
+4. Preserve opaque redactions and never attempt to recover concealed values.
+5. Confirm visually that browser chrome, Copilot UI, personal identity,
+   coordinate detail, and private file labels are absent or obscured.
 6. Remove EXIF, XMP, IPTC, PNG text chunks, thumbnails, and editor history.
 7. Recompute dimensions, size, and SHA-256.
-8. Have a human compare the PNG with its caption, alt text, and limitation.
+8. Compare every PNG with its caption, alt text, and evidence limitation.
 9. Run `node --test scripts/tests/portfolio-docs.test.mjs`.
 
-The current records show `pending-owner-review` for the final human approval.
-Local structure/metadata scripts and Developer Guardian visual inspection are
-complete, but they do not impersonate a human reviewer.
+The owner supplied this package as authoritative sanitized source. Human visual
+review and local structure/metadata validation are recorded as complete.
 
 UI captures demonstrate visible surfaces only. They do not prove successful
 cross-platform calling, authenticated access, TURN relay selection, backend

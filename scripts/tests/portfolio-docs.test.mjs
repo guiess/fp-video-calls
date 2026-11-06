@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -28,6 +28,7 @@ const REQUIRED_FILES = [
   "docs/assets/README.md",
   "docs/assets/architecture/system-overview.mmd",
   "docs/assets/architecture/system-overview.svg",
+  "docs/assets/fixtures/sanitized-v2.json",
   "docs/assets/screenshots/provenance.json",
   "docs/releases/README.md",
   "docs/releases/release-manifest.schema.json",
@@ -95,27 +96,59 @@ test("broken link and product name fixtures are rejected", async () => {
 });
 
 test("approved screenshots are real PNG files with matching provenance", async () => {
-  const provenancePath = path.join(
+  const expectedFiles = [
+    "android-chat-final.png",
+    "android-chats-final.png",
+    "android-contact-location-final.png",
+    "android-contacts-final.png",
+    "android-room-list-final.png",
+    "android-room-participant-final.png",
+    "web-chat-final.png",
+    "web-chats-final.png",
+    "web-contacts-final.png",
+    "web-room-participant-final.png",
+    "web-rooms-final.png",
+  ];
+  const screenshotDirectory = path.join(
     REPOSITORY_ROOT,
-    "docs/assets/screenshots/provenance.json",
+    "docs/assets/screenshots",
+  );
+  const provenancePath = path.join(
+    screenshotDirectory,
+    "provenance.json",
   );
   const provenance = JSON.parse(await readFile(provenancePath, "utf8"));
-  assert.ok(provenance.captures.length >= 4, "at least four captures are required");
-  assert.ok(
-    provenance.captures.filter((capture) => capture.platform === "web").length >= 2,
-    "at least two web captures are required",
+  const fixture = JSON.parse(
+    await readFile(
+      path.join(REPOSITORY_ROOT, "docs/assets/fixtures/sanitized-v2.json"),
+      "utf8",
+    ),
   );
-  assert.ok(
-    provenance.captures.filter((capture) => capture.platform === "android").length >= 2,
-    "at least two Android captures are required",
+  const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
+  assert.equal(provenance.fixtureVersion, fixture.fixtureVersion);
+  const actualFiles = (await readdir(screenshotDirectory))
+    .filter((filename) => filename.endsWith(".png"))
+    .sort();
+  assert.deepEqual(actualFiles, expectedFiles);
+  assert.deepEqual(
+    provenance.captures.map((capture) => capture.filename).sort(),
+    expectedFiles,
+  );
+  assert.equal(
+    provenance.captures.filter((capture) => capture.platform === "web").length,
+    5,
+  );
+  assert.equal(
+    provenance.captures.filter((capture) => capture.platform === "android").length,
+    6,
   );
 
   for (const capture of provenance.captures) {
-    const imagePath = path.join(
-      REPOSITORY_ROOT,
-      "docs/assets/screenshots",
-      capture.filename,
+    assert.match(
+      readme,
+      new RegExp(`docs/assets/screenshots/${capture.filename.replaceAll(".", "\\.")}`),
     );
+    const imagePath = path.join(screenshotDirectory, capture.filename);
     const bytes = await readFile(imagePath);
     const inspection = inspectPng(bytes);
     assert.equal(inspection.width, capture.width);
@@ -127,22 +160,37 @@ test("approved screenshots are real PNG files with matching provenance", async (
       capture.sha256,
     );
     assert.equal(bytes.length, capture.sizeBytes);
+    if (bytes.length > 1_048_576) {
+      assert.ok(capture.sizeBudgetException?.length >= 20);
+    }
     assert.ok(capture.altText.length >= 20);
     assert.ok(capture.caption.length >= 20);
     assert.ok(capture.evidenceLimitation.length >= 20);
-    assert.equal(capture.ocrReview.status, "reviewed");
+    assert.equal(capture.redactionStatus, "privacy-redacted");
+    assert.equal(capture.privacyReview.status, "reviewed");
+    assert.equal(capture.privacyReview.recoveryAttempted, false);
+    assert.equal("ocrReview" in capture, false);
     assert.equal(capture.metadataReview.status, "reviewed");
-    assert.ok(
-      ["approved", "pending-owner-review"].includes(capture.humanReview.status),
-      "human review status must be explicit",
-    );
+    assert.equal(capture.humanReview.status, "approved");
     assert.ok(capture.humanReview.reviewer.length >= 10);
+    if (capture.platform === "web") {
+      assert.equal(
+        capture.sourceUrl,
+        "https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app",
+      );
+      assert.equal(capture.sourceRevisionStatus, "unknown-live-deployment-revision");
+    } else {
+      assert.equal(
+        capture.installedApkSha256,
+        "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
+      );
+    }
   }
 });
 
 test("PNG inspection rejects metadata-bearing text chunks", async () => {
   const image = await readFile(
-    path.join(REPOSITORY_ROOT, "docs/assets/screenshots/web-sign-in.png"),
+    path.join(REPOSITORY_ROOT, "docs/assets/screenshots/web-chats-final.png"),
   );
   const fakeTextChunk = Buffer.concat([
     Buffer.alloc(4),

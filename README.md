@@ -27,15 +27,26 @@ not a production communications service.
 
 ## Product evidence
 
-The images below are UI evidence, not proof that every dependency or
-cross-platform scenario completed successfully. Capture source, hashes, review
-results, and limitations are recorded in
+The privacy-redacted images below are UI evidence, not proof that every
+dependency or cross-platform scenario completed successfully. Web captures are
+app-viewport-only images from the live `/app` surface; the deployed source
+revision is unknown. Android captures come from the exact historical
+`mobile-v1.0` debug APK and are not represented as current-main output. Capture
+hashes, review results, and limitations are recorded in
 [the asset provenance register](docs/assets/README.md).
 
-| Web | Android |
-|---|---|
-| ![M² Calls WebRTC call lab with empty local and remote video areas](docs/assets/screenshots/web-sign-in.png) | ![Historical M2 Video Calls Android launch screen on a test emulator](docs/assets/screenshots/android-home-historical.png) |
-| ![M² Calls guest-room join screen with the synthetic Alex Rivera identity](docs/assets/screenshots/web-guest-room.png) | ![Historical M2 Video Calls Android guest-room form using synthetic values](docs/assets/screenshots/android-call-historical.png) |
+| Surface | Web | Historical Android APK |
+|---|---|---|
+| Chats list | ![Privacy-redacted M² Calls web chats list](docs/assets/screenshots/web-chats-final.png) | ![Privacy-redacted historical Android chats list](docs/assets/screenshots/android-chats-final.png) |
+| Conversation | ![Privacy-redacted M² Calls web conversation with messages and media](docs/assets/screenshots/web-chat-final.png) | ![Privacy-redacted historical Android conversation with messages and media](docs/assets/screenshots/android-chat-final.png) |
+| Contacts | ![Privacy-redacted M² Calls web contacts page](docs/assets/screenshots/web-contacts-final.png) | ![Privacy-redacted historical Android contacts page](docs/assets/screenshots/android-contacts-final.png) |
+| Room page | ![M² Calls web rooms page with recent rooms and create-room form](docs/assets/screenshots/web-rooms-final.png) | ![Historical Android room page with recent rooms and join-room form](docs/assets/screenshots/android-room-list-final.png) |
+| Joined room | ![M² Calls web room showing two participants present](docs/assets/screenshots/web-room-participant-final.png) | ![Historical Android room showing two participants present](docs/assets/screenshots/android-room-participant-final.png) |
+| Contact location | Web capture intentionally skipped | ![Privacy-redacted historical Android contact-location page with map and coordinate data obscured](docs/assets/screenshots/android-contact-location-final.png) |
+
+The joined-room captures demonstrate that each UI displayed two participants.
+They do not establish media interoperability, authorization correctness,
+capacity, reliability, or production readiness.
 
 ## WebRTC calls
 

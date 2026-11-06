@@ -86,7 +86,6 @@ must be run explicitly. Future automation is deferred.
 The following require people, credentials, devices, or live operator access and
 were not fabricated:
 
-- final owner/delegated-human approval of the four screenshots;
 - three-person 90-second README trial;
 - one senior-engineer 30-minute architecture/security interview trial;
 - authenticated safe location capture using approved simulated data;
