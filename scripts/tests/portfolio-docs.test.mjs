@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -23,6 +23,7 @@ const REQUIRED_FILES = [
   "BUILD_INSTRUCTIONS.md",
   "LICENSE",
   "THIRD_PARTY_NOTICES.md",
+  "docs/mobile-app-features.md",
   "docs/azure-deploy.md",
   "docs/assets/architecture/system-overview.mmd",
   "docs/assets/architecture/system-overview.svg",
@@ -31,6 +32,25 @@ const REQUIRED_FILES = [
   "docs/releases/mobile-v1.0-receipt.json",
   "docs/validation-status.md",
 ];
+
+const CURRENT_LOCATION_POLICY = [
+  "Only the signed-in owner or selected recipients can read current location and history.",
+  "Recipients must exactly match a UID in `locationSharing.sharedWith` in",
+  "`users/{ownerUid}/private/userData`.",
+].join("\n");
+
+async function createDocumentationFixture(context, policy) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "m2-location-docs-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, "README.md"), [
+    "# M² Calls",
+    "Do not use sensitive conversations or confidential files.",
+    "Base64 encoding is not end-to-end encryption.",
+    "External contributions are not accepted.",
+    policy,
+  ].join("\n"));
+  return root;
+}
 
 test("required documentation files exist", async () => {
   for (const relativePath of REQUIRED_FILES) {
@@ -107,23 +127,74 @@ test("setup and security guidance retain the corrected implementation boundaries
   assert.doesNotMatch(releases, /signer, installed package metadata, and\s+device validation remain unknown/i);
 });
 
+test("validator accepts current location policy without the obsolete broad-read warning", async (context) => {
+  const root = await createDocumentationFixture(context, CURRENT_LOCATION_POLICY);
+  assert.deepEqual((await validatePortfolio(root)).errors, []);
+});
+
+test("validator requires the current recipient policy and private settings path", async (context) => {
+  for (const required of [
+    "Only the signed-in owner or selected recipients can read current location and history.",
+    "locationSharing.sharedWith",
+    "users/{ownerUid}/private/userData",
+  ]) {
+    const root = await createDocumentationFixture(context, CURRENT_LOCATION_POLICY.replace(required, ""));
+    const result = await validatePortfolio(root);
+    assert.ok(result.errors.some((error) => error.toLowerCase().includes(required.toLowerCase())));
+  }
+});
+
+test("current location guidance describes deployed access without stale warnings or rollout narrative", async () => {
+  for (const filename of [
+    "README.md", "SECURITY.md", "ARCHITECTURE.md",
+    "docs/mobile-app-features.md", "docs/azure-deploy.md",
+  ]) {
+    const text = (await readFile(path.join(REPOSITORY_ROOT, filename), "utf8")).replace(/\s+/g, " ");
+    assert.doesNotMatch(text, /any authenticated user[^.]*read stored location|authenticated-wide location reads/i);
+    assert.doesNotMatch(text, /do not use[^.]*real location data|location[^.]*awaiting deployment/i);
+    assert.match(text, /owner/i);
+    assert.match(text, /selected recipient|sharedWith/i);
+    assert.doesNotMatch(text, /[A-Z]:[\\/](?:Users|dev)[\\/]/i);
+  }
+  const security = (await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")).replace(/\s+/g, " ");
+  assert.match(security, /exact UID match/);
+  assert.match(security, /users\/\{ownerUid\}\/private\/userData/);
+  assert.match(security, /Writes and deletes remain owner-only/);
+  assert.match(security, /Missing or malformed[^.]*deny nonowner access/);
+  assert.match(security, /stopping tracking[^.]*retained current location and history/i);
+  assert.match(security, /Removing a recipient[^.]*future[^.]*server reads/i);
+  assert.match(security, /cached copies/i);
+  assert.doesNotMatch(security, /manual UAT|scoped review gate|byte-for-byte|SHA-256|ruleset identity/i);
+});
+
+test("both system diagram formats label the location read and write boundary", async () => {
+  for (const extension of ["mmd", "svg"]) {
+    const diagram = await readFile(
+      path.join(REPOSITORY_ROOT, `docs/assets/architecture/system-overview.${extension}`), "utf8",
+    );
+    assert.match(diagram, /location current\/history:/);
+    assert.match(diagram, /reads: owner\/selected; writes: owner/);
+  }
+});
+
 test("repository-relative Markdown links and anchors resolve", async () => {
   const links = await collectMarkdownLinks(REPOSITORY_ROOT);
   const brokenLinks = links.filter((link) => !link.isValid);
   assert.deepEqual(brokenLinks, []);
 });
 
-test("broken link and product name fixtures are rejected", async () => {
+test("broken link and product name fixtures are rejected", async (context) => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "m2-doc-policy-"));
+  context.after(() => rm(fixtureRoot, { recursive: true, force: true }));
   await writeFile(
     path.join(fixtureRoot, "README.md"),
     [
       "# M2 Video Calls",
       "[Missing evidence](missing.md)",
-      "Reviewed Firestore rules allow any authenticated user to read stored location.",
+      CURRENT_LOCATION_POLICY,
       "Base64 encoding is not end-to-end encryption.",
       "External contributions are not accepted.",
-      "Do not use sensitive conversations, sensitive files, or real location data.",
+      "Do not use sensitive conversations or confidential files.",
     ].join("\n"),
   );
 

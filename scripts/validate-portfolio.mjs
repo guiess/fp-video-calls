@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REQUIRED_LIVE_WARNING =
-  "do not use sensitive conversations, sensitive files, or real location data.";
+  "do not use sensitive conversations or confidential files.";
 const PROHIBITED_MARKERS = [
   /\bTODO\b/i,
   /\bTBD\b/i,
@@ -34,7 +34,7 @@ const MAX_MARKDOWN_BYTES = 2_000_000;
 const MAX_FILE_COUNT = 5_000;
 const MAX_DIRECTORY_DEPTH = 20;
 
-/** Validate portfolio documentation, naming, warnings, and evidence posture. */
+/** Validate product documentation, naming, warnings, and required boundaries. */
 export async function validatePortfolio(repositoryRoot) {
   const errors = [];
   const markdownFiles = await findFiles(repositoryRoot, ".md");
@@ -106,15 +106,18 @@ async function validateRequiredEntryPoints(repositoryRoot, markdownFiles, errors
   ).join("\n");
   const readme = await readBoundedText(path.join(repositoryRoot, "README.md"));
   const normalizedReadme = readme.toLowerCase().replace(/\s+/g, " ");
+  const normalizedContent = publicContent.toLowerCase().replace(/\s+/g, " ");
   if (!normalizedReadme.includes(REQUIRED_LIVE_WARNING)) {
     errors.push("README.md lacks the security warning");
   }
   for (const phrase of [
-    "reviewed Firestore rules allow any authenticated user to read stored location",
+    "Only the signed-in owner or selected recipients can read current location and history.",
+    "locationSharing.sharedWith",
+    "users/{ownerUid}/private/userData",
     "Base64 encoding is not end-to-end encryption",
     "external contributions are not accepted",
   ]) {
-    if (!publicContent.toLowerCase().includes(phrase.toLowerCase())) {
+    if (!normalizedContent.includes(phrase.toLowerCase())) {
       errors.push(`public documentation lacks: ${phrase}`);
     }
   }

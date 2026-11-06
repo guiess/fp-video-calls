@@ -7,7 +7,7 @@
 
 | Area | Command | Result |
 |---|---|---|
-| Documentation and assets | `node --test scripts/tests/*.test.mjs` | 24 tests passed |
+| Documentation and assets | `node --test scripts/tests/*.test.mjs` | 28 tests passed, including current location-policy guidance |
 | Documentation links and required content | `node scripts/validate-portfolio.mjs .` | Passed |
 | Screenshot inventory | PNG structure, dimensions, hashes, and byte comparison | 11 supplied PNGs matched; privacy masks preserved |
 | Historical release receipt | `node scripts/validate-release-manifest.mjs docs/releases/mobile-v1.0-receipt.json <downloaded-apk>` | Passed; size and SHA-256 matched |
@@ -79,6 +79,24 @@ At 2026-11-06 11:40 Eastern:
 
 `/health` reports Node process liveness. Azure, Firebase, storage, and coturn
 configuration are maintained separately.
+
+### Firestore location rules
+
+On 2026-11-06, a Firestore-rules-only deployment updated project `fp-video-calls`,
+database `(default)` in `nam5`:
+
+- release: `projects/fp-video-calls/releases/cloud.firestore`;
+- active ruleset: `5eaa064b-d9fc-4636-8ffa-b111f7189fe8`;
+- release update time: `2026-11-06T22:29:49.725363Z`;
+- source SHA-256: `d95cfa9ce8bffd075545c31085737a56e6f42f8b48cd8e3371185b20d57146ab`;
+- active source read-back matched the tested local rules exactly;
+- 38 isolated emulator tests passed using Node 22.23.4 and JDK 21.0.8;
+- previous ruleset `06a17bf6-6073-41d3-a8c7-f1a53360b152` and source retained
+  separately for rollback.
+
+No Storage rules, indexes, functions, or hosting were deployed. No real-user
+location queries or live behavioral tests were performed. Android was not
+rebuilt or reinstalled for this rules change.
 
 ## Automation
 

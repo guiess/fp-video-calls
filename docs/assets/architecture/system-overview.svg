@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1120" viewBox="0 0 1400 1120" role="img" aria-labelledby="title description">
   <title id="title">M² Calls system overview</title>
-  <desc id="description">Browser and Android clients use Firebase identity, a Node and Socket.IO signaling API, Firestore, FCM, SQLite, Blob or local attachment storage, and coturn. Signaling carries SDP and ICE metadata, while DTLS-SRTP media flows directly between peers or through coturn.</desc>
+  <desc id="description">Browser and Android clients use Firebase identity, a Node and Socket.IO signaling API, Firestore, FCM, SQLite, Blob or local attachment storage, and coturn. Location current/history reads require sign-in as the owner or a selected recipient; location writes remain owner-only. Signaling carries SDP and ICE metadata, while DTLS-SRTP media flows directly between peers or through coturn.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
       <polygon points="0 0, 10 3.5, 0 7" fill="#222"/>
@@ -71,8 +71,10 @@
   <text x="577" y="212" text-anchor="middle" class="label">Authentication</text>
   <rect x="695" y="155" width="280" height="125" rx="12" class="store"/>
   <text x="835" y="192" text-anchor="middle" class="label">Firestore</text>
-  <text x="835" y="220" text-anchor="middle" class="detail">profiles, contacts, location,</text>
-  <text x="835" y="244" text-anchor="middle" class="detail">history, private device data</text>
+  <text x="835" y="215" text-anchor="middle" class="detail">profiles, contacts, histories,</text>
+  <text x="835" y="236" text-anchor="middle" class="detail">private device data</text>
+  <text x="835" y="255" text-anchor="middle" class="client-detail">location current/history:</text>
+  <text x="835" y="273" text-anchor="middle" class="client-detail">reads: owner/selected; writes: owner</text>
   <rect x="1000" y="155" width="135" height="100" rx="12" class="service"/>
   <text x="1067" y="197" text-anchor="middle" class="label">FCM</text>
   <text x="1067" y="223" text-anchor="middle" class="detail">call alerts</text>

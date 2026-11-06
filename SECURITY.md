@@ -1,7 +1,6 @@
 # M² Calls security and privacy
 
-**Last source review:** 2026-11-06 at
-`482a83a83db50d75792610fc009f0fb87d24971d`.
+**Updated:** 2026-11-06.
 
 M² Calls is a personal-use application under active development and is
 intentionally not production-ready. This document describes its current
@@ -22,11 +21,9 @@ a confidential security report are welcome.
 ## Safe use during development
 
 > **M² Calls is under active development and intentionally not production-ready.**
-> Until the known authorization issues are resolved, do not use sensitive
-> conversations, sensitive files, or real location data. Current limitations
-> include unenforced location-sharing selections, private socket identity and
-> room/call authorization gaps, sensitive diagnostic logging, and non-E2E-encrypted text
-> messaging.
+> Private socket identity, room/call authorization, and file-access controls
+> still need hardening. Do not use sensitive conversations or confidential files.
+> Sensitive diagnostic logging and non-E2E-encrypted text messaging remain limitations.
 
 Use non-sensitive data during development and testing. Do not upload secrets or
 confidential records.
@@ -37,10 +34,29 @@ Authenticated REST chat routes verify Firebase ID tokens and check conversation
 membership for conversation access. Guest rooms deliberately support account-free
 calling, with passwords checked when enabled.
 
-### Known access-control gaps
+### Location authorization
 
-- **Location sharing:** Reviewed Firestore rules allow any authenticated user to read stored location current/history.
-  The selected `sharedWith` list is not enforced by those rules.
+Only the signed-in owner or selected recipients can read current location and history.
+Both `users/{ownerUid}/location/{docId}` and
+`users/{ownerUid}/locationHistory/{docId}` use the same policy. A recipient must
+be signed in and have an exact UID match in the `locationSharing.sharedWith` list from
+`users/{ownerUid}/private/userData`, not the public profile.
+Rules inspect that private document internally; recipients cannot read or
+modify it directly. Writes and deletes remain owner-only.
+Missing or malformed sharing settings, missing private documents, and empty
+recipient lists deny nonowner access; the owner retains access.
+
+Android's tracking toggle is device-local: stopping tracking stops new updates
+but selected recipients can still read retained current location and history.
+Removing a recipient revokes future authorized server reads, including subsequent
+location updates to listeners; it does not erase downloaded or cached copies.
+Readers must use owner-scoped paths/queries, not collection-group queries.
+
+This policy is deployed to project `fp-video-calls`, database `(default)`.
+Deployment details are in the [verification records](docs/validation-status.md#firestore-location-rules).
+
+### Other known access-control gaps
+
 - **Private socket identity:** `chat_auth` verifies a token only when Firebase
   Admin is ready and a token is supplied. Otherwise a claimed UID can join a
   private user-event room without proving that identity.
@@ -73,9 +89,9 @@ shape/size and is covered by the `/api/` IP rate limiter. This is not a private
 chat authorization defect. Credential issuance and relay quotas still need
 appropriate abuse and bandwidth-cost controls for the deployment.
 
-These observations describe checked-in source and rules. The deployed server
-revision, Firebase rules, active storage mode, and coturn quota settings have
-not been verified here.
+Location authorization is deployed as described above. The deployed server
+revision, Firebase Storage rules, active storage mode, and coturn quota settings
+are not established here.
 
 Source:
 [server/index.js](server/index.js),
@@ -166,8 +182,8 @@ documentation must never reproduce detected values.
 
 ## Known risk areas
 
-- missing access checks for location sharing, private Socket.IO identity,
-  room controls, and call identity/ownership;
+- missing access checks for private Socket.IO identity, room controls, and call
+  identity/ownership;
 - attachment-sharing policy and storage-mode-specific access controls;
 - dependency/supply-chain findings requiring separate triage;
 - configuration drift among SWA, App Service, Firebase, Blob/local storage, and

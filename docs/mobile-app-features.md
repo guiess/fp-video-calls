@@ -58,13 +58,20 @@ and [AndroidManifest.xml](../mobile-kotlin/app/src/main/AndroidManifest.xml).
 - Current/history persistence and map/history views.
 - Client-side cleanup logic.
 
-Reviewed Firestore rules allow any authenticated user to read stored location
-current/history. Client cleanup is not a guaranteed physical retention
-deadline. See [security and privacy](../SECURITY.md) for sharing access controls.
+Current location and history are readable only by the signed-in owner or selected
+recipients with an exact UID match in `locationSharing.sharedWith` in
+`users/{ownerUid}/private/userData`. Writes and deletes remain owner-only;
+missing or malformed settings deny nonowner access.
+Stopping tracking stops new updates but selected recipients can still read stored
+current location and history. Removing a recipient stops future authorized server
+reads, not access to downloaded or cached copies. Client cleanup is not a
+guaranteed physical retention deadline.
+See [security and privacy](../SECURITY.md#location-authorization).
 
 Evidence:
 [LocationTrackingService.kt](../mobile-kotlin/app/src/main/java/com/fpvideocalls/service/LocationTrackingService.kt),
 [LocationViewScreen.kt](../mobile-kotlin/app/src/main/java/com/fpvideocalls/ui/screens/LocationViewScreen.kt),
+[OptionsScreen.kt](../mobile-kotlin/app/src/main/java/com/fpvideocalls/ui/screens/OptionsScreen.kt),
 and [firestore.rules](../firestore.rules).
 
 ## Diagnostics and localization
