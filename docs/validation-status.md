@@ -15,6 +15,7 @@ service ran.
 |---|---|---|
 | Portfolio docs/assets | `node --test scripts/tests/*.test.mjs` | 17 tests passed |
 | Portfolio entry points | `node scripts/validate-portfolio.mjs .` | Passed |
+| Owner screenshot inventory | byte comparison plus PNG structure/hash checks | 11 supplied PNGs copied byte-for-byte; visible privacy masks preserved |
 | Historical receipt and exact APK | `node scripts/validate-release-manifest.mjs docs/releases/mobile-v1.0-receipt.json <downloaded-apk>` | Passed; exact bytes matched size and SHA-256 |
 | Server source boundary | `node scripts/validate-server-package.mjs server` | Passed; 23 source files |
 | Candidate server ZIP | create disposable source ZIP, then `node scripts/validate-server-package.mjs <candidate.zip>` | Passed; archive parser opened and validated 23 files |

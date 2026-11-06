@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 3,
+  "fixtureVersion": "m2-owner-prepared-captures-v3",
+  "canonicalProductName": "M² Calls",
+  "approvedOn": "2026-11-06",
+  "purpose": "Owner-prepared, owner-approved portfolio screenshot package",
+  "pixelPolicy": {
+    "preserveSuppliedPixels": true,
+    "resizePermitted": false,
+    "cropPermitted": false,
+    "recolorPermitted": false,
+    "privacyMaskChangesPermitted": false,
+    "metadataRemovalPermittedWhenRequired": true
+  },
+  "privacyReview": {
+    "ownerReviewed": true,
+    "visibleRedYellowMasksIntentional": true,
+    "everyVisibleIdentitySynthetic": "not-claimed"
+  },
+  "captureSurfaces": {
+    "guestWeb": [
+      "guest-entry",
+      "guest-room-create-or-join",
+      "guest-group-call"
+    ],
+    "authenticatedWeb": [
+      "logged-in-chats",
+      "logged-in-rooms",
+      "logged-in-calls"
+    ],
+    "androidHistoricalApk": [
+      "chats",
+      "conversation",
+      "contacts",
+      "rooms",
+      "group-call"
+    ]
+  }
+}

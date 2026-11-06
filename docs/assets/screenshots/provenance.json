@@ -1,34 +1,35 @@
 {
-  "schemaVersion": 2,
-  "fixtureVersion": "m2-sanitized-captures-v2",
+  "schemaVersion": 3,
+  "fixtureVersion": "m2-owner-prepared-captures-v3",
   "canonicalProductName": "M² Calls",
   "portfolioSourceBaseline": "482a83a83db50d75792610fc009f0fb87d24971d",
-  "reviewMethod": "Owner-provided sanitization plus human visual inspection; no concealed value recovery was attempted.",
+  "captureDate": "2026-11-06",
+  "reviewMethod": "Owner-prepared and owner-approved captures with intentional visible red/yellow privacy masks; Developer Guardian performed visual inventory and PNG structure checks.",
   "captures": [
     {
-      "filename": "web-chats-final.png",
-      "productIdentity": "M² Calls live web application",
-      "sourceUrl": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app",
+      "filename": "m2calls_guest_entry.png",
+      "productIdentity": "M² Calls live web experience",
+      "sourceOrigin": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net",
+      "sourceSurface": "guest entry",
       "sourceRevisionStatus": "unknown-live-deployment-revision",
       "platform": "web",
-      "environment": "App-viewport-only web capture; browser version was not supplied",
+      "environment": "App-content-only web capture; browser details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Authenticated chats-list surface with identity text privacy-redacted",
-      "visibleFeature": "Chats navigation, search, conversation list, and empty conversation pane",
-      "width": 1920,
-      "height": 1020,
-      "sizeBytes": 31246,
-      "sha256": "749cda0b7d19350b4887a1e66e25ede07a84a8543acf765a6d0b20d782a52268",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided opaque privacy redactions preserved without attempting recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Guest entry before a room is selected",
+      "visibleFeature": "Name field, room field, advanced settings, create-room action, sign-in link, and language control",
+      "width": 732,
+      "height": 852,
+      "sizeBytes": 150528,
+      "sha256": "14247174a4333bdf62b1b818a0b6e25c3a0c0e749881dbf3a0be6b532b42f5a1",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "Identity text is obscured; no browser chrome, Copilot UI, coordinate detail, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; any visible red/yellow privacy masks remain unchanged. No browser chrome or Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -36,37 +37,37 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Privacy-redacted M² Calls live web chats-list surface.",
-      "altText": "Privacy-redacted M² Calls web chats list with app navigation, search, one conversation row, and an empty conversation pane.",
-      "evidenceLimitation": "Shows the live web UI only; deployed source revision, data authorization, delivery behavior, and backend health are not established."
+      "caption": "M² Calls guest entry page from the live web experience.",
+      "altText": "M² Calls guest entry page with name and room fields, advanced settings, create-room action, sign-in link, and language control.",
+      "evidenceLimitation": "Shows guest-entry UI only; deployed source revision, room creation, authorization, signaling, and media are not established."
     },
     {
-      "filename": "web-chat-final.png",
-      "productIdentity": "M² Calls live web application",
-      "sourceUrl": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app",
+      "filename": "m2calls_guest_new_room.png",
+      "productIdentity": "M² Calls live web experience",
+      "sourceOrigin": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net",
+      "sourceSurface": "guest room creation or join",
       "sourceRevisionStatus": "unknown-live-deployment-revision",
       "platform": "web",
-      "environment": "App-viewport-only web capture; browser version was not supplied",
+      "environment": "App-content-only web capture; browser details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Authenticated conversation surface with identity, message, and private file-label text privacy-redacted",
-      "visibleFeature": "Conversation header, message bubbles, shared images, reply marker, attachment control, and composer",
-      "width": 1920,
-      "height": 1020,
-      "sizeBytes": 380375,
-      "sha256": "61d5c3bdb4cc8daebbbe2f5068ced4648fe10dfa99cc6d688bdc2ed774c9f55d",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided opaque privacy redactions preserved without attempting recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Guest room form with advanced settings expanded",
+      "visibleFeature": "Guest identity field, room field, video-quality selection, optional room password, join action, and room status summary",
+      "width": 713,
+      "height": 939,
+      "sizeBytes": 134326,
+      "sha256": "26336b24c9572b5b3225b757dababea1426c4ec3837deae4c2ac8f8f26445a98",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "Identity, message, and private file-label text are obscured; no browser chrome, Copilot UI, map detail, or coordinate data is visible."
+        "result": "Owner-reviewed intended private fields; any visible red/yellow privacy masks remain unchanged. No browser chrome or Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -74,37 +75,37 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Privacy-redacted M² Calls live web conversation with messages and shared media.",
-      "altText": "Privacy-redacted M² Calls web conversation showing message bubbles, shared images, a reply marker, attachment control, and composer.",
-      "evidenceLimitation": "Shows rendered conversation features only; message confidentiality, authorization, persistence, notifications, and cross-platform delivery are not established."
+      "caption": "M² Calls guest room creation or join form from the live web experience.",
+      "altText": "M² Calls guest room form with identity and room fields, video quality, optional password, join action, and room status summary.",
+      "evidenceLimitation": "Shows form state only; it does not prove room authorization, persistence, signaling, media establishment, or current-source deployment identity."
     },
     {
-      "filename": "web-contacts-final.png",
-      "productIdentity": "M² Calls live web application",
-      "sourceUrl": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app",
+      "filename": "m2calls_guest_group_call.png",
+      "productIdentity": "M² Calls live web experience",
+      "sourceOrigin": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net",
+      "sourceSurface": "guest group call",
       "sourceRevisionStatus": "unknown-live-deployment-revision",
       "platform": "web",
-      "environment": "App-viewport-only web capture; browser version was not supplied",
+      "environment": "App-content-only web capture; browser details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Authenticated contacts surface with identity text privacy-redacted",
-      "visibleFeature": "Contacts navigation, search, contact row, location action, and contact menu",
-      "width": 1920,
-      "height": 1020,
-      "sizeBytes": 27906,
-      "sha256": "8e9f2637034919dafa935a27045c30843772ac6f7dce71f467a8498c22e7246a",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided opaque privacy redactions preserved without attempting recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Guest group-call room displaying participant presence",
+      "visibleFeature": "Room header, participant count, local controls, multiple media regions, copy-link action, settings, and leave action",
+      "width": 1798,
+      "height": 574,
+      "sizeBytes": 260392,
+      "sha256": "2fb8f4bd298b1c749e1e9638767a9610afe93de6840abdc28cbcbf4ed57c9171",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "Identity text is obscured; no browser chrome, Copilot UI, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; visible red/yellow privacy masks remain unchanged. No browser chrome or Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -112,37 +113,37 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Privacy-redacted M² Calls live web contacts surface.",
-      "altText": "Privacy-redacted M² Calls web contacts page with search, one contact row, location action, and contact menu.",
-      "evidenceLimitation": "Shows the contacts UI only; contact discovery, relationship authorization, location access, and call delivery are not established."
+      "caption": "M² Calls guest group-call room showing participant presence.",
+      "altText": "M² Calls guest group-call room with participant count, local controls, multiple media regions, copy-link action, settings, and leave action.",
+      "evidenceLimitation": "Participant presence is visible, but the capture does not prove production readiness, reliability, capacity, authorization correctness, or sustained bidirectional media."
     },
     {
-      "filename": "web-rooms-final.png",
-      "productIdentity": "M² Calls live web application",
-      "sourceUrl": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app",
+      "filename": "m2calls_logged_chats.png",
+      "productIdentity": "M² Calls live web experience",
+      "sourceOrigin": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net",
+      "sourceSurface": "authenticated chats",
       "sourceRevisionStatus": "unknown-live-deployment-revision",
       "platform": "web",
-      "environment": "App-viewport-only web capture; browser version was not supplied",
+      "environment": "App-content-only web capture; browser details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Authenticated rooms surface",
-      "visibleFeature": "Recent room list, quality labels, room identifier field, advanced settings, and create-room action",
-      "width": 1920,
-      "height": 1020,
-      "sizeBytes": 49601,
-      "sha256": "0d5bbbeb647826e0cf0b8da828cfb76d7c1d5f77502dda2be993f5e055bec23b",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided sanitized app-viewport capture retained without concealed-value recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Logged-in chats and conversation surface",
+      "visibleFeature": "Application navigation, search, conversation list, conversation header, message history, shared media, attachment action, and composer",
+      "width": 1043,
+      "height": 665,
+      "sizeBytes": 261051,
+      "sha256": "6b1c471224ca7bd851b4d415d6e11790ce0f35659e3522e93c50046ee7a5d05c",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "No browser chrome, Copilot UI, personal identity, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; visible red/yellow privacy masks remain unchanged. No browser chrome or Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -150,37 +151,37 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "M² Calls live web rooms page with recent rooms and create-room controls.",
-      "altText": "M² Calls web rooms page showing recent rooms, quality labels, a room identifier field, advanced settings, and create-room action.",
-      "evidenceLimitation": "Shows room-history and creation UI only; room authorization, persistence, signaling, and media establishment are not established."
+      "caption": "Owner-masked logged-in M² Calls chats and conversation surface.",
+      "altText": "Owner-masked M² Calls web chats view with navigation, search, conversation list, message history, shared media, attachment action, and composer.",
+      "evidenceLimitation": "Shows rendered chat features only; message confidentiality, access control, persistence, download safety, notification delivery, and deployed revision are not established."
     },
     {
-      "filename": "web-room-participant-final.png",
-      "productIdentity": "M² Calls live web application",
-      "sourceUrl": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app",
+      "filename": "m2calls_logged_rooms.png",
+      "productIdentity": "M² Calls live web experience",
+      "sourceOrigin": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net",
+      "sourceSurface": "authenticated rooms",
       "sourceRevisionStatus": "unknown-live-deployment-revision",
       "platform": "web",
-      "environment": "App-viewport-only web capture; browser version was not supplied",
+      "environment": "App-content-only web capture; browser details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Joined room displaying two participants",
-      "visibleFeature": "Room header, two-participant count, local controls, remote media area, copy-link action, and leave action",
-      "width": 1920,
-      "height": 1020,
-      "sizeBytes": 32936,
-      "sha256": "fa9611311845dbfe5f5198f33414a7f22412bcdc7fd7a94496570f82991776b5",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided sanitized app-viewport capture retained without concealed-value recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Logged-in rooms surface",
+      "visibleFeature": "Application navigation, recent rooms, quality labels, room identifier field, advanced settings, and create-room action",
+      "width": 1051,
+      "height": 672,
+      "sizeBytes": 49307,
+      "sha256": "7a9322e42540d4e772ce0d25ef6fc44cd9813f9cffa1e117a56eb102dff36c2e",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "No browser chrome, Copilot UI, personal identity, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; any visible red/yellow privacy masks remain unchanged. No browser chrome or Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -188,36 +189,73 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "M² Calls live web room displaying two participants.",
-      "altText": "M² Calls web room with a two-participant count, local call controls, remote media area, copy-link action, and leave action.",
-      "evidenceLimitation": "The UI displays two participants, but this does not establish bidirectional media, interoperability, authorization correctness, reliability, capacity, or production readiness."
+      "caption": "M² Calls logged-in rooms page from the live web experience.",
+      "altText": "M² Calls logged-in rooms page with recent rooms, quality labels, room identifier field, advanced settings, and create-room action.",
+      "evidenceLimitation": "Shows room-history and creation UI only; room authorization, persistence, signaling, media establishment, and deployed revision are not established."
     },
     {
-      "filename": "android-chats-final.png",
+      "filename": "m2calls_logged_calls.png",
+      "productIdentity": "M² Calls live web experience",
+      "sourceOrigin": "https://thankful-moss-0611ddf0f.3.azurestaticapps.net",
+      "sourceSurface": "authenticated calls",
+      "sourceRevisionStatus": "unknown-live-deployment-revision",
+      "platform": "web",
+      "environment": "App-content-only web capture; browser details were not supplied",
+      "captureDate": "2026-11-06",
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Logged-in call history",
+      "visibleFeature": "Application navigation, call-history rows, direction/status indicators, durations, dates, and selection pane",
+      "width": 1050,
+      "height": 673,
+      "sizeBytes": 49696,
+      "sha256": "f369c8a1663bbe757263f650f3ae38dc52a9203f8b94d4e86398c7e47ae1f5b1",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
+      "privacyReview": {
+        "status": "reviewed",
+        "recoveryAttempted": false,
+        "result": "Owner-reviewed intended private fields; visible red/yellow privacy masks remain unchanged. No browser chrome or Copilot UI is visible."
+      },
+      "metadataReview": {
+        "status": "reviewed",
+        "result": "PNG signature and dimensions validated; no prohibited text/EXIF chunks or trailing data."
+      },
+      "humanReview": {
+        "status": "approved",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
+        "approvalDate": "2026-11-06"
+      },
+      "caption": "Owner-masked M² Calls logged-in call-history surface.",
+      "altText": "Owner-masked M² Calls web call history with call rows, direction and status indicators, durations, dates, and a selection pane.",
+      "evidenceLimitation": "Shows call-history rendering only; identity binding, notification delivery, call completion, retention, and deployed revision are not established."
+    },
+    {
+      "filename": "m2calls_app_chats.png",
       "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
       "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
       "platform": "android",
-      "environment": "Exact historical mobile-v1.0 debug APK capture; device details were not supplied",
+      "environment": "Installed historical mobile-v1.0 debug APK; device details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Historical APK chats-list surface with identity text privacy-redacted",
-      "visibleFeature": "Chats tab, conversation row, last-message media indicator, compose action, and bottom navigation",
-      "width": 1080,
-      "height": 2400,
-      "sizeBytes": 48896,
-      "sha256": "deacc6b0715436e8e38718d5ef1a3d21058b70451a2db1ede1e3d35e1f6cc4cb",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided opaque privacy redactions preserved without attempting recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Historical APK chats list",
+      "visibleFeature": "Conversation row, media indicator, compose action, and bottom navigation",
+      "width": 438,
+      "height": 946,
+      "sizeBytes": 18712,
+      "sha256": "ccdd4f519e3ee88e9ab6ba4f3afaeb97ff1693e037f1f230a5ea350aadf31237",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "Identity text is obscured; no Copilot UI, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; visible red/yellow privacy masks remain unchanged. No Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -225,37 +263,35 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Privacy-redacted chats list from the historical mobile-v1.0 debug APK.",
-      "altText": "Privacy-redacted historical Android chats list with one conversation row, media indicator, compose action, and bottom navigation.",
+      "caption": "Owner-masked chats list from the historical mobile-v1.0 debug APK.",
+      "altText": "Owner-masked historical Android chats list with one conversation row, media indicator, compose action, and bottom navigation.",
       "evidenceLimitation": "Shows rendering from the exact historical APK only; it is not evidence of current-main Android output or current-service compatibility."
     },
     {
-      "filename": "android-chat-final.png",
+      "filename": "m2calls_app_chat.png",
       "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
       "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
       "platform": "android",
-      "environment": "Exact historical mobile-v1.0 debug APK capture; device details were not supplied",
+      "environment": "Installed historical mobile-v1.0 debug APK; device details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Historical APK conversation with identity, message, and private file-label text privacy-redacted",
-      "visibleFeature": "Conversation header, video-call action, message bubbles, shared images, download actions, attachment control, and composer",
-      "width": 1080,
-      "height": 2400,
-      "sizeBytes": 2155234,
-      "sha256": "33d1a4d353d2af786acb77ba7a46a6c785383cd471481f80654799f6ac5ad329",
-      "redactionStatus": "privacy-redacted",
-      "sizeBudgetException": "Retained above 1 MiB to preserve legibility of the owner-supplied conversation and shared-media evidence.",
-      "transformations": [
-        "Owner-provided opaque privacy redactions preserved without attempting recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Historical APK conversation",
+      "visibleFeature": "Conversation header, video-call action, message bubbles, shared images, file card, download actions, attachment control, and composer",
+      "width": 445,
+      "height": 950,
+      "sizeBytes": 373030,
+      "sha256": "d3c1cd9384328fcf0ef45917a7963d04ed9a5475988a209715988429d616f12e",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "Identity, message, and private file-label text are obscured; no Copilot UI, map detail, or coordinate data is visible."
+        "result": "Owner-reviewed intended private fields; visible red/yellow privacy masks remain unchanged. No Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -263,38 +299,35 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Privacy-redacted conversation from the historical mobile-v1.0 debug APK.",
-      "altText": "Privacy-redacted historical Android conversation with message bubbles, shared images, download actions, attachment control, and composer.",
+      "caption": "Owner-masked conversation from the historical mobile-v1.0 debug APK.",
+      "altText": "Owner-masked historical Android conversation with message bubbles, shared images, file card, download actions, attachment control, and composer.",
       "evidenceLimitation": "Shows historical APK UI only; message confidentiality, authorization, persistence, downloads, notifications, and current-service compatibility are not established."
     },
     {
-      "filename": "android-contacts-final.png",
+      "filename": "m2calls_app_contacts.png",
       "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
       "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
       "platform": "android",
-      "environment": "Exact historical mobile-v1.0 debug APK capture; device details were not supplied",
+      "environment": "Installed historical mobile-v1.0 debug APK; device details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Historical APK contacts surface with identity text privacy-redacted",
-      "visibleFeature": "Contacts/history tabs, add-contact action, contact row actions, and bottom navigation",
-      "width": 1080,
-      "height": 2400,
-      "sizeBytes": 49171,
-      "sha256": "cd52ecebb52223e644263273168da8852236009ebec8ffdd4d0f2b462755400b",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided opaque privacy redactions preserved without attempting recovery.",
-        "An additional opaque mask was applied during integration to complete identity redaction.",
-        "The image was re-encoded as PNG after masking."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Historical APK contacts page",
+      "visibleFeature": "Contacts/history tabs, add-contact action, contact-row actions, and bottom navigation",
+      "width": 436,
+      "height": 952,
+      "sizeBytes": 22758,
+      "sha256": "f7729c9b2988cb516c76216a2e609512178090cf6cb29a5a786efeb2ae743625",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "Identity text is obscured; no Copilot UI, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; visible red/yellow privacy masks remain unchanged. No Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -302,73 +335,35 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Privacy-redacted contacts surface from the historical mobile-v1.0 debug APK.",
-      "altText": "Privacy-redacted historical Android contacts page with contacts and history tabs, add-contact action, contact actions, and bottom navigation.",
-      "evidenceLimitation": "Shows the historical contacts UI only; contact discovery, relationship authorization, location access, calling, and current-main behavior are not established."
+      "caption": "Owner-masked contacts page from the historical mobile-v1.0 debug APK.",
+      "altText": "Owner-masked historical Android contacts page with contacts and history tabs, add-contact action, contact actions, and bottom navigation.",
+      "evidenceLimitation": "Shows historical contacts UI only; contact discovery, relationship authorization, location access, calling, and current-main behavior are not established."
     },
     {
-      "filename": "android-contact-location-final.png",
+      "filename": "m2calls_app_rooms.png",
       "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
       "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
       "platform": "android",
-      "environment": "Exact historical mobile-v1.0 debug APK capture; device details were not supplied",
+      "environment": "Installed historical mobile-v1.0 debug APK; device details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Historical APK contact-location surface with identity, map detail, and coordinate data obscured",
-      "visibleFeature": "Contact-location navigation, map region, refresh action, location-history cards, and map actions",
-      "width": 1080,
-      "height": 2400,
-      "sizeBytes": 47643,
-      "sha256": "98d3b1b75e3d78cae865e3b104c949848a78d35cb53d9958241a6c1998bfc2d5",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided opaque privacy redactions over identity, map detail, and coordinate data preserved without attempting recovery."
-      ],
-      "privacyReview": {
-        "status": "reviewed",
-        "recoveryAttempted": false,
-        "result": "Identity, map detail, and coordinate data are obscured; no Copilot UI or private file label is visible."
-      },
-      "metadataReview": {
-        "status": "reviewed",
-        "result": "PNG signature and dimensions validated; no prohibited text/EXIF chunks or trailing data."
-      },
-      "humanReview": {
-        "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
-        "approvalDate": "2026-11-06"
-      },
-      "caption": "Privacy-redacted contact-location surface from the historical mobile-v1.0 debug APK, with map and coordinate data obscured.",
-      "altText": "Privacy-redacted historical Android contact-location page with an obscured map region, refresh action, location-history cards, and map actions.",
-      "evidenceLimitation": "Shows the historical location UI only; location accuracy, access control, retention, live tracking, map content, and current-service compatibility are not established."
-    },
-    {
-      "filename": "android-room-list-final.png",
-      "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
-      "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
-      "platform": "android",
-      "environment": "Exact historical mobile-v1.0 debug APK capture; device details were not supplied",
-      "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Historical APK room page",
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Historical APK rooms page",
       "visibleFeature": "Join-room form, recent room list, delete actions, and bottom navigation",
-      "width": 1080,
-      "height": 2400,
-      "sizeBytes": 99192,
-      "sha256": "4649560649c7e2c3de692deea187efd781552b665ced60456695f0b7b8897d2e",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided sanitized capture retained without concealed-value recovery."
-      ],
+      "width": 438,
+      "height": 936,
+      "sizeBytes": 51491,
+      "sha256": "f950b140895a1fb22ba0b55cd75c8f668d8d998ddb7a1c61f0673abdf59d93a6",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "No personal identity, Copilot UI, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; any visible red/yellow privacy masks remain unchanged. No Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -376,36 +371,35 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Room page from the historical mobile-v1.0 debug APK.",
-      "altText": "Historical Android room page showing a join-room form, recent rooms, delete actions, and bottom navigation.",
+      "caption": "Rooms page from the historical mobile-v1.0 debug APK.",
+      "altText": "Historical Android rooms page showing a join-room form, recent rooms, delete actions, and bottom navigation.",
       "evidenceLimitation": "Shows historical room UI only; room authorization, persistence, signaling, media establishment, and current-main behavior are not established."
     },
     {
-      "filename": "android-room-participant-final.png",
+      "filename": "m2calls_app_group_call.png",
       "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
       "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
       "platform": "android",
-      "environment": "Exact historical mobile-v1.0 debug APK capture; device details were not supplied",
+      "environment": "Installed historical mobile-v1.0 debug APK; device details were not supplied",
       "captureDate": "2026-11-06",
-      "operator": "Repository owner-provided sanitized package",
-      "fixtureVersion": "m2-sanitized-captures-v2",
-      "scenario": "Historical APK joined room displaying two participants",
-      "visibleFeature": "Two participant video regions, room label, microphone, camera, audio, leave, and camera-switch controls",
-      "width": 1080,
-      "height": 2400,
-      "sizeBytes": 828622,
-      "sha256": "9833ca44d7eec8dee9735a67a99ef412ca2a32d5347de03d4693f05bd7f5dc40",
-      "redactionStatus": "privacy-redacted",
-      "transformations": [
-        "Owner-provided sanitized capture retained without concealed-value recovery."
-      ],
+      "operator": "Repository owner-prepared screenshot package",
+      "fixtureVersion": "m2-owner-prepared-captures-v3",
+      "scenario": "Historical APK group call displaying participant presence",
+      "visibleFeature": "Room header, participant media regions, microphone, camera, audio, leave, and camera-switch controls",
+      "width": 453,
+      "height": 1006,
+      "sizeBytes": 34632,
+      "sha256": "0a072157e1202232458fd38505e0a101bfc49a52ce4aaafe8db69819b13fd2e8",
+      "redactionStatus": "owner-prepared-privacy-masked",
+      "pixelPreservation": "Copied byte-for-byte; no metadata stripping or visible transformation was required.",
+      "transformations": [],
       "privacyReview": {
         "status": "reviewed",
         "recoveryAttempted": false,
-        "result": "No personal identity, Copilot UI, map detail, coordinate data, or private file label is visible."
+        "result": "Owner-reviewed intended private fields; any visible red/yellow privacy masks remain unchanged. No Copilot UI is visible."
       },
       "metadataReview": {
         "status": "reviewed",
@@ -413,20 +407,12 @@
       },
       "humanReview": {
         "status": "approved",
-        "reviewer": "Repository owner sanitized package and Developer Guardian visual inspection",
+        "reviewer": "Repository owner approval and Developer Guardian visual inspection",
         "approvalDate": "2026-11-06"
       },
-      "caption": "Historical mobile-v1.0 debug APK room displaying two participants.",
-      "altText": "Historical Android joined room with two participant video regions and microphone, camera, audio, leave, and camera-switch controls.",
-      "evidenceLimitation": "The UI displays two participants, but this does not establish bidirectional media, interoperability, authorization correctness, reliability, capacity, production readiness, or current-main behavior."
-    }
-  ],
-  "blockedSurfaces": [
-    {
-      "surface": "web contact-location",
-      "status": "intentionally-skipped",
-      "reason": "The owner did not include a sanitized web location capture.",
-      "safeOutcome": "No substitute mockup or unredacted location evidence was added."
+      "caption": "Historical mobile-v1.0 debug APK group call showing participant presence.",
+      "altText": "Historical Android group call with participant media regions and microphone, camera, audio, leave, and camera-switch controls.",
+      "evidenceLimitation": "Participant presence is visible, but the capture does not prove production readiness, reliability, capacity, authorization correctness, sustained bidirectional media, or current-main behavior."
     }
   ]
 }

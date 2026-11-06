@@ -27,25 +27,51 @@ not a production communications service.
 
 ## Product evidence
 
-The privacy-redacted images below are UI evidence, not proof that every
-dependency or cross-platform scenario completed successfully. Web captures are
-app-viewport-only images from the live `/app` surface; the deployed source
-revision is unknown. Android captures come from the exact historical
-`mobile-v1.0` debug APK and are not represented as current-main output. Capture
-hashes, review results, and limitations are recorded in
+The owner-prepared images below preserve their visible red/yellow privacy masks.
+They are UI evidence, not proof that every dependency or cross-platform scenario
+completed successfully. Web images contain application content only and come
+from the live M² Calls experience; the deployed source revision is unknown.
+Android images come from the installed historical `mobile-v1.0` debug APK and
+are not represented as current-main output. Capture hashes, review results, and
+limitations are recorded in
 [the asset provenance register](docs/assets/README.md).
 
-| Surface | Web | Historical Android APK |
-|---|---|---|
-| Chats list | ![Privacy-redacted M² Calls web chats list](docs/assets/screenshots/web-chats-final.png) | ![Privacy-redacted historical Android chats list](docs/assets/screenshots/android-chats-final.png) |
-| Conversation | ![Privacy-redacted M² Calls web conversation with messages and media](docs/assets/screenshots/web-chat-final.png) | ![Privacy-redacted historical Android conversation with messages and media](docs/assets/screenshots/android-chat-final.png) |
-| Contacts | ![Privacy-redacted M² Calls web contacts page](docs/assets/screenshots/web-contacts-final.png) | ![Privacy-redacted historical Android contacts page](docs/assets/screenshots/android-contacts-final.png) |
-| Room page | ![M² Calls web rooms page with recent rooms and create-room form](docs/assets/screenshots/web-rooms-final.png) | ![Historical Android room page with recent rooms and join-room form](docs/assets/screenshots/android-room-list-final.png) |
-| Joined room | ![M² Calls web room showing two participants present](docs/assets/screenshots/web-room-participant-final.png) | ![Historical Android room showing two participants present](docs/assets/screenshots/android-room-participant-final.png) |
-| Contact location | Web capture intentionally skipped | ![Privacy-redacted historical Android contact-location page with map and coordinate data obscured](docs/assets/screenshots/android-contact-location-final.png) |
+### Guest web
 
-The joined-room captures demonstrate that each UI displayed two participants.
-They do not establish media interoperability, authorization correctness,
+| Guest entry | Create or join a guest room |
+|---|---|
+| ![M² Calls guest entry page with name and room fields](docs/assets/screenshots/m2calls_guest_entry.png) | ![M² Calls guest room form with advanced settings and join action](docs/assets/screenshots/m2calls_guest_new_room.png) |
+
+**Guest group call**
+
+![M² Calls guest group call showing participant presence and call controls](docs/assets/screenshots/m2calls_guest_group_call.png)
+
+### Authenticated web
+
+| Chats | Rooms |
+|---|---|
+| ![Owner-masked M² Calls logged-in chats and conversation view](docs/assets/screenshots/m2calls_logged_chats.png) | ![M² Calls logged-in rooms page with recent rooms and create-room controls](docs/assets/screenshots/m2calls_logged_rooms.png) |
+
+**Calls**
+
+![Owner-masked M² Calls logged-in call history](docs/assets/screenshots/m2calls_logged_calls.png)
+
+### Historical Android APK
+
+| Chats | Conversation |
+|---|---|
+| ![Owner-masked chats list from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_chats.png) | ![Owner-masked conversation from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_chat.png) |
+
+| Contacts | Rooms |
+|---|---|
+| ![Owner-masked contacts page from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_contacts.png) | ![Rooms page from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_rooms.png) |
+
+**Android group call**
+
+![Historical mobile-v1.0 debug APK group call showing participant presence and call controls](docs/assets/screenshots/m2calls_app_group_call.png)
+
+The guest and Android group-call captures demonstrate participant presence in
+the UI. They do not establish media interoperability, authorization correctness,
 capacity, reliability, or production readiness.
 
 ## WebRTC calls

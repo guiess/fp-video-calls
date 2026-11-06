@@ -84,8 +84,8 @@ standards rather than owner-authored repository content.
 - The architecture Mermaid source and rendered SVG are repository-authored.
 - Screenshot files in `docs/assets/screenshots` are runtime captures described
   by [their provenance register](docs/assets/README.md).
-- The privacy-redacted capture package and concealed-data policy are recorded in
-  [fixtures/sanitized-v2.json](docs/assets/fixtures/sanitized-v2.json).
+- The owner-prepared capture package and pixel/privacy-mask policy are recorded
+  in [fixtures/owner-prepared-v3.json](docs/assets/fixtures/owner-prepared-v3.json).
 - No stock photo, third-party avatar, recorded human voice, or real face is
   approved for the current capture set.
 

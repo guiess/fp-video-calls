@@ -19,10 +19,10 @@ capture fixtures, public screenshots, and machine-readable provenance.
 
 ## Screenshot fixture
 
-[fixtures/sanitized-v2.json](fixtures/sanitized-v2.json) records the approved
-privacy-redacted capture package. Redacted identity, message, file-label, map,
-and coordinate values are intentionally not retained in repository metadata and
-must not be reconstructed.
+[fixtures/owner-prepared-v3.json](fixtures/owner-prepared-v3.json) records the
+owner-prepared, owner-approved capture package dated 2026-11-06. Visible
+red/yellow privacy masks are intentional and preserved. The record does not
+claim that every visible identity is synthetic.
 
 ## Screenshot provenance
 
@@ -35,37 +35,37 @@ record for every public PNG. Each entry binds a filename to:
 - date, operator, fixture version, and scenario;
 - dimensions, byte size, and SHA-256;
 - crop/mask/annotation history;
-- privacy-redaction, PNG metadata, and human review status;
+- owner mask review, PNG metadata, and human review status;
 - caption, alt text, and evidence limitation.
 
-The capture set contains five web app-viewport images from
-`https://thankful-moss-0611ddf0f.3.azurestaticapps.net/app` and six Android
-images from the exact historical `mobile-v1.0` debug APK. The web deployment
-revision is unknown. Historical Android images are not represented as
-current-main output.
+The capture set contains six app-content-only images from the live M² Calls web
+experience and five Android images from the installed historical
+`mobile-v1.0` debug APK. The web deployment revision is unknown. Historical
+Android images are not represented as current-main output.
 
-Both platforms show chats, a conversation, contacts, rooms, and a joined room
-with two participants displayed. Android additionally shows the contact-location
-surface with map detail and coordinate data obscured. The web location capture
-was intentionally skipped.
+The web set covers guest entry, guest room creation/join, a guest group call,
+logged-in chats, logged-in rooms, and logged-in calls. The Android set covers
+chats, a conversation, contacts, rooms, and a group call.
 
 ## Review procedure
 
-1. Use only the owner-approved sanitized capture package.
+1. Use only the owner-prepared, owner-approved capture package.
 2. Capture the actual application UI; generated mockups are not runtime
    evidence.
 3. Keep the raw capture outside the repository.
-4. Preserve opaque redactions and never attempt to recover concealed values.
-5. Confirm visually that browser chrome, Copilot UI, personal identity,
-   coordinate detail, and private file labels are absent or obscured.
+4. Preserve the supplied pixels and visible red/yellow masks.
+5. Do not resize, recolor, crop, or change privacy masks.
 6. Remove EXIF, XMP, IPTC, PNG text chunks, thumbnails, and editor history.
 7. Recompute dimensions, size, and SHA-256.
 8. Compare every PNG with its caption, alt text, and evidence limitation.
 9. Run `node --test scripts/tests/portfolio-docs.test.mjs`.
 
-The owner supplied this package as authoritative sanitized source. Human visual
-review and local structure/metadata validation are recorded as complete.
+No prohibited PNG metadata was present, so the supplied PNG bytes were copied
+unchanged. Human visual review and local structure/metadata validation are
+recorded as complete.
 
 UI captures demonstrate visible surfaces only. They do not prove successful
 cross-platform calling, authenticated access, TURN relay selection, backend
 health, or current-source compatibility unless a separate test record says so.
+The guest and Android group-call images show participant presence but do not
+establish production readiness, reliability, or capacity.
