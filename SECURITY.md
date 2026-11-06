@@ -34,6 +34,13 @@ Authenticated REST chat routes verify Firebase ID tokens and check conversation
 membership for conversation access. Guest rooms deliberately support account-free
 calling, with passwords checked when enabled.
 
+REST call invitations bind `callerId` to the verified Firebase token UID and
+resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
+Firestore contacts. Legacy body identity fields are ignored. Missing trusted
+name/photo fields use `User`/no photo; lookup failures return HTTP 500
+`CALLER_PROFILE_LOOKUP_FAILED` before any invitation delivery. Socket and Android
+FCM invitations share this canonical identity. `[OWASP]`
+
 ### Location authorization
 
 Only the signed-in owner or selected recipients can read current location and history.
@@ -87,10 +94,9 @@ These are source guarantees, not evidence that this revision is deployed.
   the acting socket's authority. In particular, `close_room` does not verify
   membership or host status. Account-free joining is intentional; unchecked
   control actions are not required for guest access.
-- **Call identity and ownership:** invite/answer/cancel routes require login,
-  but invite identity fields are accepted from the request rather than bound
-  to the verified UID. Answer/cancel do not verify the requester's relationship
-  to the call.
+- **Call ownership:** invite/answer/cancel routes require login and invitation
+  identity is bound to the verified UID. Answer/cancel do not verify the
+  requester's relationship to the call.
 
 ### Attachment access by storage mode
 

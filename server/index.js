@@ -249,15 +249,23 @@ async function getFcmToken(uid) {
 
 /**
  * POST /api/call/invite
- * Body: { callerId, callerName, callerPhoto?, calleeUids: string[], roomId, callType }
- * Sends an FCM data message to each callee so their device rings.
+ * Body: { calleeUids: string[], roomId, callType, roomPassword? }
+ * Legacy callerId/callerName/callerPhoto fields are accepted but ignored.
+ * Socket and FCM caller identity comes only from the verified UID and Firebase Auth.
  */
 app.post("/api/call/invite", requireAuth, async (req, res) => {
-  const { callerId, callerName, callerPhoto, calleeUids, roomId, callType, roomPassword } = req.body || {};
-  console.log("[call/invite] received:", { callerId, callerName, calleeUids, roomId, callType });
-  if (!callerId || !callerName || !Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
+  const { calleeUids, roomId, callType, roomPassword } = req.body || {};
+  if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
     console.log("[call/invite] BAD_REQUEST");
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
+  }
+  const callerId = req.uid;
+  let callerProfile;
+  try {
+    callerProfile = await admin.auth().getUser(callerId);
+  } catch {
+    console.error("[call/invite] Caller profile lookup failed");
+    return res.status(500).json({ ok: false, error: "CALLER_PROFILE_LOOKUP_FAILED" });
   }
   const callUUID = crypto.randomUUID();
   try {
@@ -265,8 +273,8 @@ app.post("/api/call/invite", requireAuth, async (req, res) => {
     const invitePayload = {
       callUUID,
       callerId: String(callerId),
-      callerName: String(callerName),
-      callerPhoto: String(callerPhoto || ""),
+      callerName: callerProfile.displayName || "User",
+      callerPhoto: callerProfile.photoURL || "",
       roomId: String(roomId),
       callType: String(callType || "direct"),
       roomPassword: String(roomPassword || ""),
@@ -309,15 +317,9 @@ app.post("/api/call/invite", requireAuth, async (req, res) => {
             token,
             android: { priority: "high" },
             data: {
+              ...invitePayload,
               type: "call_invite",
-              callUUID,
-              callerId: String(callerId),
-              callerName: String(callerName),
-              callerPhoto: String(callerPhoto || ""),
               calleeUid: String(uid),
-              roomId: String(roomId),
-              callType: String(callType || "direct"),
-              roomPassword: String(roomPassword || ""),
             },
           });
         })

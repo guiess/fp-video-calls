@@ -128,11 +128,14 @@ row is deleted. Host/member authority is not bound to a server-issued capability
 
 ### Authenticated invitation lifecycle
 
-An authenticated REST request supplies caller/callee/room fields. The server
-delivers `call_invite` through user Socket.IO rooms and FCM, then supports
-cancel/answer notifications. Android can display full-screen ringing and enter
-the room. The authenticated token is not consistently used as the authoritative
-caller identity for every supplied field.
+An authenticated REST request supplies callee/room fields. The server binds the
+invitation caller UID to the verified Firebase ID token and resolves name/photo
+through Firebase Auth, ignoring legacy body identity fields. Missing profile
+fields use `User`/no photo; a failed profile lookup returns HTTP 500
+`CALLER_PROFILE_LOOKUP_FAILED` before any socket or FCM delivery. The same
+`call_invite` identity and call UUID reach user Socket.IO rooms and FCM. Android
+can display full-screen ringing and enter the room. Cancel/answer ownership
+checks remain a separate limitation.
 
 ### Persistent and transient chat
 
