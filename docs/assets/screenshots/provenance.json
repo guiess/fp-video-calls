@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "m2-portfolio-v1",
+  "canonicalProductName": "M² Calls",
+  "sourceBaseline": "482a83a83db50d75792610fc009f0fb87d24971d",
+  "captures": [
+    {
+      "filename": "web-sign-in.png",
+      "productIdentity": "M² Calls",
+      "sourceSha": "482a83a83db50d75792610fc009f0fb87d24971d",
+      "platform": "web",
+      "environment": "Microsoft Edge 156.0.4314.50 headless, Windows, 1440x1000 viewport",
+      "captureDate": "2026-11-06",
+      "operator": "Developer Guardian automation",
+      "fixtureVersion": "m2-portfolio-v1",
+      "scenario": "Public /dev WebRTC call lab with no camera feed, no participants, and empty chat",
+      "visibleFeature": "Call controls, local/remote media regions, TURN configuration surface, and transient chat",
+      "width": 1440,
+      "height": 1000,
+      "sizeBytes": 40453,
+      "sha256": "1f832e046893bc054b5a9997201497ea287339d448bb3db16fe64706eda70ce2",
+      "transformations": [],
+      "ocrReview": {
+        "status": "reviewed",
+        "result": "No identity, message, credential, token, signed URL, notification, or coordinate was visible. TURN username/password inputs were empty."
+      },
+      "metadataReview": {
+        "status": "reviewed",
+        "result": "PNG signature/dimensions validated; no tEXt, zTXt, iTXt, eXIf, or trailing data."
+      },
+      "humanReview": {
+        "status": "pending-owner-review",
+        "reviewer": "Owner or delegated human reviewer required",
+        "approvalDate": null
+      },
+      "caption": "M² Calls public WebRTC call-lab UI with empty media and chat state.",
+      "altText": "M² Calls WebRTC call lab with empty local and remote video areas, call controls, TURN fields, and chat.",
+      "evidenceLimitation": "Demonstrates rendered UI only; it does not prove camera access, peer connection, TURN relay, chat delivery, or current-source deployment identity."
+    },
+    {
+      "filename": "web-guest-room.png",
+      "productIdentity": "M² Calls",
+      "sourceSha": "482a83a83db50d75792610fc009f0fb87d24971d",
+      "platform": "web",
+      "environment": "Microsoft Edge 156.0.4314.50 headless, Windows, 1440x1000 viewport",
+      "captureDate": "2026-11-06",
+      "operator": "Developer Guardian automation",
+      "fixtureVersion": "m2-portfolio-v1",
+      "scenario": "Public guest-room URL with synthetic Alex Rivera identity and portfolio-demo room",
+      "visibleFeature": "Guest room, display name, room identifier, quality/password options, and language control",
+      "width": 1440,
+      "height": 1000,
+      "sizeBytes": 517731,
+      "sha256": "9ffaa661a78f4f19081ba0dced9afaf1233a35451bb0496daf68068e4ebb162f",
+      "transformations": [],
+      "ocrReview": {
+        "status": "reviewed",
+        "result": "Only approved synthetic name Alex Rivera and synthetic room portfolio-demo were visible; no secrets, real location, or private notification appeared."
+      },
+      "metadataReview": {
+        "status": "reviewed",
+        "result": "PNG signature/dimensions validated; no tEXt, zTXt, iTXt, eXIf, or trailing data."
+      },
+      "humanReview": {
+        "status": "pending-owner-review",
+        "reviewer": "Owner or delegated human reviewer required",
+        "approvalDate": null
+      },
+      "caption": "M² Calls guest-room join UI populated with approved synthetic values.",
+      "altText": "M² Calls guest-room form showing synthetic Alex Rivera and portfolio-demo values.",
+      "evidenceLimitation": "Demonstrates UI and public server metadata lookup only; it does not prove a successful room join, media path, password authorization, or interoperability."
+    },
+    {
+      "filename": "android-home-historical.png",
+      "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
+      "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
+      "platform": "android",
+      "environment": "Android emulator API 36, sdk_gphone64_x86_64; installed APK contains arm64-v8a and armeabi-v7a native code",
+      "captureDate": "2026-11-06",
+      "operator": "Developer Guardian automation",
+      "fixtureVersion": "m2-portfolio-v1",
+      "scenario": "Cold launch after exact-byte installation; notification permission denied; no account selected",
+      "visibleFeature": "Historical APK launch and guest-entry choices",
+      "width": 1080,
+      "height": 2500,
+      "sizeBytes": 93665,
+      "sha256": "705439446c522583e84d6751dd50e2b8b51ac1927dd70518336c7db876f51703",
+      "transformations": [
+        "Added a 100-pixel red banner reading 'Historical M2 Video Calls mobile-v1.0 debug APK'.",
+        "Re-encoded to PNG using System.Drawing to remove inherited ancillary metadata."
+      ],
+      "ocrReview": {
+        "status": "reviewed",
+        "result": "No account, notification content, credential, message, file, or location was visible."
+      },
+      "metadataReview": {
+        "status": "reviewed",
+        "result": "PNG signature/dimensions validated; no tEXt, zTXt, iTXt, eXIf, or trailing data."
+      },
+      "humanReview": {
+        "status": "pending-owner-review",
+        "reviewer": "Owner or delegated human reviewer required",
+        "approvalDate": null
+      },
+      "caption": "Historical M2 Video Calls mobile-v1.0 debug APK launch screen on a test emulator.",
+      "altText": "Historical M2 Video Calls debug APK launch screen with M² Calls label and guest or Google sign-in choices.",
+      "evidenceLimitation": "Proves exact-byte installation and rendering on one emulator only; it does not recover original build provenance or establish compatibility with current services."
+    },
+    {
+      "filename": "android-call-historical.png",
+      "productIdentity": "M2 Video Calls historical mobile-v1.0 artifact",
+      "installedApkSha256": "0ddc7bd3068ba40982516a83a1e1787c03c3803f24863e8521f3c56c31ed30a6",
+      "platform": "android",
+      "environment": "Android emulator API 36, sdk_gphone64_x86_64; installed APK contains arm64-v8a and armeabi-v7a native code",
+      "captureDate": "2026-11-06",
+      "operator": "Developer Guardian automation",
+      "fixtureVersion": "m2-portfolio-v1",
+      "scenario": "Historical APK guest room form with synthetic Alex_Rivera and portfolio-demo values",
+      "visibleFeature": "Android guest call setup",
+      "width": 1080,
+      "height": 2500,
+      "sizeBytes": 68151,
+      "sha256": "9a55d9cdf5f4cb9c63b2d2cfaa4c30c6803eb3744015931f22a4bd3f93b09dd6",
+      "transformations": [
+        "Added a 100-pixel red banner reading 'Historical M2 Video Calls mobile-v1.0 debug APK'.",
+        "Re-encoded to PNG using System.Drawing to remove inherited ancillary metadata."
+      ],
+      "ocrReview": {
+        "status": "reviewed",
+        "result": "Only approved synthetic name Alex_Rivera and room portfolio-demo were visible; no credential, personal message, file, notification, or coordinate appeared."
+      },
+      "metadataReview": {
+        "status": "reviewed",
+        "result": "PNG signature/dimensions validated; no tEXt, zTXt, iTXt, eXIf, or trailing data."
+      },
+      "humanReview": {
+        "status": "pending-owner-review",
+        "reviewer": "Owner or delegated human reviewer required",
+        "approvalDate": null
+      },
+      "caption": "Historical M2 Video Calls mobile-v1.0 guest call form using synthetic values.",
+      "altText": "Historical M2 Video Calls debug APK guest-room form with synthetic Alex_Rivera and portfolio-demo values.",
+      "evidenceLimitation": "Demonstrates input/rendering only; no room join, camera, microphone, signaling, media, or current-service interoperability was tested."
+    }
+  ],
+  "blockedSurfaces": [
+    {
+      "surface": "location sharing/history",
+      "reason": "The public web location surface requires authentication and the historical APK requires Firebase-backed identity/location setup. No owner-approved authenticated fixture or simulated location injection was available.",
+      "safeOutcome": "No real location was used and no generated mockup was presented as runtime evidence."
+    }
+  ]
+}

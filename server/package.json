@@ -7,10 +7,10 @@
   "scripts": {
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js",
-    "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
+    "test": "vitest run",
     "test:telemetry": "node --test telemetry-validation.test.js",
     "test:turn": "node --test turn-config.test.js turn-config.qa.test.js turn-credentials.test.js",
-    "test:watch": "node --experimental-vm-modules node_modules/.bin/vitest"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.26.0",

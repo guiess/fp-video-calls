@@ -1,0 +1,121 @@
+# Build and validate M² Calls
+
+These instructions describe a clean-checkout development path for repository
+commit `482a83a83db50d75792610fc009f0fb87d24971d` and later compatible revisions.
+They do not require production credentials.
+
+## Supported toolchain
+
+- Git
+- Node.js 22.x and npm with lockfile support
+- JDK 17
+- Android SDK 34 with Android build tools required by AGP 8.2.2
+- Bash or PowerShell
+
+Node 22 is the CI baseline because locked web/server dependencies include
+packages requiring Node 20 or newer. Earlier Node 18 deployment advice is
+superseded.
+
+## Clone
+
+```bash
+git clone https://github.com/guiess/fp-video-calls.git
+cd fp-video-calls
+```
+
+Do not reuse `server-deploy.zip` as source or rollback evidence. It is tracked
+historical material and is not the canonical source tree.
+
+## Documentation and provenance tests
+
+```bash
+node --test scripts/tests/*.test.mjs
+node scripts/validate-portfolio.mjs .
+node scripts/validate-release-manifest.mjs docs/releases/mobile-v1.0-receipt.json
+```
+
+The scripts use only Node built-ins. Validation errors go to stderr and return
+exit code `2`; usage errors return `64`; unexpected runtime failures return `1`.
+
+## Web
+
+```bash
+cd web
+npm ci
+npm test
+npm run typecheck
+npm run build
+```
+
+Start a local development server:
+
+```bash
+npm run dev
+```
+
+`web/public/config.js` and Vite values are public configuration. Use only
+non-secret endpoints/settings.
+
+## Server
+
+```bash
+cd server
+npm ci
+npm test
+npm run test:turn
+npm run test:telemetry
+```
+
+Start without production integrations:
+
+```bash
+npm start
+```
+
+The process can run with Firebase/Blob/TURN integrations unavailable, but the
+affected features will be absent or return explicit configuration failures.
+Never insert real secrets into commands, screenshots, logs, or committed files.
+
+## Android
+
+From `mobile-kotlin`:
+
+```bash
+./gradlew --version
+./gradlew test
+./gradlew lint
+./gradlew assembleDebug
+```
+
+On Windows, use `gradlew.bat`. JDK 17 is required. The application ID remains
+`com.fpvideocalls`, and debug APK outputs retain the technical `M2Calls` prefix.
+
+The source checkout intentionally does not contain `google-services.json`.
+Provide a safe, non-production Firebase client configuration through the normal
+local Android setup when a task actually requires Firebase-backed execution.
+Do not commit it. Pure unit tests should not require production Firebase access.
+
+## Full validation order
+
+1. Documentation/provenance tests.
+2. Web locked install, unit tests, type check, and build.
+3. Server locked install, default tests, TURN tests, and telemetry tests.
+4. Gradle wrapper validation in CI, Android unit tests, lint, and debug assembly.
+5. Device/browser checks only with synthetic data.
+
+Tests present in source are not the same as tests executed, and local success is
+not the same as CI enforcement. Record the exact revision and commands whenever
+reporting results.
+
+## Safe local configuration
+
+- Use synthetic identities, messages, files, call relationships, and simulated
+  coordinates.
+- Do not use personal conversations or real location.
+- Do not store secrets in Vite variables, `config.js`, browser local storage, or
+  screenshots.
+- Use a disposable Firebase project/client if integration testing is required.
+- Use a test coturn realm/secret and rotate it after shared testing.
+
+See [SECURITY.md](SECURITY.md) and
+[the canonical Azure guide](docs/azure-deploy.md) before any hosted evaluation.

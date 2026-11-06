@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "m2-portfolio-v1",
+  "canonicalProductName": "M² Calls",
+  "approvedOn": "2026-11-06",
+  "purpose": "Synthetic-only public portfolio captures",
+  "identities": [
+    {
+      "displayName": "Alex Rivera",
+      "account": "alex.portfolio@example.invalid",
+      "provenance": "Fictional identity created for this repository"
+    },
+    {
+      "displayName": "Sam Lee",
+      "account": "sam.portfolio@example.invalid",
+      "provenance": "Fictional identity created for this repository"
+    }
+  ],
+  "messages": [
+    "Synthetic call check — no personal data.",
+    "The simulated route is ready for review."
+  ],
+  "files": [
+    {
+      "filename": "synthetic-call-notes.txt",
+      "contentOwner": "Repository owner",
+      "redistributionRights": "Apache-2.0 repository-authored text"
+    }
+  ],
+  "avatars": [],
+  "audioOrVideoMedia": [],
+  "locations": [
+    {
+      "label": "Simulated waterfront waypoint",
+      "latitude": 47.6065,
+      "longitude": -122.3421,
+      "isSimulated": true,
+      "provenance": "Arbitrary public-map coordinate selected for synthetic UI evidence"
+    },
+    {
+      "label": "Simulated park waypoint",
+      "latitude": 47.6097,
+      "longitude": -122.3331,
+      "isSimulated": true,
+      "provenance": "Arbitrary public-map coordinate selected for synthetic UI evidence"
+    }
+  ],
+  "prohibitedData": [
+    "real names or accounts",
+    "real conversations",
+    "real faces or voices",
+    "home or workplace coordinates",
+    "production records",
+    "credentials, tokens, or signed URLs",
+    "private notifications"
+  ]
+}

@@ -1,0 +1,57 @@
+flowchart LR
+  classDef client fill:#e8f1ff,stroke:#173f70,color:#111;
+  classDef service fill:#fff4d6,stroke:#6f4f00,color:#111;
+  classDef store fill:#e8f8ec,stroke:#245c32,color:#111;
+  classDef boundary fill:#fff,stroke:#555,color:#111,stroke-dasharray: 6 4;
+  classDef risk fill:#fff0f0,stroke:#8a1c1c,color:#111;
+
+  subgraph Public["Public/device trust boundary"]
+    Web["M² Calls web\nReact + TypeScript"]:::client
+    Android["M² Calls Android\nKotlin + Compose\ncom.fpvideocalls"]:::client
+  end
+
+  subgraph Azure["Hosted application boundary"]
+    SWA["Azure Static Web Apps\nstatic web hosting"]:::service
+    Node["Node + Express + Socket.IO\nREST, signaling, events"]:::service
+    Memory["In-memory state\nrosters, calls, telemetry"]:::risk
+    SQLite[("SQLite\nmessages, receipts, rooms")]:::store
+    Attach["Attachment adapter"]:::service
+    Blob[("Azure Blob Storage\nwhen configured")]:::store
+    Local[("Local uploads fallback")]:::risk
+  end
+
+  subgraph Firebase["Firebase provider boundary"]
+    Auth["Firebase Authentication"]:::service
+    Firestore[("Firestore\nprofiles, contacts, location,\nhistory and private device data")]:::store
+    FCM["Firebase Cloud Messaging"]:::service
+    Storage[("Firebase Storage\npresent/configured;\nnot verified primary upload path")]:::risk
+  end
+
+  subgraph TurnBoundary["TURN VM/network boundary"]
+    Turn["coturn\nSTUN/TURN/TURNS"]:::service
+  end
+
+  Web -->|"HTTPS: static assets"| SWA
+  Web -->|"HTTPS/WSS: API, signaling, events"| Node
+  Android -->|"HTTPS/WSS: API, signaling, events"| Node
+  Web -->|"authenticated client access"| Auth
+  Android -->|"authenticated client access"| Auth
+  Web -->|"direct client reads/writes"| Firestore
+  Android -->|"direct client reads/writes"| Firestore
+  Node -->|"Admin SDK when configured"| Firestore
+  Node -->|"call notifications"| FCM
+  FCM -->|"ring/cancel/answer metadata"| Android
+  Node --> Memory
+  Node --> SQLite
+  Node --> Attach
+  Attach -->|"configured mode"| Blob
+  Attach -->|"fallback mode"| Local
+  Web -.->|"configured surface"| Storage
+  Android -.->|"configured surface"| Storage
+  Web -->|"GET /api/turn\ncaller-provided identifiers"| Node
+  Android -->|"GET /api/turn\ncaller-provided identifiers"| Node
+  Web <-->|"DTLS-SRTP direct peer media"| Android
+  Web <-->|"DTLS-SRTP relayed media"| Turn
+  Android <-->|"DTLS-SRTP relayed media"| Turn
+  Node -.->|"SDP, ICE metadata,\nDTLS fingerprints only;\nnot media"| Web
+  Node -.->|"SDP, ICE metadata,\nDTLS fingerprints only;\nnot media"| Android

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/guiess/fp-video-calls/blob/main/docs/releases/release-manifest.schema.json",
+  "title": "M² Calls release provenance manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "profile",
+    "canonicalProductName",
+    "repository",
+    "release",
+    "artifact"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "profile": { "enum": ["legacy", "ci-built"] },
+    "canonicalProductName": { "const": "M² Calls" },
+    "repository": { "const": "guiess/fp-video-calls" },
+    "release": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "artifact": {
+      "type": "object",
+      "required": ["filename", "sizeBytes", "sha256"],
+      "properties": {
+        "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "sizeBytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "digestSource": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "properties": { "profile": { "const": "legacy" } },
+      "required": [
+        "historicalProductName",
+        "tagCommit",
+        "buildSourceCommit",
+        "buildSourceStatus",
+        "observations"
+      ]
+    },
+    {
+      "properties": { "profile": { "const": "ci-built" } },
+      "required": [
+        "releaseChannel",
+        "source",
+        "build",
+        "android",
+        "tests",
+        "signer",
+        "attestations",
+        "approval"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

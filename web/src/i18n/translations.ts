@@ -97,7 +97,6 @@ export interface Translations {
   refresh: string;
   contactAdded: string;
   deletedChat: string;
-  contactAdded: string;
   roomsTab: string;
   optionsTab: string;
 
@@ -132,10 +131,10 @@ export interface Translations {
   typeMessage: string;
   typing: string;
   members: string;
+  addContact?: string;
   confirmDelete: string;
   deleteConversation: string;
   confirmDeleteConversation: string;
-  deletedChat: string;
   searchContacts: string;
   noContactsFound: string;
   groupNamePlaceholder: string;
@@ -303,7 +302,6 @@ export const translations: Record<Language, Translations> = {
     confirmDelete: 'Удалить это сообщение?',
     deleteConversation: 'Удалить',
     confirmDeleteConversation: 'Удалить этот чат? Вся история сообщений будет удалена.',
-    deletedChat: '[Удалено]',
     searchContacts: 'Поиск контактов...',
     noContactsFound: 'Контакты не найдены',
     groupNamePlaceholder: 'Название группы...',
@@ -469,7 +467,6 @@ export const translations: Record<Language, Translations> = {
     confirmDelete: 'Delete this message?',
     deleteConversation: 'Delete',
     confirmDeleteConversation: 'Delete this chat? All message history will be permanently removed.',
-    deletedChat: '[Deleted]',
     searchContacts: 'Search contacts...',
     noContactsFound: 'No contacts found',
     groupNamePlaceholder: 'Group name...',
