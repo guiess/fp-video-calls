@@ -112,8 +112,8 @@ Evidence:
 - Ephemeral coturn HMAC credentials and client-side refresh/recovery logic.
 - Unit suites for web services, server storage/TURN/telemetry behavior, and
   Android domain/recovery logic.
-- Release-provenance schema, historical artifact receipt, documentation checks,
-  and least-privilege CI policy.
+- Release-provenance schema, historical artifact receipt, and local
+  documentation/provenance checks.
 
 ## Architecture, security, and operations
 
@@ -124,7 +124,6 @@ Evidence:
 - [Release evidence and withdrawal procedure](docs/releases/README.md)
 - [Editable and rendered system diagram](docs/assets/README.md)
 - [Executed validation and pending external evidence](docs/validation-status.md)
-- [Reviewed CI baselines](docs/ci-baselines.md)
 
 ## Current limitations
 
@@ -157,14 +156,14 @@ commands are:
 ```bash
 node --test scripts/tests/*.test.mjs
 cd web && npm ci && npm test && npm run build
-cd ../server && npm ci && npm test && npm run test:turn && npm run test:telemetry
-cd ../mobile-kotlin && ./gradlew test lint assembleDebug
+cd ../server && npm ci && node node_modules/vitest/vitest.mjs run
+npm run test:turn && npm run test:telemetry
+cd ../mobile-kotlin && ./gradlew test assembleDebug
 ```
 
 Deployment behavior and unknown live facts are separated in
-[docs/azure-deploy.md](docs/azure-deploy.md). A passing local command is not a
-passing-CI claim; CI status applies only after the workflow runs on the exact
-revision.
+[docs/azure-deploy.md](docs/azure-deploy.md). Validation in this repository is
+local/manual. Future validation automation is deferred.
 
 ## Ownership and maintenance
 

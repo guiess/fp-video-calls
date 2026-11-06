@@ -15,7 +15,7 @@ modify live infrastructure.
 
 | Classification | Meaning | Current examples |
 |---|---|---|
-| Repository-verified | Directly supported by tracked source/configuration | SWA workflow, App Service start command, runtime `config.js`, Blob/local adapter, Firebase rules, TURN endpoint |
+| Repository-verified | Directly supported by tracked source/configuration | Tracked SWA deployment file, App Service start command, runtime `config.js`, Blob/local adapter, Firebase rules, TURN endpoint |
 | Live-verified | Observed against a public endpoint on a recorded date | Web entry point and `/health` responded during specification research |
 | Operator-reported | Requires Azure/Firebase/VM owner confirmation | Resource names, SKUs, deployed source revision, active settings, backups |
 | Proposed | Recommended future hardening, not current fact | IaC, readiness probes, measured recovery objectives, monitoring/alerts |
@@ -163,14 +163,15 @@ Validation:
 cd web
 npm ci
 npm test
-npm run typecheck
 npm run build
 ```
 
-The hardened workflow validates pull requests without deployment credentials.
-Only a trusted push to `main` can use the SWA deployment token, and deployment
-depends on the validation workflow for the same commit. Documentation-only
-changes do not trigger application deployment.
+The tracked Azure Static Web Apps deployment file is restored to its historical
+state. It is deployment automation, not evidence that local tests or validators
+ran, and it is not gated by the local documentation/provenance scripts. This
+portfolio change does not add or harden GitHub-hosted validation. Run the local
+commands above and record their exact revision before an operator authorizes a
+deployment. Future validation/deployment separation remains deferred work.
 
 `window.APP_CONFIG.SIGNALING_URL` is the current preferred public runtime source.
 If it changes, validate the exact `config.js` served by SWA and confirm that no

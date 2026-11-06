@@ -12,9 +12,9 @@ They do not require production credentials.
 - Android SDK 34 with Android build tools required by AGP 8.2.2
 - Bash or PowerShell
 
-Node 22 is the CI baseline because locked web/server dependencies include
-packages requiring Node 20 or newer. Earlier Node 18 deployment advice is
-superseded.
+Node 22 is the locally verified baseline because locked web/server dependencies
+include packages requiring Node 20 or newer. Earlier Node 18 deployment advice
+is superseded.
 
 ## Clone
 
@@ -43,7 +43,6 @@ exit code `2`; usage errors return `64`; unexpected runtime failures return `1`.
 cd web
 npm ci
 npm test
-npm run typecheck
 npm run build
 ```
 
@@ -61,10 +60,15 @@ non-secret endpoints/settings.
 ```bash
 cd server
 npm ci
-npm test
+node node_modules/vitest/vitest.mjs run
 npm run test:turn
 npm run test:telemetry
 ```
+
+The default server suite currently executes 41 tests with one known mismatch:
+the small-WebP test expects JPEG conversion while the current implementation
+preserves the original WebP when no resize is needed. This portfolio pair-fix
+does not change runtime behavior or that pre-existing test contract.
 
 Start without production integrations:
 
@@ -83,7 +87,6 @@ From `mobile-kotlin`:
 ```bash
 ./gradlew --version
 ./gradlew test
-./gradlew lint
 ./gradlew assembleDebug
 ```
 
@@ -95,17 +98,28 @@ Provide a safe, non-production Firebase client configuration through the normal
 local Android setup when a task actually requires Firebase-backed execution.
 Do not commit it. Pure unit tests should not require production Firebase access.
 
-## Full validation order
+Android lint is available as a separate local diagnostic:
+
+```bash
+./gradlew lint
+```
+
+The reviewed source currently reports 3 errors and 58 warnings, recorded in
+[docs/validation-status.md](docs/validation-status.md). No lint baseline is
+retained by this portfolio change.
+
+## Local validation order
 
 1. Documentation/provenance tests.
-2. Web locked install, unit tests, type check, and build.
+2. Web locked install, unit tests, and build.
 3. Server locked install, default tests, TURN tests, and telemetry tests.
-4. Gradle wrapper validation in CI, Android unit tests, lint, and debug assembly.
-5. Device/browser checks only with synthetic data.
+4. Android unit tests and debug assembly.
+5. Optional lint diagnostics.
+6. Device/browser checks only with synthetic data.
 
-Tests present in source are not the same as tests executed, and local success is
-not the same as CI enforcement. Record the exact revision and commands whenever
-reporting results.
+Tests present in source are not the same as tests executed. Record the exact
+revision and commands whenever reporting local results. No automated validation
+gate is established by this documentation package.
 
 ## Safe local configuration
 

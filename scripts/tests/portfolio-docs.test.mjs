@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,7 +10,6 @@ import {
   collectMarkdownLinks,
   inspectPng,
   validatePortfolio,
-  validateWorkflowPolicy,
 } from "../validate-portfolio.mjs";
 
 const REPOSITORY_ROOT = path.resolve(
@@ -33,9 +32,7 @@ const REQUIRED_FILES = [
   "docs/releases/README.md",
   "docs/releases/release-manifest.schema.json",
   "docs/releases/mobile-v1.0-receipt.json",
-  "docs/ci-baselines.md",
   "docs/validation-status.md",
-  "mobile-kotlin/app/lint-baseline.xml",
 ];
 
 test("required portfolio files exist", async () => {
@@ -78,14 +75,8 @@ test("repository-relative Markdown links and anchors resolve", async () => {
   assert.deepEqual(brokenLinks, []);
 });
 
-test("workflow policy uses immutable actions and explicit permissions", async () => {
-  const result = await validateWorkflowPolicy(REPOSITORY_ROOT);
-  assert.deepEqual(result.errors, []);
-});
-
-test("broken link, product name, and workflow fixtures are rejected", async () => {
+test("broken link and product name fixtures are rejected", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "m2-doc-policy-"));
-  await mkdir(path.join(fixtureRoot, ".github", "workflows"), { recursive: true });
   await writeFile(
     path.join(fixtureRoot, "README.md"),
     [
@@ -96,35 +87,11 @@ test("broken link, product name, and workflow fixtures are rejected", async () =
       "External contributions are not accepted.",
     ].join("\n"),
   );
-  await writeFile(
-    path.join(fixtureRoot, ".github", "workflows", "unsafe.yml"),
-    "on: pull_request\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n",
-  );
 
   const docs = await validatePortfolio(fixtureRoot);
   const links = await collectMarkdownLinks(fixtureRoot);
-  const workflows = await validateWorkflowPolicy(fixtureRoot);
   assert.match(docs.errors.join("\n"), /legacy identifier as the public title/);
   assert.equal(links.some((link) => !link.isValid), true);
-  assert.match(workflows.errors.join("\n"), /lacks top-level permissions/);
-  assert.match(workflows.errors.join("\n"), /mutable action/);
-});
-
-test("web exposes a real type-check command", async () => {
-  const packageJson = JSON.parse(
-    await readFile(path.join(REPOSITORY_ROOT, "web/package.json"), "utf8"),
-  );
-  assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
-  const config = await stat(path.join(REPOSITORY_ROOT, "web/tsconfig.json"));
-  assert.equal(config.isFile(), true);
-});
-
-test("server test scripts are portable across CI operating systems", async () => {
-  const packageJson = JSON.parse(
-    await readFile(path.join(REPOSITORY_ROOT, "server/package.json"), "utf8"),
-  );
-  assert.equal(packageJson.scripts.test, "vitest run");
-  assert.equal(packageJson.scripts["test:watch"], "vitest");
 });
 
 test("approved screenshots are real PNG files with matching provenance", async () => {

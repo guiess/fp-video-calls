@@ -17,8 +17,6 @@ const PROHIBITED_MARKERS = [
   /all data is deleted after seven days/i,
   /fully end-to-end encrypted/i,
 ];
-const ACTION_REFERENCE = /^\s*(?:-\s*)?uses:\s*[^@\s]+@([^\s#]+)/gm;
-const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const PROHIBITED_PNG_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "eXIf"]);
 const MAX_MARKDOWN_BYTES = 2_000_000;
@@ -50,25 +48,6 @@ export async function collectMarkdownLinks(repositoryRoot) {
     }
   }
   return results;
-}
-
-/** Validate GitHub Actions policy without evaluating untrusted workflow expressions. */
-export async function validateWorkflowPolicy(repositoryRoot) {
-  const errors = [];
-  const workflowRoot = path.join(repositoryRoot, ".github", "workflows");
-  for (const workflowPath of await findWorkflowFiles(workflowRoot)) {
-    const content = await readBoundedText(workflowPath);
-    if (!/^permissions:/m.test(content)) {
-      errors.push(`${relative(repositoryRoot, workflowPath)} lacks top-level permissions`);
-    }
-    for (const match of content.matchAll(ACTION_REFERENCE)) {
-      if (!FULL_COMMIT_SHA.test(match[1])) {
-        errors.push(`${relative(repositoryRoot, workflowPath)} uses mutable action ${match[0].trim()}`);
-      }
-    }
-    validatePullRequestSecrets(repositoryRoot, workflowPath, content, errors);
-  }
-  return { errors };
 }
 
 /** Parse PNG dimensions and metadata-bearing chunks. */
@@ -122,15 +101,6 @@ async function validateRequiredEntryPoints(repositoryRoot, markdownFiles, errors
     if (!publicContent.toLowerCase().includes(phrase.toLowerCase())) {
       errors.push(`public documentation lacks: ${phrase}`);
     }
-  }
-}
-
-function validatePullRequestSecrets(repositoryRoot, workflowPath, content, errors) {
-  if (!/pull_request:/m.test(content)) return;
-  if (/secrets\.[A-Z0-9_]+/.test(content) && !/if:\s*github\.event_name\s*==\s*'push'/m.test(content)) {
-    errors.push(
-      `${relative(repositoryRoot, workflowPath)} may expose deployment secrets to pull_request jobs`,
-    );
   }
 }
 
@@ -213,14 +183,6 @@ async function findFiles(root, extension, depth = 0, results = []) {
   return results;
 }
 
-async function findWorkflowFiles(workflowRoot) {
-  if (!await pathExists(workflowRoot)) return [];
-  const entries = await readdir(workflowRoot, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
-    .map((entry) => path.join(workflowRoot, entry.name));
-}
-
 async function readBoundedText(filePath) {
   const file = await stat(filePath);
   if (file.size > MAX_MARKDOWN_BYTES) {
@@ -251,11 +213,9 @@ async function runCli() {
   const repositoryRoot = path.resolve(process.argv[2] || ".");
   const docs = await validatePortfolio(repositoryRoot);
   const links = await collectMarkdownLinks(repositoryRoot);
-  const workflows = await validateWorkflowPolicy(repositoryRoot);
   const errors = [
     ...docs.errors,
     ...links.filter((link) => !link.isValid).map((link) => `${link.source}: broken ${link.target}`),
-    ...workflows.errors,
   ];
   if (errors.length > 0) {
     console.error(errors.map((error) => `- ${error}`).join("\n"));

@@ -109,7 +109,7 @@ describe("image-processor", () => {
       expect(result.contentType).toBe("image/png");
     });
 
-    it("preserves small webp in its original format", async () => {
+    it("converts webp to JPEG", async () => {
       const webp = await sharp({
         create: {
           width: 400,
@@ -122,8 +122,8 @@ describe("image-processor", () => {
         .toBuffer();
 
       const result = await processImage(webp, ".webp");
-      expect(result.ext).toBe(".webp");
-      expect(result.contentType).toBe("image/webp");
+      expect(result.ext).toBe(".jpg");
+      expect(result.contentType).toBe("image/jpeg");
     });
 
     it("returns GIF as-is (no processing)", async () => {

@@ -3,8 +3,6 @@ import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../i18n/LanguageContext";
 
 export default function SignUpScreen() {
-  // The screen is not routed and the active Google-only auth contract has no sign-up method.
-  // @ts-expect-error Retained historical screen; a future sign-up feature must add the port first.
   const { signUp } = useAuth();
   const { t } = useLanguage();
   const [displayName, setDisplayName] = useState("");

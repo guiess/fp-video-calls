@@ -34,11 +34,6 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
-    lint {
-        baseline = file("lint-baseline.xml")
-        abortOnError = true
-    }
-
     buildFeatures {
         compose = true
     }

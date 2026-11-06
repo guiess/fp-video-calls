@@ -13,7 +13,6 @@
  */
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useLanguage } from "../i18n/LanguageContext";
-import type { Translations } from "../i18n/translations";
 import {
   LocationData,
   LocationHistoryEntry,
@@ -370,7 +369,7 @@ interface LocationCardProps {
   timestamp: number;
   accuracy?: number;
   address?: string;
-  t: Translations;
+  t: Record<string, string>;
   highlight?: boolean;
 }
 

@@ -24,7 +24,6 @@ interface Conversation {
   lastMessage?: {
     sender_name?: string;
     plaintext?: string;
-    ciphertext?: string;
     type: string;
     timestamp: number;
   };

@@ -1,36 +1,36 @@
-# M² Calls validation status
+# M² Calls local validation status
 
-- **Implementation workspace revision:** uncommitted changes based on
- `482a83a83db50d75792610fc009f0fb87d24971d`
+- **Portfolio source baseline:** `482a83a83db50d75792610fc009f0fb87d24971d`
 - **Validation date:** 2026-11-06
-- **Purpose:** distinguish source tests, executed checks, CI policy, live
- observations, and unavailable external evidence.
+- **Purpose:** distinguish source tests, locally executed checks, live
+  observations, and unavailable external evidence.
+
+All validators added by the portfolio package are local/manual commands. They
+are not merge gates, deployment gates, or evidence that a hosted automation
+service ran.
 
 ## Executed locally
 
 | Area | Command/evidence | Result |
 |---|---|---|
-| Portfolio docs/assets/workflows | `node --test scripts/tests/*.test.mjs` | 20 tests passed |
+| Portfolio docs/assets | `node --test scripts/tests/*.test.mjs` | 17 tests passed |
 | Portfolio entry points | `node scripts/validate-portfolio.mjs .` | Passed |
 | Historical receipt and exact APK | `node scripts/validate-release-manifest.mjs docs/releases/mobile-v1.0-receipt.json <downloaded-apk>` | Passed; exact bytes matched size and SHA-256 |
 | Server source boundary | `node scripts/validate-server-package.mjs server` | Passed; 23 source files |
 | Candidate server ZIP | create disposable source ZIP, then `node scripts/validate-server-package.mjs <candidate.zip>` | Passed; archive parser opened and validated 23 files |
 | Web | `npm test` | 119 tests passed |
-| Web type check | `npm run typecheck` | Passed |
-| Web build | `npm run build` | Passed; bundle-size/code-splitting warnings remain |
-| Server default | `npm test` on Node 22.23.4 | 41 tests passed |
+| Web build | `npm run build` | Passed; duplicate translation-key and bundle-size/code-splitting warnings remain |
+| Server default | `node node_modules/vitest/vitest.mjs run` on Node 22.23.4 | 40 passed, 1 failed: the small-WebP test expects JPEG while current runtime preserves WebP |
 | Server TURN | `npm run test:turn` | 9 tests passed |
 | Server telemetry | `npm run test:telemetry` | 6 tests passed |
 | Android unit tests | `gradlew test` | 340 debug and 340 release executions passed |
-| Android lint | `gradlew lint` | Passed with the reviewed baseline in [ci-baselines.md](ci-baselines.md) |
 | Android debug build | `gradlew assembleDebug` | Passed using an ignored synthetic non-production Firebase client file |
-| Workflow YAML | `npx -y yaml-lint '.github/workflows/*.yml'` | Passed |
-| Diff hygiene | `git diff --check` | Passed |
+| Android lint diagnostic | `gradlew lint` | Non-zero as expected: 3 errors and 58 warnings; no baseline is retained by this change |
 
 The host default Node 26 could not build `better-sqlite3@12.6.2`; the locked
 package declares support through Node 25. Re-running install/tests with Node
-22.23.4 succeeded. This is the evidence for the Node 22 build/deployment
-baseline.
+22.23.4 succeeded. This is the evidence for the Node 22 local and deployment
+guidance.
 
 Locked installs reported existing dependency findings:
 
@@ -38,8 +38,7 @@ Locked installs reported existing dependency findings:
 - server: 40 total, including 19 high and 5 critical.
 
 These are advisory/package counts, not proven exploit counts. They require
-separate triage. Pull-request dependency review blocks newly introduced high or
-critical advisory changes.
+separate triage and are not remediated by this documentation change.
 
 ## Historical APK observations
 
@@ -75,22 +74,12 @@ At 2026-11-06 11:40 Eastern:
 No Azure, Firebase, coturn, Blob, monitoring, backup, cost, or deployed-revision
 configuration was queried.
 
-## CI-enforced after merge
+## Automation status
 
-The workflows are configured to enforce:
-
-- docs/assets/manifests/package validation;
-- web locked install, tests, type check, and build;
-- server locked install plus default/TURN/telemetry suites;
-- Gradle wrapper validation, Android unit tests, lint, and debug assembly with a
-  synthetic non-production Firebase client file;
-- immutable full-SHA action references and explicit permissions;
-- pull-request dependency review without deployment credentials;
-- web deployment only after a successful trusted `main` validation run;
-- application-deploy skip for documentation-only revisions.
-
-No passing-CI claim is made because these workflows have not run on this
-uncommitted revision.
+The repository retains its original Azure Static Web Apps deployment file. This
+portfolio change does not add hosted validation, publication, or release
+automation. The local documentation, asset, manifest, and package validators
+must be run explicitly. Future automation is deferred.
 
 ## Pending external evidence
 
@@ -106,5 +95,4 @@ were not fabricated:
   SQLite persistence, and coturn;
 - forced-relay selected-pair evidence with bidirectional media;
 - rollback/data-recovery and 15-minute withdrawal rehearsals;
-- repository description/homepage/license metadata update after the files are
-  committed and published.
+- repository description/homepage/license metadata update after publication.

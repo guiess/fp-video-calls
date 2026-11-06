@@ -166,19 +166,18 @@ local disk, and memory.
 | Web unit tests | Config, encryption format/display, location, recovery, telemetry | Browser E2E and current cross-device interop |
 | Server tests | Storage, image processing, previews, quotas, TURN, telemetry | Complete authorization and live dependency integration |
 | Android unit tests | Calls, chat models, location, notifications, recovery, TURN lease, telemetry | Device/UI suite and current historical APK compatibility |
-| Documentation tests | Required files, names, links, images, workflow policy, manifests | Human audience trials until separately recorded |
+| Documentation tests | Required files, names, links, images, and manifests | Human audience trials until separately recorded |
 
 The canonical commands are in
 [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md). Documentation distinguishes
-tests present, tests executed locally, checks enforced by CI, and live
-observations.
+tests present, tests executed locally, and live observations.
 
 **Trade-off:** unit-level recovery logic is deterministic and fast to validate,
 but real WebRTC behavior depends on browsers, devices, networks, TURN, and
 signaling timing.
 
-**Limitation:** no passing-CI statement applies until the workflow has run on the
-exact revision; open issues remain part of the evidence.
+**Limitation:** local results are not an automated merge or deployment gate;
+open issues remain part of the evidence.
 
 ## 25–30 minutes: deployment, provenance, and operations
 
@@ -191,10 +190,12 @@ because Oryx may restore/build after upload.
 
 The historical `mobile-v1.0` APK is preserved byte-for-byte and described by a
 [legacy receipt](docs/releases/mobile-v1.0-receipt.json). Its tag commit and
-unknown build-source commit are separate facts. Future binaries require the
-[CI-built manifest profile](docs/releases/release-manifest.schema.json),
+unknown build-source commit are separate facts. Future binaries can use the
+deferred `ci-built` manifest profile in
+[release-manifest.schema.json](docs/releases/release-manifest.schema.json),
 independent hashing, Android signature verification, test evidence, and separate
-build/release attestation identities.
+build/release attestation identities. No release-build automation is implemented
+by this portfolio change.
 
 **Trade-off:** retaining manual server/TURN operations avoids an unauthorized
 infrastructure redesign, but weakens repeatability compared with reviewed IaC.

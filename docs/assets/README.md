@@ -64,7 +64,7 @@ limitation is recorded instead of presenting a mockup as runtime evidence.
 9. Run `node --test scripts/tests/portfolio-docs.test.mjs`.
 
 The current records show `pending-owner-review` for the final human approval.
-Automated structure/metadata checks and Developer Guardian visual inspection are
+Local structure/metadata scripts and Developer Guardian visual inspection are
 complete, but they do not impersonate a human reviewer.
 
 UI captures demonstrate visible surfaces only. They do not prove successful

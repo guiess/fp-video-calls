@@ -37,9 +37,11 @@ Before actively recommending installation:
 7. record incompatibilities with current services;
 8. retain the historical M2 Video Calls identity.
 
-## Future CI-built profile
+## Future provenance profile — automation deferred
 
-Future promoted binaries must satisfy
+The schema retains a `ci-built` profile as a future evidence contract. No
+release-build, attestation, promotion, or publication automation is implemented
+by this portfolio change. Future promoted binaries must satisfy
 [release-manifest.schema.json](release-manifest.schema.json) and
 `node scripts/validate-release-manifest.mjs <manifest> <artifact>`.
 
@@ -65,8 +67,8 @@ claims.
 ## Promotion
 
 1. Validate source and dependency state.
-2. Build in the trusted workflow without publication credentials in untrusted
-   jobs.
+2. Build with an owner-approved reproducible process. A future trusted workflow
+   may implement this step, but none is added here.
 3. Run unit, lint, scan, and device/browser checks.
 4. Compute final-byte metadata after all signing/packaging.
 5. Verify the signer and expected attestation repository/workflow identities.
@@ -85,7 +87,7 @@ already installed copies:
    before the download link;
 3. mark the release historical/prerelease/not-current when owner-approved;
 4. preserve tag, bytes, digest, receipt, and safe investigation evidence;
-5. disable automated promotion paths for the affected version;
+5. disable any promotion automation if one is introduced in the future;
 6. prepare a higher-version roll-forward rather than replacing the asset;
 7. document whether uninstall/reinstall risks local data loss;
 8. record completion time and any delay.

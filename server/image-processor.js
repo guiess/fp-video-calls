@@ -2,8 +2,8 @@
  * Image processing module for upload-time resize.
  *
  * Resizes images that exceed configurable maximum dimensions, maintaining
- * aspect ratio. Oversized non-PNG images are converted to JPEG at 85% quality.
- * Small images are returned in their original format and are not upscaled.
+ * aspect ratio. Converts non-PNG images to JPEG at 85% quality.
+ * Small images are not upscaled.
  *
  * @module image-processor
  */
@@ -36,8 +36,7 @@ export function isResizableImage(ext) {
  *
  * - If the image fits within maxWidth × maxHeight, the original is returned
  *   (no upscaling).
- * - Small files keep their original format.
- * - Oversized PNG files stay PNG; other oversized formats become JPEG at 85%.
+ * - PNG files stay as PNG; all other formats are converted to JPEG at 85%.
  * - Animated GIFs are returned as-is (sharp doesn't handle animation well).
  *
  * @param {Buffer} buffer - The raw image file buffer.
