@@ -16,22 +16,29 @@
     "profile": { "enum": ["legacy", "ci-built"] },
     "canonicalProductName": { "const": "M² Calls" },
     "repository": { "const": "guiess/fp-video-calls" },
-    "release": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "release": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
     "artifact": {
       "type": "object",
       "required": ["filename", "sizeBytes", "sha256"],
       "properties": {
-        "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
-        "sizeBytes": { "type": "integer", "minimum": 1 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "digestSource": { "type": "string", "minLength": 1 }
+        "filename": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "\\S" },
+        "sizeBytes": { "$ref": "#/$defs/positiveInteger" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "digestSource": { "$ref": "#/$defs/boundedString" }
       },
       "additionalProperties": true
     }
   },
   "oneOf": [
     {
-      "properties": { "profile": { "const": "legacy" } },
+      "properties": {
+        "profile": { "const": "legacy" },
+        "historicalProductName": { "const": "M2 Video Calls" },
+        "tagCommit": { "$ref": "#/$defs/commit" },
+        "buildSourceCommit": { "const": null },
+        "buildSourceStatus": { "type": "string", "minLength": 20, "pattern": "^unknown-" },
+        "observations": { "type": "array" }
+      },
       "required": [
         "historicalProductName",
         "tagCommit",
@@ -41,7 +48,90 @@
       ]
     },
     {
-      "properties": { "profile": { "const": "ci-built" } },
+      "properties": {
+        "profile": { "const": "ci-built" },
+        "releaseChannel": { "enum": ["test", "prerelease", "production"] },
+        "source": {
+          "type": "object",
+          "required": ["sourceSha", "tag", "tagCommit", "cleanTree"],
+          "properties": {
+            "sourceSha": { "$ref": "#/$defs/commit" },
+            "tag": { "$ref": "#/$defs/boundedString" },
+            "tagCommit": { "$ref": "#/$defs/commit" },
+            "cleanTree": { "const": true }
+          }
+        },
+        "build": {
+          "type": "object",
+          "required": ["workflowPath", "workflowRevision", "runId", "runAttempt", "commands", "toolchain", "lockfileHashes"],
+          "properties": {
+            "workflowPath": { "$ref": "#/$defs/boundedString" },
+            "workflowRevision": { "$ref": "#/$defs/commit" },
+            "runId": { "$ref": "#/$defs/boundedString" },
+            "runAttempt": { "$ref": "#/$defs/positiveInteger" },
+            "commands": { "$ref": "#/$defs/stringArray" },
+            "toolchain": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "$ref": "#/$defs/boundedString" },
+              "additionalProperties": { "$ref": "#/$defs/boundedString" }
+            },
+            "lockfileHashes": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "$ref": "#/$defs/boundedString" },
+              "additionalProperties": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "android": {
+          "type": "object",
+          "required": ["applicationId", "versionName", "versionCode", "minSdk", "targetSdk", "abis", "debuggable"],
+          "properties": {
+            "applicationId": { "const": "com.fpvideocalls" },
+            "versionName": { "$ref": "#/$defs/boundedString" },
+            "versionCode": { "$ref": "#/$defs/positiveInteger" },
+            "minSdk": { "$ref": "#/$defs/positiveInteger" },
+            "targetSdk": { "$ref": "#/$defs/positiveInteger" },
+            "abis": { "$ref": "#/$defs/stringArray" },
+            "debuggable": { "type": "boolean" }
+          }
+        },
+        "tests": {
+          "type": "object",
+          "required": ["suites", "deviceMatrix", "scans"],
+          "properties": {
+            "suites": { "$ref": "#/$defs/stringArray" },
+            "deviceMatrix": { "$ref": "#/$defs/stringArray" },
+            "scans": { "$ref": "#/$defs/stringArray" }
+          }
+        },
+        "signer": {
+          "type": "object",
+          "required": ["certificateSha256"],
+          "properties": {
+            "certificateSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "attestations": {
+          "type": "object",
+          "required": ["build", "release"],
+          "properties": {
+            "build": { "$ref": "#/$defs/attestation" },
+            "release": { "$ref": "#/$defs/attestation" }
+          }
+        },
+        "approval": {
+          "type": "object",
+          "required": ["approver", "evidenceLocation"],
+          "properties": {
+            "approver": { "$ref": "#/$defs/boundedString" },
+            "evidenceLocation": { "$ref": "#/$defs/boundedString" }
+          }
+        }
+      },
+      "if": { "properties": { "releaseChannel": { "const": "production" } }, "required": ["releaseChannel"] },
+      "then": { "properties": { "android": { "properties": { "debuggable": { "const": false } } } } },
       "required": [
         "releaseChannel",
         "source",
@@ -54,5 +144,22 @@
       ]
     }
   ],
+  "$defs": {
+    "boundedString": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" },
+    "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "positiveInteger": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "stringArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/boundedString" }
+    },
+    "attestation": {
+      "type": "object",
+      "required": ["identity"],
+      "properties": { "identity": { "$ref": "#/$defs/boundedString" } }
+    }
+  },
   "additionalProperties": true
 }

@@ -48,6 +48,7 @@ function validateCommonFields(manifest) {
   requireOneOf(manifest, "profile", ["legacy", "ci-built"], errors);
   requireEqual(manifest, "canonicalProductName", CANONICAL_PRODUCT_NAME, errors);
   requireEqual(manifest, "repository", REPOSITORY_NAME, errors);
+  requireString(manifest, "release", errors, "", 200);
   validateArtifactRecord(manifest.artifact, errors);
   return errors;
 }
@@ -59,7 +60,6 @@ function validateLegacy(manifest, errors) {
     HISTORICAL_PRODUCT_NAME,
     errors,
   );
-  requireString(manifest, "release", errors);
   requireCommit(manifest, "tagCommit", errors);
   if (manifest.buildSourceCommit !== null) {
     errors.push("buildSourceCommit must remain null until original evidence is recovered");
@@ -103,13 +103,14 @@ function validateSource(source, errors) {
 
 function validateBuild(build, errors) {
   if (!isRecord(build)) return errors.push("build is required");
-  for (const field of ["workflowPath", "workflowRevision", "runId"]) {
+  for (const field of ["workflowPath", "runId"]) {
     requireString(build, field, errors);
   }
+  requireCommit(build, "workflowRevision", errors);
   requirePositiveInteger(build, "runAttempt", errors);
   requireNonEmptyStringArray(build, "commands", errors);
-  if (!isRecord(build.toolchain)) errors.push("build.toolchain is required");
-  if (!isRecord(build.lockfileHashes)) errors.push("build.lockfileHashes is required");
+  validateStringMap(build.toolchain, "build.toolchain", errors);
+  validateStringMap(build.lockfileHashes, "build.lockfileHashes", errors, SHA256_PATTERN);
 }
 
 function validateAndroid(android, errors) {
@@ -134,7 +135,7 @@ function validateTests(tests, errors) {
 
 function validateSigner(signer, errors) {
   if (!isRecord(signer)) return errors.push("signer is required");
-  if (!SHA256_PATTERN.test(signer.certificateSha256 || "")) {
+  if (typeof signer.certificateSha256 !== "string" || !SHA256_PATTERN.test(signer.certificateSha256)) {
     errors.push("signer.certificateSha256 must be a lowercase SHA-256 digest");
   }
 }
@@ -158,10 +159,13 @@ function validateApproval(approval, errors) {
 
 function validateArtifactRecord(artifact, errors) {
   if (!isRecord(artifact)) return errors.push("artifact is required");
-  requireString(artifact, "filename", errors, "artifact");
+  requireString(artifact, "filename", errors, "artifact", 255);
   requirePositiveInteger(artifact, "sizeBytes", errors, "artifact");
-  if (!SHA256_PATTERN.test(artifact.sha256 || "")) {
+  if (typeof artifact.sha256 !== "string" || !SHA256_PATTERN.test(artifact.sha256)) {
     errors.push("artifact.sha256 must be a lowercase SHA-256 digest");
+  }
+  if (artifact.digestSource !== undefined) {
+    requireString(artifact, "digestSource", errors, "artifact");
   }
 }
 
@@ -188,15 +192,15 @@ function requireEqual(record, field, expected, errors, prefix = "") {
   }
 }
 
-function requireString(record, field, errors, prefix = "") {
+function requireString(record, field, errors, prefix = "", maxLength = 2_000) {
   const value = record[field];
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > 2_000) {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
     errors.push(`${qualified(prefix, field)} must be a non-empty bounded string`);
   }
 }
 
 function requireCommit(record, field, errors) {
-  if (!COMMIT_PATTERN.test(record[field] || "")) {
+  if (typeof record[field] !== "string" || !COMMIT_PATTERN.test(record[field])) {
     errors.push(`${field} must be a lowercase 40-character commit SHA`);
   }
 }
@@ -219,9 +223,29 @@ function requireNonEmptyStringArray(record, field, errors) {
     !Array.isArray(value)
     || value.length === 0
     || value.length > 100
-    || value.some((entry) => typeof entry !== "string" || entry.length === 0)
+    || value.some((entry) => typeof entry !== "string" || entry.trim().length === 0 || entry.length > 2_000)
   ) {
     errors.push(`${field} must be a non-empty bounded string array`);
+  }
+}
+
+function validateStringMap(value, field, errors, pattern) {
+  if (!isRecord(value) || Object.keys(value).length === 0) {
+    errors.push(`${field} must be a non-empty object`);
+    return;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key.trim() || key.length > 2_000) {
+      errors.push(`${field} must have non-empty bounded keys`);
+    }
+    if (
+      typeof entry !== "string"
+      || !entry.trim()
+      || entry.length > 2_000
+      || (pattern && !pattern.test(entry))
+    ) {
+      errors.push(`${field}.${key} must be ${pattern ? "a lowercase SHA-256 digest" : "a non-empty bounded version string"}`);
+    }
   }
 }
 

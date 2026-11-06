@@ -1,11 +1,11 @@
-# M² Calls Android capability evidence
+# M² Calls Android features
 
 - **Source baseline:** `482a83a83db50d75792610fc009f0fb87d24971d`
 - **Technical identity:** application ID/package `com.fpvideocalls`; APK output
   prefix `M2Calls`
 
-This source-backed inventory supports the portfolio overview without claiming
-that every feature has current device/interoperability evidence.
+This document lists the implemented Android application features and their
+representative source paths.
 
 ## Calling
 
@@ -60,7 +60,7 @@ and [AndroidManifest.xml](../mobile-kotlin/app/src/main/AndroidManifest.xml).
 
 Reviewed Firestore rules allow any authenticated user to read stored location
 current/history. Client cleanup is not a guaranteed physical retention
-deadline. Use simulated coordinates only.
+deadline. See [security and privacy](../SECURITY.md) for sharing access controls.
 
 Evidence:
 [LocationTrackingService.kt](../mobile-kotlin/app/src/main/java/com/fpvideocalls/service/LocationTrackingService.kt),
@@ -78,10 +78,10 @@ Evidence:
 [TelemetryScreen.kt](../mobile-kotlin/app/src/main/java/com/fpvideocalls/ui/screens/TelemetryScreen.kt),
 and [resources](../mobile-kotlin/app/src/main/res).
 
-## Validation posture
+## Tests
 
 Unit tests cover call, chat model, location, notification, telemetry, and
 recovery logic under
-[app/src/test](../mobile-kotlin/app/src/test). Device/UI execution, current
-Firebase integration, WebRTC interoperability, and historical APK compatibility
-must be recorded separately and are not inferred from source presence.
+[app/src/test](../mobile-kotlin/app/src/test). Device and browser integration
+checks cover Firebase-backed flows and WebRTC interoperability; see
+[build instructions](../BUILD_INSTRUCTIONS.md) for setup and commands.

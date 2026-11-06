@@ -1,40 +1,26 @@
 # M² Calls
 
-M² Calls is an experimental full-stack WebRTC portfolio project for browser and
-Android calling, communication, and location-sharing workflows. It demonstrates
-product architecture across React/TypeScript, Kotlin/Compose, Node/Socket.IO,
-Firebase, SQLite, Azure storage, and coturn. It is an engineering case study,
-not a production communications service.
+M² Calls is a personal-use communications app for web and Android. It supports
+WebRTC audio/video calls, persistent messaging, contacts, files, call history,
+and location sharing. The app is under active development and is intentionally
+not production-ready.
 
-> **Safety notice:** Do not use personal conversations, sensitive files, or real location data.
+> **Safety notice:** Until the known authorization issues are resolved, do not use sensitive conversations, sensitive files, or real location data.
 > Known authorization and privacy limitations are documented in
 > [SECURITY.md](SECURITY.md).
 
-## Evaluate the project
+## Availability
 
-| Surface | Entry point | What it proves | Important limitation |
-|---|---|---|---|
-| Current live web deployment | [Open the M² Calls web demo](https://thankful-moss-0611ddf0f.3.azurestaticapps.net) | The public web entry point was reachable during the 2026-11 documentation review | Reachability does not prove dependency health, call interoperability, data authorization, monitoring, or a specific deployed source revision |
-| Server liveness | [Open `/health`](https://app-voice-video-server.azurewebsites.net/health) | The Node process can answer its liveness route | `/health` is not a readiness, dependency, security, or media-relay check |
-| Historical Android binary | [View the `mobile-v1.0` release](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0) | A preserved Android debug artifact exists under its historical identity | See the mandatory warning below and the [release receipt](docs/releases/mobile-v1.0-receipt.json) |
+- **Web app:** [Open M² Calls](https://thankful-moss-0611ddf0f.3.azurestaticapps.net)
+- **Android:** [Download version 1.0.0.191](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.191/M2Calls-1.0.0.191-debug.apk)
+  for Android 8.0 or later. See the [release notes](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0.0.191)
+  or [build from source](BUILD_INSTRUCTIONS.md).
+- **Server status:** [`/health`](https://app-voice-video-server.azurewebsites.net/health)
+  reports process liveness only.
 
-> **Historical, non-production M2 Video Calls Android debug build.** This APK
-> predates the canonical M² Calls portfolio package and is associated with
-> `mobile-v1.0`, whose tag diverges from current main. Its original build source
-> and build process have not been verified. Use only on a test device with
-> synthetic, non-sensitive data. Compatibility with the current live services
-> is not established.
+## Screenshots
 
-## Product evidence
-
-The owner-prepared images below preserve their visible red/yellow privacy masks.
-They are UI evidence, not proof that every dependency or cross-platform scenario
-completed successfully. Web images contain application content only and come
-from the live M² Calls experience; the deployed source revision is unknown.
-Android images come from the installed historical `mobile-v1.0` debug APK and
-are not represented as current-main output. Capture hashes, review results, and
-limitations are recorded in
-[the asset provenance register](docs/assets/README.md).
+Personal information is redacted in the screenshots.
 
 ### Guest web
 
@@ -44,7 +30,7 @@ limitations are recorded in
 
 **Guest group call**
 
-![M² Calls guest group call showing participant presence and call controls](docs/assets/screenshots/m2calls_guest_group_call.png)
+![M² Calls guest group call with three participants and call controls](docs/assets/screenshots/m2calls_guest_group_call.png)
 
 ### Authenticated web
 
@@ -56,23 +42,22 @@ limitations are recorded in
 
 ![Owner-masked M² Calls logged-in call history](docs/assets/screenshots/m2calls_logged_calls.png)
 
-### Historical Android APK
+### Android app
 
 | Chats | Conversation |
 |---|---|
-| ![Owner-masked chats list from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_chats.png) | ![Owner-masked conversation from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_chat.png) |
+| ![Owner-masked M² Calls Android chats list](docs/assets/screenshots/m2calls_app_chats.png) | ![Owner-masked M² Calls Android conversation](docs/assets/screenshots/m2calls_app_chat.png) |
 
 | Contacts | Rooms |
 |---|---|
-| ![Owner-masked contacts page from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_contacts.png) | ![Rooms page from the historical mobile-v1.0 debug APK](docs/assets/screenshots/m2calls_app_rooms.png) |
+| ![Owner-masked M² Calls Android contacts page](docs/assets/screenshots/m2calls_app_contacts.png) | ![M² Calls Android rooms page](docs/assets/screenshots/m2calls_app_rooms.png) |
 
 **Android group call**
 
-![Historical mobile-v1.0 debug APK group call showing participant presence and call controls](docs/assets/screenshots/m2calls_app_group_call.png)
+![M² Calls Android group call with two participants and call controls](docs/assets/screenshots/m2calls_app_group_call.png)
 
-The guest and Android group-call captures demonstrate participant presence in
-the UI. They do not establish media interoperability, authorization correctness,
-capacity, reliability, or production readiness.
+The guest web and Android galleries include group calls with multiple
+participants and the available call controls.
 
 ## WebRTC calls
 
@@ -83,7 +68,7 @@ candidate pair is selected; signaling does not carry audio or video. The
 implemented mesh is intended for small calls, but this repository provides no
 current capacity or universal-connectivity guarantee.
 
-Evidence:
+Implementation:
 [web peer orchestration](web/src/services/webrtc.ts),
 [Android peer orchestration](mobile-kotlin/app/src/main/java/com/fpvideocalls/webrtc/WebRTCManager.kt),
 [server signaling relay](server/index.js), and
@@ -94,10 +79,10 @@ Evidence:
 Authenticated call flows support direct/group invitations, web socket delivery,
 FCM delivery to Android, ringing, answer/cancel, room entry, and call history.
 Guest rooms provide persistent-looking room identifiers and optional passwords,
-but their control and signaling authorization boundaries are intentionally
-documented as limitations rather than presented as remediated.
+with account-free access. Some room-control events still need membership and
+host authorization checks; see [SECURITY.md](SECURITY.md).
 
-Evidence:
+Implementation:
 [web call service](web/src/services/callService.ts),
 [Android call API](mobile-kotlin/app/src/main/java/com/fpvideocalls/data/CallApiService.kt),
 [Android FCM receiver](mobile-kotlin/app/src/main/java/com/fpvideocalls/service/FcmService.kt),
@@ -107,12 +92,11 @@ and [server call routes](server/index.js).
 
 Android can collect current and historical location, run a foreground location
 service, restore configured behavior after boot, and publish data to Firestore.
-Web and Android surfaces can view location history. Use simulated coordinates
-only: reviewed Firestore rules allow any authenticated user to read stored
-location current/history, and client cleanup does not establish a guaranteed
-physical deletion deadline.
+Web and Android surfaces can view current locations and location history.
+See [Security and privacy](SECURITY.md) for location-sharing access controls
+and data-retention limitations.
 
-Evidence:
+Implementation:
 [location service](mobile-kotlin/app/src/main/java/com/fpvideocalls/service/LocationTrackingService.kt),
 [web location view](web/src/screens/LocationPanel.tsx), and
 [reviewed Firestore rules](firestore.rules).
@@ -138,7 +122,7 @@ Evidence:
   Android also has bounded local persistence. It is not a hosted monitoring
   service.
 
-## Engineering highlights
+## Technical architecture
 
 - WebRTC signaling/media separation with direct and TURN-relayed media paths.
 - Cross-platform React/TypeScript and Kotlin/Compose clients.
@@ -149,18 +133,17 @@ Evidence:
 - Ephemeral coturn HMAC credentials and client-side refresh/recovery logic.
 - Unit suites for web services, server storage/TURN/telemetry behavior, and
   Android domain/recovery logic.
-- Release-provenance schema, historical artifact receipt, and local
-  documentation/provenance checks.
+- Release metadata and documentation checks.
 
 ## Architecture, security, and operations
 
-- [Architecture and six-part interview guide](ARCHITECTURE.md)
+- [Architecture reference](ARCHITECTURE.md)
 - [Security, privacy, permissions, and reporting](SECURITY.md)
 - [Build and test from a clean checkout](BUILD_INSTRUCTIONS.md)
 - [Canonical Azure deployment guide](docs/azure-deploy.md)
 - [Release evidence and withdrawal procedure](docs/releases/README.md)
-- [Editable and rendered system diagram](docs/assets/README.md)
-- [Executed validation and pending external evidence](docs/validation-status.md)
+- [System diagram](docs/assets/architecture/system-overview.svg) and [editable source](docs/assets/architecture/system-overview.mmd)
+- [Build and verification records](docs/validation-status.md)
 
 ## Current limitations
 
@@ -170,10 +153,12 @@ Evidence:
 - Current active web and Android text-send paths use reversible Base64 encoding
   with empty encrypted-key maps. Base64 encoding is not end-to-end encryption;
   cryptographic helpers exist but are not the universal active send path.
-- Reviewed authorization boundaries include token-optional Socket.IO chat
-  identity, broad location/file reads, unauthenticated local-file downloads,
-  caller-provided call identity fields, guest-room control gaps, and
-  unauthenticated TURN issuance.
+- Known access-control gaps include token-optional private Socket.IO identity,
+  missing enforcement of location-sharing selections, unchecked room controls,
+  and call identity/ownership checks. Attachment access depends on the storage
+  mode. Account-free guest calling, temporary download links, and guest TURN
+  credentials are design choices, with access and abuse controls described in
+  [SECURITY.md](SECURITY.md).
 - The signaling service uses in-memory active call/roster/telemetry state and a
   local SQLite database, which complicates horizontal scaling and seamless
   failover.
@@ -187,7 +172,7 @@ Warnings document risk; they do not remediate runtime defects. See
 
 ## Build, test, and deployment
 
-Follow [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md). The canonical validation
+Follow [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md). Common developer
 commands are:
 
 ```bash
@@ -195,20 +180,19 @@ node --test scripts/tests/*.test.mjs
 cd web && npm ci && npm test && npm run build
 cd ../server && npm ci && node node_modules/vitest/vitest.mjs run
 npm run test:turn && npm run test:telemetry
-cd ../mobile-kotlin && ./gradlew test assembleDebug
+cd ../mobile-kotlin && bash ./gradlew test assembleDebug
 ```
 
-Deployment behavior and unknown live facts are separated in
-[docs/azure-deploy.md](docs/azure-deploy.md). Validation in this repository is
-local/manual. Future validation automation is deferred.
+Deployment and operational guidance is maintained in
+[docs/azure-deploy.md](docs/azure-deploy.md).
 
 ## Ownership and maintenance
 
 I primarily owned product direction and architecture. AI tools assisted implementation, tests, and documentation under my direction and review.
 
 This repository is owner-maintained; external contributions are not accepted.
-Pull requests are not accepted. Security reports remain welcome through the
-private route in [SECURITY.md](SECURITY.md).
+Pull requests are not accepted. See [SECURITY.md](SECURITY.md) for how to arrange
+a confidential security report.
 
 The owner-authored repository material is licensed under
 [Apache License 2.0](LICENSE), subject to the rights and exclusions described in
@@ -218,6 +202,5 @@ The owner-authored repository material is licensed under
 
 M² Calls is the canonical public product name. `fp-video-calls` remains the
 legacy repository identifier, `com.fpvideocalls` remains the Android application
-ID/package, `M2Calls` remains a build/output identifier, and M2 Video Calls is
-the historical branding attached to `mobile-v1.0`. These names trace one project;
-they are not separate current products.
+ID/package, and `M2Calls` remains a build/output identifier. These names trace
+one project; they are not separate current products.

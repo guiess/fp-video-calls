@@ -3,56 +3,81 @@
 **Last source review:** 2026-11-06 at
 `482a83a83db50d75792610fc009f0fb87d24971d`.
 
-M² Calls is an experimental portfolio system. This document describes observed
-boundaries and limitations; it is not a production-security assurance, privacy
-certification, or claim that warnings repair runtime defects.
+M² Calls is a personal-use application under active development and is
+intentionally not production-ready. This document describes its current
+security and privacy boundaries.
 
-## Report a vulnerability privately
+## Reporting a security concern
 
-Use the repository's
-[GitHub private vulnerability reporting form](https://github.com/guiess/fp-video-calls/security/advisories/new).
-Do not open a public issue with credentials, personal data, exploit details, or
-private URLs. No response-time or remediation SLA is promised.
+GitHub private vulnerability reporting is not enabled for this repository as of
+2026-11-06, and no separate private reporting channel is published.
+To arrange a confidential report, open an issue containing only a request to
+contact the owner privately. Do not include vulnerability details, credentials,
+personal data, or private URLs in that issue; wait until a private channel is
+agreed. No response-time or remediation SLA is promised.
 
-External contributions and pull requests are not accepted, but private reports
-are reviewed by the owner.
+External contributions and pull requests are not accepted. Requests to arrange
+a confidential security report are welcome.
 
-## Evaluation safety
+## Safe use during development
 
-> **M² Calls experimental portfolio demo and historical M2 Video Calls debug
-> Android build.** Do not use personal conversations, sensitive files or real
-> location data. Known limitations include broad location/file access,
-> sensitive diagnostic logging, unauthenticated guest/control boundaries and
-> non-E2E-encrypted text messaging. These materials are not a
-> production-security assurance or privacy certification.
+> **M² Calls is under active development and intentionally not production-ready.**
+> Until the known authorization issues are resolved, do not use sensitive
+> conversations, sensitive files, or real location data. Current limitations
+> include unenforced location-sharing selections, private socket identity and
+> room/call authorization gaps, sensitive diagnostic logging, and non-E2E-encrypted text
+> messaging.
 
-Use synthetic accounts, names, messages, files, avatars, coordinates, call
-relationships, and notification content. Do not upload secrets or production
-records.
+Use non-sensitive data during development and testing. Do not upload secrets or
+confidential records.
 
 ## Identity and authorization boundaries
 
-Authenticated REST chat, guest rooms, Socket.IO channels, call delivery, and
-TURN issuance do not share one uniform identity model:
+Authenticated REST chat routes verify Firebase ID tokens and check conversation
+membership for conversation access. Guest rooms deliberately support account-free
+calling, with passwords checked when enabled.
 
-- Authenticated REST chat routes use Firebase ID-token middleware.
-- `chat_auth` verifies a token only when Firebase Admin is ready and a token is
-  supplied. A claimed UID can otherwise join a user event room.
-- Guest room creation/join/signaling use caller-supplied identifiers and an
-  optional room password. The reviewed source does not issue host/member
-  capabilities that authorize close, signaling, or control events.
-- Authenticated call invite/answer/cancel routes do not consistently bind every
-  caller identity field to the verified token UID.
-- `GET /api/turn` validates the shape/size of caller-supplied identifiers but
-  does not authenticate the application user before issuing time-limited coturn
-  credentials.
-- Reviewed Firestore rules allow any authenticated user to read stored location current/history.
-- Reviewed Firebase Storage rules allow any authenticated user to read chat
-  objects under the configured path.
-- The server's local attachment download route does not require authentication.
-  Blob mode uses time-limited SAS URLs, which remain bearer URLs.
+### Known access-control gaps
 
-Evidence:
+- **Location sharing:** Reviewed Firestore rules allow any authenticated user to read stored location current/history.
+  The selected `sharedWith` list is not enforced by those rules.
+- **Private socket identity:** `chat_auth` verifies a token only when Firebase
+  Admin is ready and a token is supplied. Otherwise a claimed UID can join a
+  private user-event room without proving that identity.
+- **Room controls:** some events trust room/user identifiers without checking
+  the acting socket's authority. In particular, `close_room` does not verify
+  membership or host status. Account-free joining is intentional; unchecked
+  control actions are not required for guest access.
+- **Call identity and ownership:** invite/answer/cancel routes require login,
+  but invite identity fields are accepted from the request rather than bound
+  to the verified UID. Answer/cancel do not verify the requester's relationship
+  to the call.
+
+### Attachment access by storage mode
+
+- The checked-in Firebase Storage rules allow any authenticated user to read
+  and write chat objects without checking conversation membership. The active
+  server upload adapter instead selects Azure Blob or filesystem storage.
+- Blob mode uses expiring SAS download URLs. Anyone holding a valid URL can
+  download its object; this is a bearer-link design, not an authentication
+  bypass by itself.
+- Filesystem mode serves unguessable file URLs without login or expiry.
+  Possession of the URL grants access. Conversation-private downloads would
+  require an additional membership check.
+
+### Guest TURN credentials
+
+`GET /api/turn` issues short-lived coturn credentials before room entry without
+requiring a Firebase login, supporting guest calling. It validates identifier
+shape/size and is covered by the `/api/` IP rate limiter. This is not a private
+chat authorization defect. Credential issuance and relay quotas still need
+appropriate abuse and bandwidth-cost controls for the deployment.
+
+These observations describe checked-in source and rules. The deployed server
+revision, Firebase rules, active storage mode, and coturn quota settings have
+not been verified here.
+
+Source:
 [server/index.js](server/index.js),
 [server/auth-middleware.js](server/auth-middleware.js),
 [firestore.rules](firestore.rules),
@@ -78,7 +103,7 @@ Evidence:
 - At-rest encryption depends on provider and deployment configuration and was
   not comprehensively verified.
 
-Evidence:
+Source:
 [web active send path](web/src/screens/ChatConversationScreen.tsx),
 [Android active send path](mobile-kotlin/app/src/main/java/com/fpvideocalls/data/ChatRepository.kt),
 [web crypto helper](web/src/services/encryption.ts), and
@@ -86,7 +111,7 @@ Evidence:
 
 ## Data inventory and retention
 
-| Data | Current stores/recipients | Evidence-backed retention statement |
+| Data | Current stores/recipients | Current retention statement |
 |---|---|---|
 | Identity/profile | Firebase Auth and Firestore | Provider/configuration dependent |
 | Contacts/groups | Firestore | Persists until user/application deletion; complete lifecycle not verified |
@@ -141,15 +166,13 @@ documentation must never reproduce detected values.
 
 ## Known risk areas
 
-- broken access control across location, files, guest rooms, Socket.IO identity,
-  invitations, and TURN;
+- missing access checks for location sharing, private Socket.IO identity,
+  room controls, and call identity/ownership;
+- attachment-sharing policy and storage-mode-specific access controls;
 - dependency/supply-chain findings requiring separate triage;
 - configuration drift among SWA, App Service, Firebase, Blob/local storage, and
   coturn;
-- resource abuse of unauthenticated or weakly authorized endpoints;
-- sensitive logs and notification metadata;
-- integrity ambiguity for the historical APK.
+- resource abuse of guest endpoints and TURN bandwidth;
+- sensitive logs and notification metadata.
 
-These are tracked as separate remediation work. This portfolio package does not
-change runtime APIs, authorization, rules, package identity, or historical
-artifacts.
+These areas require further hardening before production use.

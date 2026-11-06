@@ -4,18 +4,29 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const REQUIRED_WARNING =
-  "**Historical, non-production M2 Video Calls Android debug build.**";
 const REQUIRED_LIVE_WARNING =
-  "Do not use personal conversations, sensitive files, or real location data.";
+  "do not use sensitive conversations, sensitive files, or real location data.";
 const PROHIBITED_MARKERS = [
   /\bTODO\b/i,
   /\bTBD\b/i,
   /yourusername/i,
   /99%\+\s*(?:-|—)?\s*universal connectivity/i,
-  /\bproduction-ready\b/i,
   /all data is deleted after seven days/i,
   /fully end-to-end encrypted/i,
+];
+const PROHIBITED_POSITIONING = [
+  /\bportfolio (?:project|package|system|demo|overview|change|assets?)\b/i,
+  /\bhiring manager\b/i,
+  /\btechnical interview(?:er)?\b/i,
+  /\b90-second\b/i,
+  /\b30-minute\b/i,
+  /\bevaluate the project\b/i,
+  /\bwhat it proves\b/i,
+  /\bshowcase\b/i,
+  /\bdemonstrates?\b/i,
+  /\bUI evidence\b/i,
+  /\bnot proof\b/i,
+  /\bevidence limitation\b/i,
 ];
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const PROHIBITED_PNG_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "eXIf"]);
@@ -74,6 +85,13 @@ function validateMarkdownContent(repositoryRoot, filePath, content, errors) {
   for (const marker of PROHIBITED_MARKERS) {
     if (marker.test(content)) errors.push(`${relativePath} contains prohibited marker ${marker}`);
   }
+  if (isPublicDocumentation(relativePath)) {
+    for (const marker of PROHIBITED_POSITIONING) {
+      if (marker.test(content)) {
+        errors.push(`${relativePath} contains obsolete positioning ${marker}`);
+      }
+    }
+  }
   if (/^#\s+(?:M2 Video Calls|fp-video-calls)\s*$/im.test(content)) {
     errors.push(`${relativePath} uses a legacy identifier as the public title`);
   }
@@ -87,11 +105,9 @@ async function validateRequiredEntryPoints(repositoryRoot, markdownFiles, errors
     await Promise.all(markdownFiles.map((file) => readBoundedText(file)))
   ).join("\n");
   const readme = await readBoundedText(path.join(repositoryRoot, "README.md"));
-  if (!readme.includes(REQUIRED_WARNING)) {
-    errors.push("README.md lacks the historical APK warning");
-  }
-  if (!readme.includes(REQUIRED_LIVE_WARNING)) {
-    errors.push("README.md lacks the live demo privacy warning");
+  const normalizedReadme = readme.toLowerCase().replace(/\s+/g, " ");
+  if (!normalizedReadme.includes(REQUIRED_LIVE_WARNING)) {
+    errors.push("README.md lacks the security warning");
   }
   for (const phrase of [
     "reviewed Firestore rules allow any authenticated user to read stored location",
@@ -209,6 +225,18 @@ function relative(root, filePath) {
   return path.relative(root, filePath).replaceAll("\\", "/");
 }
 
+function isPublicDocumentation(relativePath) {
+  const rootDocuments = new Set([
+    "README.md",
+    "ARCHITECTURE.md",
+    "SECURITY.md",
+    "BUILD_INSTRUCTIONS.md",
+    "THIRD_PARTY_NOTICES.md",
+  ]);
+  return rootDocuments.has(relativePath)
+    || relativePath.startsWith("docs/");
+}
+
 async function runCli() {
   const repositoryRoot = path.resolve(process.argv[2] || ".");
   const docs = await validatePortfolio(repositoryRoot);
@@ -222,7 +250,7 @@ async function runCli() {
     process.exitCode = 2;
     return;
   }
-  console.log("Portfolio documentation validation passed.");
+  console.log("Documentation validation passed.");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

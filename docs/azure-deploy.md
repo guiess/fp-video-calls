@@ -4,8 +4,8 @@
 - **Owner:** repository owner
 - **Source baseline:** `482a83a83db50d75792610fc009f0fb87d24971d`
 - **Documentation review:** 2026-11-06
-- **Environment:** best-effort portfolio/demo; production assurance is not
-  established
+- **Environment:** personal-use deployment under active development;
+  intentionally not production-ready
 
 This guide separates repository-verified behavior, live reachability
 observations, operator-reported facts, and proposed improvements. It does not
@@ -83,7 +83,7 @@ inject Vite build variables into already built JavaScript.
 | `CORS_ORIGINS` / `CORS_ORIGIN` | Server operator | Public policy | Empty allows any origin in current source | Restore prior allowlist; verify clients |
 | `CORS_CREDENTIALS` | Server operator | Public policy | `false` | Restore prior value |
 | `CORS_ALLOW_HEADERS` | Server operator | Public policy | `Content-Type, Authorization` | Restore prior value |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Server operator | Secret | Firebase Admin unavailable if absent and no ADC | Restore/rotate credential |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Server operator | Secret | Base64-encoded service-account JSON, not raw JSON; Firebase Admin unavailable if absent and no ADC | Restore/rotate credential |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Server operator | Secret-bearing file path | Alternative Application Default Credentials path | Restore path/identity |
 | `CHAT_DB_PATH` | Server/data owner | Sensitive path | `server/chat.db` | Application rollback does not restore data |
 | `CHAT_UPLOAD_DIR` | Server/data owner | Sensitive path | Beside DB or `server/uploads` | Restore mount/config; separately recover objects |
@@ -144,12 +144,18 @@ App Service deployment remains a source/Oryx boundary:
 
 1. select a Linux App Service stack supporting Node 22;
 2. enable WebSockets;
-3. configure runtime settings without printing secrets;
-4. deploy the validated source ZIP;
-5. allow Oryx to restore production dependencies;
-6. record the resulting deployment ID and platform logs;
-7. verify process start, liveness, CORS, WebSocket upgrade, authentication, and
+3. set `SCM_DO_BUILD_DURING_DEPLOYMENT=true` and `ENABLE_ORYX_BUILD=true`
+   in the Linux App Service application settings, and verify those values before
+   upload; ZIP deployment does not restore dependencies by default;
+4. configure runtime settings without printing secrets;
+5. deploy the validated source ZIP;
+6. confirm in deployment logs that Oryx used Node 22 and restored dependencies;
+7. record the resulting deployment ID and platform logs;
+8. verify process start, liveness, CORS, WebSocket upgrade, authentication, and
    synthetic API behavior.
+
+See [App Service ZIP build automation](https://learn.microsoft.com/azure/app-service/deploy-zip#enable-build-automation-for-zip-deploy)
+for the platform's source-deployment behavior.
 
 The repository start contract is `npm start` → `node index.js`. A successful
 source ZIP upload is not a build-once attestation because platform restore/build
@@ -166,12 +172,9 @@ npm test
 npm run build
 ```
 
-The tracked Azure Static Web Apps deployment file is restored to its historical
-state. It is deployment automation, not evidence that local tests or validators
-ran, and it is not gated by the local documentation/provenance scripts. This
-portfolio change does not add or harden GitHub-hosted validation. Run the local
-commands above and record their exact revision before an operator authorizes a
-deployment. Future validation/deployment separation remains deferred work.
+The tracked Azure Static Web Apps deployment file remains in its existing state.
+Run the commands above before deployment. Validation/deployment separation
+remains deferred work.
 
 `window.APP_CONFIG.SIGNALING_URL` is the current preferred public runtime source.
 If it changes, validate the exact `config.js` served by SWA and confirm that no
@@ -243,7 +246,7 @@ TURN verification requires a controlled forced-relay call:
    revision, time, and reviewer;
 6. redact IPs, credentials, SDP, tokens, and personal data before publication.
 
-A successful credential response or allocation alone does not prove
+TURN verification also includes a selected relay candidate pair and
 bidirectional media.
 
 ## Verification checklist
@@ -295,23 +298,8 @@ configuration is claimed. Operators should separately own:
 TURN bandwidth, VM, Blob, App Service, Firebase, and egress costs are
 owner-managed and currently unquantified.
 
-## Superseded-document map
-
-The following files remain as historical pointers only and contain no current
-operational recipe:
-
-- `azure-deploy-complete.md`
-- `deployment-automation.md`
-- `server-deploy-howto.md`
-- `staticwebapp-config-solution.md`
-- `github-secrets-vs-environments.md`
-- `debugging-swa-env-vars.md`
-- `azure-swa-env-vars-not-working.md`
-- `webrtc-turn-explanation.md`
-- `turn/README.md`
-
 ## Legacy identifiers
 
 M² Calls is the public product name. `fp-video-calls` remains the repository
-identifier, `com.fpvideocalls` the Android package, `M2Calls` the build/output
-identifier, and M2 Video Calls the `mobile-v1.0` historical release name.
+identifier, `com.fpvideocalls` the Android package, and `M2Calls` the build/output
+identifier.

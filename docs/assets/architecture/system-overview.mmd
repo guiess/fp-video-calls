@@ -5,10 +5,27 @@ flowchart LR
   classDef boundary fill:#fff,stroke:#555,color:#111,stroke-dasharray: 6 4;
   classDef risk fill:#fff0f0,stroke:#8a1c1c,color:#111;
 
-  subgraph Public["Public/device trust boundary"]
+  subgraph DevicesAndRelay[" "]
+    direction TB
+    subgraph Public["Public/device trust boundary"]
     Web["M² Calls web\nReact + TypeScript"]:::client
     Android["M² Calls Android\nKotlin + Compose\ncom.fpvideocalls"]:::client
+    end
+    subgraph TurnBoundary["TURN VM/network boundary"]
+      Turn["coturn\nSTUN/TURN/TURNS"]:::service
+    end
+    Public ~~~ TurnBoundary
   end
+  style DevicesAndRelay fill:none,stroke:none
+
+  subgraph HostedServices[" "]
+    direction TB
+    subgraph Firebase["Firebase provider boundary"]
+      Auth["Firebase Authentication"]:::service
+      Firestore[("Firestore\nprofiles, contacts, location,\nhistory and private device data")]:::store
+      FCM["Firebase Cloud Messaging"]:::service
+      Storage[("Firebase Storage\npresent/configured;\nnot verified primary upload path")]:::risk
+    end
 
   subgraph Azure["Hosted application boundary"]
     SWA["Azure Static Web Apps\nstatic web hosting"]:::service
@@ -20,16 +37,9 @@ flowchart LR
     Local[("Local uploads fallback")]:::risk
   end
 
-  subgraph Firebase["Firebase provider boundary"]
-    Auth["Firebase Authentication"]:::service
-    Firestore[("Firestore\nprofiles, contacts, location,\nhistory and private device data")]:::store
-    FCM["Firebase Cloud Messaging"]:::service
-    Storage[("Firebase Storage\npresent/configured;\nnot verified primary upload path")]:::risk
+    Firebase ~~~ Azure
   end
-
-  subgraph TurnBoundary["TURN VM/network boundary"]
-    Turn["coturn\nSTUN/TURN/TURNS"]:::service
-  end
+  style HostedServices fill:none,stroke:none
 
   Web -->|"HTTPS: static assets"| SWA
   Web -->|"HTTPS/WSS: API, signaling, events"| Node

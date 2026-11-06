@@ -287,7 +287,7 @@ The product takes explicit ownership of TURN lease renewal and in-call transport
 
 ## Appendix — References
 
-- Repository architecture: `docs/architecture.md`
+- Repository architecture: `ARCHITECTURE.md`
 - Android one-time TURN fetch: `mobile-kotlin/app/src/main/java/com/fpvideocalls/webrtc/WebRTCManager.kt`
 - Android ignored TTL: `mobile-kotlin/app/src/main/java/com/fpvideocalls/data/CallApiService.kt`
 - Web TURN refresh reference: `web/src/services/webrtc.ts`

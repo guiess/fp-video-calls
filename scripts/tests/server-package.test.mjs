@@ -9,8 +9,7 @@ import {
   validateServerPackageEntries,
 } from "../validate-server-package.mjs";
 
-test("candidate package includes required server modules", async () => {
-  const entries = [
+const COMPLETE_PACKAGE = [
     "package.json",
     "package-lock.json",
     "index.js",
@@ -21,8 +20,23 @@ test("candidate package includes required server modules", async () => {
     "turn-config.js",
     "turn-credentials.js",
     "telemetry-validation.js",
-  ];
-  assert.deepEqual(validateServerPackageEntries(entries).errors, []);
+    "app-config.js",
+    "image-processor.js",
+    "link-preview.js",
+];
+
+test("candidate package includes required server modules", () => {
+  assert.deepEqual(validateServerPackageEntries(COMPLETE_PACKAGE).errors, []);
+});
+
+test("candidate package rejects each missing runtime module", () => {
+  for (const filename of COMPLETE_PACKAGE) {
+    const entries = COMPLETE_PACKAGE.filter((entry) => entry !== filename);
+    assert.ok(
+      validateServerPackageEntries(entries).errors.includes(`missing required module: ${filename}`),
+      `missing ${filename} must be rejected`,
+    );
+  }
 });
 
 test("candidate package rejects dependencies, data, credentials, logs, and nested archives", () => {

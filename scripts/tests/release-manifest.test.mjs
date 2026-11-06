@@ -94,6 +94,64 @@ test("tag and source mismatch is rejected for ci-built releases", async () => {
   assert.match(result.errors.join("\n"), /tagCommit.*sourceSha/);
 });
 
+test("both profiles require a bounded release identity and artifact filename", async () => {
+  for (const createManifest of [validLegacyManifest, validCiBuiltManifest]) {
+    for (const release of [undefined, null, 191, "", " ", "v".repeat(201)]) {
+      const manifest = createManifest();
+      manifest.release = release;
+      const result = await validateReleaseManifest(manifest);
+      assert.match(result.errors.join("\n"), /release must/);
+    }
+    const manifest = createManifest();
+    manifest.artifact.filename = "a".repeat(256);
+    const result = await validateReleaseManifest(manifest);
+    assert.match(result.errors.join("\n"), /artifact.filename/);
+  }
+});
+
+test("build evidence requires toolchain versions and valid lockfile hashes", async () => {
+  for (const [field, values] of [
+    ["toolchain", [{}, { java: "" }, { java: " " }, { java: 17 }]],
+    ["lockfileHashes", [{}, { "package-lock.json": "" }, { "package-lock.json": "not-a-hash" }, { "package-lock.json": 123 }]],
+  ]) {
+    for (const value of values) {
+      const manifest = validCiBuiltManifest();
+      manifest.build[field] = value;
+      const result = await validateReleaseManifest(manifest);
+      assert.match(result.errors.join("\n"), new RegExp(`build\\.${field}`));
+    }
+  }
+});
+
+test("ci-built provenance fields cannot be null", async () => {
+  for (const field of ["source", "build", "android", "tests", "signer", "attestations", "approval", "releaseChannel"]) {
+    const manifest = validCiBuiltManifest();
+    manifest[field] = null;
+    const result = await validateReleaseManifest(manifest);
+    assert.ok(result.errors.length > 0, `${field} cannot be null`);
+  }
+});
+
+test("release schema constrains required provenance and build evidence", async () => {
+  const schema = JSON.parse(await readFile(
+    path.join(REPOSITORY_ROOT, "docs/releases/release-manifest.schema.json"),
+    "utf8",
+  ));
+  const ci = schema.oneOf.find((profile) => profile.properties.profile.const === "ci-built");
+  for (const field of ["source", "build", "android", "tests", "signer", "attestations", "approval"]) {
+    assert.ok(ci.required.includes(field));
+    assert.equal(ci.properties[field].type, "object");
+    assert.ok(ci.properties[field].required.length > 0);
+  }
+  assert.equal(schema.properties.release.maxLength, 200);
+  assert.equal(schema.properties.artifact.properties.filename.maxLength, 255);
+  const build = ci.properties.build.properties;
+  assert.equal(build.toolchain.minProperties, 1);
+  assert.equal(build.lockfileHashes.minProperties, 1);
+  assert.equal(build.lockfileHashes.additionalProperties.$ref, "#/$defs/sha256");
+  assert.deepEqual(ci.properties.releaseChannel.enum, ["test", "prerelease", "production"]);
+});
+
 function validLegacyManifest() {
   return {
     schemaVersion: 1,

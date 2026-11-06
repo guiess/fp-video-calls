@@ -79,13 +79,11 @@ Azure, Firebase, GitHub, OpenStreetMap tile providers, and any TURN/DNS/TLS
 provider are governed by their own terms. WebRTC and related protocols are
 standards rather than owner-authored repository content.
 
-## Portfolio assets
+## Documentation assets
 
 - The architecture Mermaid source and rendered SVG are repository-authored.
-- Screenshot files in `docs/assets/screenshots` are runtime captures described
-  by [their provenance register](docs/assets/README.md).
-- The owner-prepared capture package and pixel/privacy-mask policy are recorded
-  in [fixtures/owner-prepared-v3.json](docs/assets/fixtures/owner-prepared-v3.json).
+- Screenshot files in `docs/assets/screenshots` are application captures
+  supplied by the owner, with personal information redacted.
 - No stock photo, third-party avatar, recorded human voice, or real face is
   approved for the current capture set.
 

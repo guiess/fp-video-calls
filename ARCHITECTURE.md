@@ -1,10 +1,10 @@
 # M² Calls architecture
 
-**Evidence baseline:** repository commit
-`482a83a83db50d75792610fc009f0fb87d24971d`, reviewed 2026-11-06.  
-**Purpose:** six evidence-backed five-minute interview sections.  
-**Scope:** implemented source behavior and explicit unknowns, not an aspirational
-redesign.
+- **Source baseline:** repository commit
+  `482a83a83db50d75792610fc009f0fb87d24971d`, reviewed 2026-11-06
+- **Purpose:** system architecture and runtime reference
+- **Scope:** implemented source behavior and explicit unknowns, not an
+  aspirational redesign
 
 ![M² Calls system overview showing clients, signaling, media, storage, and trust boundaries](docs/assets/architecture/system-overview.svg)
 
@@ -17,8 +17,9 @@ text equivalent follows so color and graphics are not required.
 Browser and Android clients obtain identity from Firebase Authentication for
 authenticated application flows. They call the Node/Express API over HTTPS and
 connect to Socket.IO over WSS. The server verifies Firebase ID tokens for
-authenticated REST chat routes, but guest rooms, selected Socket.IO events, and
-TURN issuance have different or weaker identity boundaries.
+authenticated REST chat routes. Guest rooms and TURN issuance support
+account-free access; private Socket.IO identity and some room/call controls have
+missing checks described in [SECURITY.md](SECURITY.md).
 
 The Node service relays SDP offers, SDP answers, ICE candidates, call events,
 typing events, and opted-in telemetry. Audio/video never passes through the
@@ -37,9 +38,9 @@ primary-speaker choice, call signaling, telemetry subscriptions, and rate state
 are in memory. FCM carries incoming-call/cancel/answer notification metadata to
 Android devices.
 
-## 0–5 minutes: component map
+## Component map
 
-| Component | Responsibility | State and boundary | Evidence |
+| Component | Responsibility | State and boundary | Source |
 |---|---|---|---|
 | React/TypeScript web | Authenticated shell, guest rooms, calling, chat, location views, diagnostics | Browser trust boundary; public runtime config | [web/src](web/src) |
 | Kotlin/Compose Android | Calling, FCM/full-screen ringing, chat, contacts, location collection/history, diagnostics | Device permissions and local persistence | [mobile app source](mobile-kotlin/app/src/main) |
@@ -48,16 +49,16 @@ Android devices.
 | Firebase Auth/Firestore/FCM | Identity, profiles/contacts/history/location, private device data, notifications | Provider-managed; rules vary by collection | [firestore.rules](firestore.rules) |
 | Blob/local attachment adapter | Upload, download, delete, SAS/local URL selection | Deployment-selected at server startup | [server/blob-storage.js](server/blob-storage.js) |
 | coturn | STUN/TURN allocations and relayed media | Separate VM/network/security boundary | [server TURN contract](server/turn-config.js) |
-| Azure SWA/App Service | Web hosting and Node hosting | Live configuration/revision not proven by this repository | [deployment guide](docs/azure-deploy.md) |
+| Azure SWA/App Service | Web hosting and Node hosting | Live configuration and deployed revision are not recorded in this repository | [deployment guide](docs/azure-deploy.md) |
 
-**Trade-off:** one Node process plus SQLite and in-memory state keeps the portfolio
-deployment understandable, but it couples scaling/failover to process and local
-disk behavior.
+**Trade-off:** one Node process plus SQLite and in-memory state keeps the
+personal-use deployment manageable, but it couples scaling/failover to process
+and local disk behavior.
 
 **Limitation:** direct client access to Firebase and mixed server persistence mean
 this is not a system-wide Clean Architecture implementation.
 
-## 5–10 minutes: WebRTC signaling, media, and TURN
+## WebRTC signaling, media, and TURN
 
 1. A participant joins a room through Socket.IO.
 2. The server records the participant in an in-memory roster and sends the
@@ -86,7 +87,7 @@ media where possible, but uplink use grows with each peer.
 [#14](https://github.com/guiess/fp-video-calls/issues/14) preclude reliability or
 capacity guarantees.
 
-## 10–15 minutes: identity, storage, and privacy boundaries
+## Identity, storage, and privacy boundaries
 
 | Boundary | Authentication/authorization observed | Data visible |
 |---|---|---|
@@ -100,8 +101,11 @@ capacity guarantees.
 Data inventory and retention evidence are maintained in
 [SECURITY.md](SECURITY.md). Reviewed Firestore rules allow any authenticated user
 to read stored location current/history. Storage rules allow broad authenticated
-reads under chat paths. The local-file route is unauthenticated. These are
-runtime limitations, not documentation fixes.
+reads under chat paths. The server upload adapter uses Blob or filesystem
+storage; Blob downloads use expiring bearer links, while filesystem links do
+not expire. These storage modes have different access-control requirements.
+Guest TURN issuance supports account-free calls and requires separate abuse
+controls.
 
 **Trade-off:** Firebase reduces identity/device-notification implementation cost,
 while direct client access and server APIs create multiple authorization models
@@ -110,7 +114,7 @@ that must be reasoned about separately.
 **Limitation:** current source does not establish a uniform capability model for
 rooms, files, location, invitations, or TURN.
 
-## 15–20 minutes: runtime flows and architectural trade-offs
+## Runtime flows and architectural trade-offs
 
 ### Guest room lifecycle
 
@@ -140,8 +144,8 @@ string exists; local files are the fallback.
 
 Android requests fine/coarse/background location, runs a foreground service,
 writes current/history documents, and may resume configured behavior after boot.
-Clients read and merge history for display. Cleanup is client-triggered and does
-not prove a server-enforced physical retention deadline.
+Clients read and merge history for display. Cleanup is client-triggered; no
+server-enforced physical retention deadline is configured.
 
 ### Telemetry lifecycle
 
@@ -154,19 +158,19 @@ telemetry. Prohibited fields are defined by
 
 **Trade-off:** specialized code around recovery and storage uses useful
 interfaces/adapters, but introducing a repository-wide abstraction rewrite would
-expand scope without changing the present product evidence.
+expand scope without improving the current personal-use architecture.
 
 **Limitation:** state ownership is mixed across clients, Firebase, SQLite, Blob,
 local disk, and memory.
 
-## 20–25 minutes: tests, recovery, and known defects
+## Tests, recovery, and known defects
 
-| Evidence class | Present | Not established |
+| Area | Present | Current gaps |
 |---|---|---|
 | Web unit tests | Config, encryption format/display, location, recovery, telemetry | Browser E2E and current cross-device interop |
 | Server tests | Storage, image processing, previews, quotas, TURN, telemetry | Complete authorization and live dependency integration |
-| Android unit tests | Calls, chat models, location, notifications, recovery, TURN lease, telemetry | Device/UI suite and current historical APK compatibility |
-| Documentation tests | Required files, names, links, images, and manifests | Human audience trials until separately recorded |
+| Android unit tests | Calls, chat models, location, notifications, recovery, TURN lease, telemetry | Device/UI suite and cross-device integration |
+| Documentation tests | Required files, names, links, images, and manifests | Manual review remains part of documentation updates |
 
 The canonical commands are in
 [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md). Documentation distinguishes
@@ -176,10 +180,7 @@ tests present, tests executed locally, and live observations.
 but real WebRTC behavior depends on browsers, devices, networks, TURN, and
 signaling timing.
 
-**Limitation:** local results are not an automated merge or deployment gate;
-open issues remain part of the evidence.
-
-## 25–30 minutes: deployment, provenance, and operations
+## Deployment, provenance, and operations
 
 The web is built for Azure Static Web Apps, the Node application for Azure App
 Service/Oryx, and coturn for a separately managed VM. Runtime web signaling
@@ -188,17 +189,16 @@ configuration prefers `window.APP_CONFIG.SIGNALING_URL`; Vite values and
 settings. A source ZIP accepted by App Service is not a build-once artifact
 because Oryx may restore/build after upload.
 
-The historical `mobile-v1.0` APK is preserved byte-for-byte and described by a
-[legacy receipt](docs/releases/mobile-v1.0-receipt.json). Its tag commit and
-unknown build-source commit are separate facts. Future binaries can use the
+Artifact records and verification procedures are maintained in
+[release documentation](docs/releases/README.md). Future binaries can use the
 deferred `ci-built` manifest profile in
 [release-manifest.schema.json](docs/releases/release-manifest.schema.json),
 independent hashing, Android signature verification, test evidence, and separate
 build/release attestation identities. No release-build automation is implemented
-by this portfolio change.
+in this repository.
 
-**Trade-off:** retaining manual server/TURN operations avoids an unauthorized
-infrastructure redesign, but weakens repeatability compared with reviewed IaC.
+**Trade-off:** manual server/TURN operations keep the deployment simple, but
+provide less repeatability than infrastructure as code.
 
 **Limitation:** live resource configuration, deployed revision, rollback timing,
 data recovery, monitoring, quotas, and cost alerts remain operator-verified or
@@ -221,8 +221,7 @@ unknown until recorded.
 - Document actual mixed boundaries rather than claim system-wide Clean
   Architecture. `[CLEAN-ARCH]`
 - Keep signaling separate from encrypted media transport. `[CUSTOM: WebRTC]`
-- Preserve immutable historical artifact identity and distinguish unknown
-  provenance. `[GOOGLE-ENG]`
+- Preserve immutable artifact identity and source provenance. `[GOOGLE-ENG]`
 - Depend on manifest contracts and validators rather than release prose.
   `[HEXAGONAL]`
 - Keep documentation validation separate from trusted deployment authorization.
