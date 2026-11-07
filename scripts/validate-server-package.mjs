@@ -9,6 +9,7 @@ const REQUIRED_FILES = [
   "package-lock.json",
   "index.js",
   "auth-middleware.js",
+  "chat-socket-auth.js",
   "chat-db.js",
   "chat-routes.js",
   "blob-storage.js",
