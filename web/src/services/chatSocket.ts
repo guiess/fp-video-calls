@@ -1,8 +1,11 @@
 import io, { Socket } from "socket.io-client";
 import { auth } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
 
 let chatSocket: Socket | null = null;
 let connected = false;
+let authenticationAttempt = 0;
+let unsubscribeAuth: (() => void) | null = null;
 
 export type ChatMessageEvent = {
   id: string;
@@ -64,12 +67,19 @@ export function ensureChatSocket(): Socket {
   });
 
   chatSocket.on("disconnect", () => {
+    authenticationAttempt++;
     connected = false;
     console.log("[chat-socket] disconnected");
   });
 
   chatSocket.on("connect_error", (err: any) => {
     console.warn("[chat-socket] connect error:", err.message);
+  });
+
+  chatSocket.on("error", ({ code }: { code?: string }) => {
+    if (code === "AUTH_REQUIRED" || code === "AUTH_FAILED" || code === "FIREBASE_NOT_CONFIGURED") {
+      console.warn("[chat-socket] authentication rejected:", code);
+    }
   });
 
   chatSocket.on("chat_message", (msg: ChatMessageEvent) => {
@@ -101,17 +111,38 @@ export function ensureChatSocket(): Socket {
     listeners.forEach((h) => h.onCallAnswered?.(data));
   });
 
+  let currentUid = auth.currentUser?.uid;
+  unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+    if (currentUid !== user?.uid) {
+      currentUid = user?.uid;
+      authenticationAttempt++;
+      chatSocket?.disconnect();
+      chatSocket?.connect();
+    } else {
+      void authenticateSocket();
+    }
+  });
+
   return chatSocket;
 }
 
 /** Send chat_auth with Firebase ID token. Called on connect and can be called later. */
 export async function authenticateSocket() {
-  const uid = auth.currentUser?.uid;
-  if (uid && chatSocket?.connected) {
-    let token: string | undefined;
-    try { token = await auth.currentUser?.getIdToken(); } catch {}
-    chatSocket.emit("chat_auth", { uid, token });
-    console.log("[chat-socket] authenticated as", uid);
+  const user = auth.currentUser;
+  const socket = chatSocket;
+  const connectionId = socket?.id;
+  const attempt = ++authenticationAttempt;
+  if (!user || !socket?.connected) return;
+  const isCurrent = () => attempt === authenticationAttempt && socket === chatSocket &&
+    socket.connected && socket.id === connectionId && user === auth.currentUser;
+  try {
+    const token = await user.getIdToken();
+    if (isCurrent()) socket.emit("chat_auth", { uid: user.uid, token });
+  } catch {
+    if (!isCurrent()) return;
+    console.warn("[chat-socket] token acquisition failed");
+    // A rejected auth attempt also revokes any previous private subscription.
+    socket.emit("chat_auth", {});
   }
 }
 
@@ -133,6 +164,9 @@ export function emitTyping(conversationId: string, typing: boolean) {
 }
 
 export function disconnectChatSocket() {
+  authenticationAttempt++;
+  unsubscribeAuth?.();
+  unsubscribeAuth = null;
   chatSocket?.disconnect();
   chatSocket = null;
   connected = false;

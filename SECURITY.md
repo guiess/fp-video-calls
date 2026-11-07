@@ -55,11 +55,34 @@ Readers must use owner-scoped paths/queries, not collection-group queries.
 This policy is deployed to project `fp-video-calls`, database `(default)`.
 Deployment details are in the [verification records](docs/validation-status.md#firestore-location-rules).
 
+### Private socket identity
+
+`chat_auth` requires a Firebase ID token and derives the private user-room UID
+from the verified token, ignoring any claimed `uid`. Missing/malformed tokens
+emit `error` with `AUTH_REQUIRED`; invalid tokens emit `AUTH_FAILED`; unavailable
+Firebase Admin emits `FIREBASE_NOT_CONFIGURED`. Tokens are bounded to 16 KiB
+and verified UIDs to Firebase's 128-character limit; control characters are
+rejected. Tokens and provider errors are not logged. `[OWASP]`
+
+Every attempt clears the previous private identity and leaves its private room
+before verification. Only the latest connected attempt can establish identity;
+room mutations are serialized so delayed verification or adapter joins cannot
+restore an older subscription. Adapter failures disconnect the socket rather
+than risk retaining private delivery. Ordinary token rejection does not
+disconnect guests or remove their call-room membership. `[OWASP]`
+
+Web obtains fresh tokens on connection/reconnection and observes auth restore,
+account changes, and sign-out. Identity changes reset the private socket
+connection without clearing event subscribers; stale token requests are
+discarded. Token acquisition failure is logged without provider details and
+sends a rejected empty auth attempt to clear any previous private subscription.
+Android already obtains a token for each connection and reconnect, and its
+application auth-state listener replaces/disconnects the socket on identity
+changes. No Firebase login is required for a socket connection or guest calls.
+These are source guarantees, not evidence that this revision is deployed.
+
 ### Other known access-control gaps
 
-- **Private socket identity:** `chat_auth` verifies a token only when Firebase
-  Admin is ready and a token is supplied. Otherwise a claimed UID can join a
-  private user-event room without proving that identity.
 - **Room controls:** some events trust room/user identifiers without checking
   the acting socket's authority. In particular, `close_room` does not verify
   membership or host status. Account-free joining is intentional; unchecked

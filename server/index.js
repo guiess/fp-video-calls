@@ -15,6 +15,7 @@ import chatRoutes from "./chat-routes.js";
 import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
+import { registerChatAuthentication } from "./chat-socket-auth.js";
 import { isBlobStorageConfigured } from "./blob-storage.js";
 import {
   isPlainObject,
@@ -174,7 +175,7 @@ const rooms = new Map();
 // participants info extended: { socketId, displayName, micMuted?: boolean }
 
 const OBJECT_PAYLOAD_EVENTS = new Set([
-  "chat_auth", "chat_typing", "join_room", "set_primary", "leave_room",
+  "chat_typing", "join_room", "set_primary", "leave_room",
   "close_room", "offer", "answer", "ice_candidate", "chat_message",
   "mic_state_changed", "camera_state_changed", "telemetry_subscribe",
   "telemetry_unsubscribe", "telemetry_data"
@@ -487,25 +488,9 @@ io.on("connection", (socket) => {
     else socket.emit("error", { code: "BAD_REQUEST" });
   });
 
-  // Chat: user identifies themselves with Firebase ID token
-  socket.on("chat_auth", async ({ uid, token }) => {
-    if (!uid) return;
-    // Verify token if Firebase Admin is ready and token is provided
-    if (firebaseReady && token) {
-      try {
-        const decoded = await admin.auth().verifyIdToken(token);
-        if (decoded.uid !== uid) {
-          console.warn(`[chat] Token UID mismatch: claimed ${uid}, actual ${decoded.uid}`);
-          return socket.emit("error", { code: "AUTH_FAILED" });
-        }
-      } catch (e) {
-        console.warn(`[chat] Token verification failed for ${uid}:`, e.message);
-        return socket.emit("error", { code: "AUTH_FAILED" });
-      }
-    }
-    socket.join(`user:${uid}`);
-    socket._chatUid = uid;
-    console.log(`[chat] ${uid} joined user room via socket ${socket.id}`);
+  registerChatAuthentication(socket, {
+    isReady: () => firebaseReady,
+    verifyIdToken: (token) => admin.auth().verifyIdToken(token),
   });
 
   // Chat: typing indicator

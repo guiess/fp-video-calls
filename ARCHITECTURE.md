@@ -18,8 +18,8 @@ Browser and Android clients obtain identity from Firebase Authentication for
 authenticated application flows. They call the Node/Express API over HTTPS and
 connect to Socket.IO over WSS. The server verifies Firebase ID tokens for
 authenticated REST chat routes. Guest rooms and TURN issuance support
-account-free access; private Socket.IO identity and some room/call controls have
-missing checks described in [SECURITY.md](SECURITY.md).
+account-free access; private Socket.IO identity requires a verified Firebase ID
+token. Remaining room/call control gaps are described in [SECURITY.md](SECURITY.md).
 
 The Node service relays SDP offers, SDP answers, ICE candidates, call events,
 typing events, and opted-in telemetry. Audio/video never passes through the
@@ -92,7 +92,7 @@ capacity guarantees.
 | Boundary | Authentication/authorization observed | Data visible |
 |---|---|---|
 | Authenticated REST chat | Firebase ID token middleware | Conversation/message/file metadata and SQLite-backed results |
-| Socket.IO `chat_auth` | Token verified only when Firebase Admin is ready **and** a token is supplied | User-room events and typing/call delivery |
+| Socket.IO `chat_auth` | Required Firebase ID token; private UID derived solely from verified token; fails closed when Admin is unavailable | User-room events and typing/call delivery |
 | Guest rooms/signaling | Caller-supplied room/user fields plus optional room password | Roster, SDP, ICE, transient room chat |
 | TURN issuance | Bounded caller-supplied `userId`/`roomId`; no application token | Time-limited TURN username/credential/URLs |
 | Firestore | Collection-specific rules | Profiles, contacts, histories, location, private subcollections |
