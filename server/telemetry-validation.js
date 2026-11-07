@@ -1,11 +1,16 @@
 export const TELEMETRY_MAX_PAYLOAD_BYTES = 4096;
 export const TELEMETRY_MAX_IDENTIFIER_LENGTH = 128;
 export const TELEMETRY_MAX_METRIC_STRING_LENGTH = 32;
+export const TELEMETRY_TEXT_VERSION = 2;
+export const TELEMETRY_MAX_TEXT_LENGTH = 2048;
 export const TELEMETRY_RATE_WINDOW_MS = 10_000;
 export const TELEMETRY_MAX_SAMPLES_PER_WINDOW = 20;
 
 const TELEMETRY_ENVELOPE_KEYS = new Set([
   "roomId", "roomName", "senderId", "senderName", "peerId", "ts", "metrics"
+]);
+const TELEMETRY_TEXT_KEYS = new Set([
+  "roomId", "roomName", "senderId", "senderName", "peerId", "ts", "version", "text"
 ]);
 const TELEMETRY_NUMBER_METRICS = new Set([
   "rttMs", "availIncomingKbps", "availOutgoingKbps", "jbMs",
@@ -19,23 +24,44 @@ const TELEMETRY_STRING_METRICS = new Set([
 
 export function validateTelemetrySample(payload, room, senderId, now = Date.now()) {
   if (!isPlainObject(payload) || exceedsTelemetrySize(payload)) return null;
-  if (!hasOnlyKeys(payload, TELEMETRY_ENVELOPE_KEYS)) return null;
   if (!isValidEnvelope(payload, room, senderId, now)) return null;
-  const metrics = sanitizeTelemetryMetrics(payload.metrics);
-  if (!metrics) return null;
+  const body = validateTelemetryBody(payload);
+  if (!body) return null;
   const sender = room.participants.get(senderId);
-  return {
+  const sample = {
     roomId: payload.roomId,
     roomName: boundedRoomName(payload.roomName, payload.roomId),
     senderId,
     senderName: boundedRoomName(sender?.displayName, "Guest"),
     peerId: payload.peerId,
     ts: payload.ts,
-    metrics
+    ...body
   };
+  if (sample.version === TELEMETRY_TEXT_VERSION && ![
+    sample.roomId, sample.roomName, sample.senderId, sample.senderName, sample.peerId,
+  ].every(isDiagnosticText)) return null;
+  return exceedsTelemetrySize(sample) ? null : sample;
+}
+
+function validateTelemetryBody(payload) {
+  if (Object.hasOwn(payload, "version")) {
+    if (payload.version !== TELEMETRY_TEXT_VERSION || !hasOnlyKeys(payload, TELEMETRY_TEXT_KEYS)) return null;
+    if (!Number.isSafeInteger(payload.ts) || !isDiagnosticText(payload.text)) return null;
+    return { version: TELEMETRY_TEXT_VERSION, text: payload.text };
+  }
+  if (!hasOnlyKeys(payload, TELEMETRY_ENVELOPE_KEYS)) return null;
+  const metrics = sanitizeTelemetryMetrics(payload.metrics);
+  return metrics ? { metrics } : null;
+}
+
+/** Diagnostic text remains opaque; preserve Unicode and LF without rendering it. */
+export function isDiagnosticText(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= TELEMETRY_MAX_TEXT_LENGTH
+    && !/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069\uD800-\uDFFF]/u.test(value);
 }
 
 function isValidEnvelope(payload, room, senderId, now) {
+  if (!isBoundedString(senderId, TELEMETRY_MAX_IDENTIFIER_LENGTH) || !room?.participants?.has(senderId)) return false;
   if (!isBoundedString(payload.roomId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return false;
   if (!isBoundedString(payload.peerId, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return false;
   if (!isOptionalBoundedString(payload.roomName, TELEMETRY_MAX_IDENTIFIER_LENGTH)) return false;

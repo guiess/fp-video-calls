@@ -61,6 +61,8 @@ function makeSocket(id) {
     to: (room) => harness.broadcast(room, id),
     receive: (event, payload, ack) => handlers.get(event)(payload, ack),
   };
+  socket.rooms = socket.channels;
+  socket.connected = true;
   harness.sockets.set(id, socket);
   connection(socket);
   return socket;

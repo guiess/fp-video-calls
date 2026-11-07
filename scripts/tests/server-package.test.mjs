@@ -21,6 +21,7 @@ const COMPLETE_PACKAGE = [
     "turn-config.js",
     "turn-credentials.js",
     "telemetry-validation.js",
+    "telemetry-relay.js",
     "app-config.js",
     "image-processor.js",
     "link-preview.js",

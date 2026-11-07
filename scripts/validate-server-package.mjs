@@ -19,6 +19,7 @@ const REQUIRED_FILES = [
   "turn-config.js",
   "turn-credentials.js",
   "telemetry-validation.js",
+  "telemetry-relay.js",
 ];
 const PROHIBITED_PATHS = [
   /(^|\/)node_modules(\/|$)/i,

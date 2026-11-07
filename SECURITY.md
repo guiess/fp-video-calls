@@ -191,6 +191,22 @@ signed URLs, or other secrets. Open issue
 usability; issue [#17](https://github.com/guiess/fp-video-calls/issues/17)
 tracks extensibility/delay diagnostics.
 
+The relay preserves deployed v1 metrics and v2 text diagnostics. V2 text is
+opaque: Unicode/LF remain unchanged, while other C0 controls, C1/bidi controls
+and unpaired surrogates are rejected. Text is limited to 2048 UTF-16 code units;
+both incoming and derived envelopes must fit 4096 bytes. Exact schema,
+timestamp, bounded roster sender and derived header checks apply. Shape checks
+are not a content/PII scrubber; the prohibition above still applies. `[OWASP]`
+
+Publishing requires the sender's own opt-in. Delivery rechecks each subscriber's
+current socket, roster and internal `room:` channel authority; stale recipients
+are removed. `TELEMETRY_FORBIDDEN`, `TELEMETRY_UNSUPPORTED_VERSION`,
+`TELEMETRY_INVALID` and `TELEMETRY_RATE_LIMITED` distinguish rejections.
+The per-socket/room quota is twenty samples per ten seconds and survives
+unsubscribe, leave, close and rejoin; disconnect clears it and consent.
+New replacement sockets require fresh consent. Source preservation is pending
+coordinated deployment, not a change to guest account identity or location rules.
+
 ## Device permissions
 
 The Android manifest requests:

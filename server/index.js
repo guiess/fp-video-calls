@@ -17,11 +17,8 @@ import chatDb from "./chat-db.js";
 import { requireAuth } from "./auth-middleware.js";
 import { registerChatAuthentication } from "./chat-socket-auth.js";
 import { isBlobStorageConfigured } from "./blob-storage.js";
-import {
-  isPlainObject,
-  isTelemetryRateLimited,
-  validateTelemetrySample
-} from "./telemetry-validation.js";
+import { isPlainObject } from "./telemetry-validation.js";
+import { registerTelemetryHandlers } from "./telemetry-relay.js";
 import { parseTurnRequestQuery, resolveTurnTtlSeconds } from "./turn-config.js";
 import { issueTurnCredentials } from "./turn-credentials.js";
 
@@ -489,7 +486,7 @@ app.get("/room/:roomId/meta", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  const telemetryRateByRoom = new Map();
+  registerTelemetryHandlers(io, socket, { rooms, roomChannel });
   socket.use(([eventName, payload], next) => {
     if (!OBJECT_PAYLOAD_EVENTS.has(eventName) || isPlainObject(payload)) return next();
     if (eventName.startsWith("telemetry_")) rejectTelemetry(socket, "TELEMETRY_INVALID");
@@ -636,7 +633,6 @@ io.on("connection", (socket) => {
     if (!actorId) return;
     if (userId !== undefined && userId !== actorId) return rejectRoomControl(socket, "ROOM_FORBIDDEN");
     const room = rooms.get(roomId);
-    telemetryRateByRoom.delete(roomId);
     if (room) {
       room.participants.delete(actorId);
       room.telemetrySubscribers?.delete(socket.id);
@@ -658,7 +654,6 @@ io.on("connection", (socket) => {
   // Any currently joined member can close the room for everybody.
   socket.on("close_room", ({ roomId }, ack) => {
     if (!requireRoomMember(socket, roomId, ack)) return;
-    telemetryRateByRoom.delete(roomId);
     const room = rooms.get(roomId);
     // Ack-aware clients perform their own teardown; legacy clients receive ROOM_CLOSED.
     const recipients = typeof ack === "function" ? socket.to(roomChannel(roomId)) : io.to(roomChannel(roomId));
@@ -725,52 +720,6 @@ io.on("connection", (socket) => {
       room.participants.set(userId, p);
     }
     io.to(roomChannel(roomId)).emit("peer_camera_state", { userId, off: !!off });
-  });
-
-  // ── Telemetry relay ──────────────────────────────────────────────
-  // Opted-in room members both publish and subscribe. Membership and identity
-  // are derived from the joined socket; client-provided identity is ignored.
-  socket.on("telemetry_subscribe", ({ roomId }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
-    if (!getUserIdBySocket(roomId, socket.id)) {
-      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
-    }
-    if (!room.telemetrySubscribers) room.telemetrySubscribers = new Set();
-    room.telemetrySubscribers.add(socket.id);
-    console.log(`[telemetry] ${socket.id} subscribed in ${roomId} (${room.telemetrySubscribers.size} total)`);
-  });
-
-  socket.on("telemetry_unsubscribe", ({ roomId }) => {
-    telemetryRateByRoom.delete(roomId);
-    const room = rooms.get(roomId);
-    if (!room) return;
-    if (!getUserIdBySocket(roomId, socket.id)) {
-      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
-    }
-    room.telemetrySubscribers?.delete(socket.id);
-  });
-
-  socket.on("telemetry_data", (payload) => {
-    if (!isPlainObject(payload)) return rejectTelemetry(socket, "TELEMETRY_INVALID");
-    const { roomId } = payload;
-    const room = rooms.get(roomId);
-    if (!room) return;
-    const authenticatedSenderId = getUserIdBySocket(roomId, socket.id);
-    if (!authenticatedSenderId) {
-      return rejectTelemetry(socket, "TELEMETRY_FORBIDDEN");
-    }
-    const sample = validateTelemetrySample(payload, room, authenticatedSenderId);
-    if (!sample) return rejectTelemetry(socket, "TELEMETRY_INVALID");
-    if (isTelemetryRateLimited(telemetryRateByRoom, roomId, Date.now())) {
-      return rejectTelemetry(socket, "TELEMETRY_RATE_LIMITED");
-    }
-    const subs = room?.telemetrySubscribers;
-    if (!subs || subs.size === 0) return; // nobody listening → drop
-    for (const sid of subs) {
-      if (sid === socket.id) continue; // don't echo to sender
-      io.to(sid).emit("telemetry_data", sample);
-    }
   });
 
   socket.on("disconnect", () => {

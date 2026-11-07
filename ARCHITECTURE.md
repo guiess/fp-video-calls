@@ -196,6 +196,16 @@ telemetry. Prohibited fields are defined by
 [server telemetry validation](server/telemetry-validation.js) and
 [Android recovery policy](mobile-kotlin/app/src/main/java/com/fpvideocalls/webrtc/RecoveryTelemetryPolicy.kt).
 
+The source preserves deployed v1 metric envelopes and v2 opaque diagnostic
+text, including Unicode/LF, with 2048 text-code-unit and 4096 payload-byte limits.
+[The relay](server/telemetry-relay.js) requires publisher consent and current
+sender/recipient roster, socket, and internal `room:` channel membership.
+Unsupported versions have a distinct error. Twenty samples per ten seconds
+are tracked per socket/room across unsubscribe, leave, close and rejoin;
+disconnect clears the counter and consent. Replacement sockets never inherit
+consent. These compatibility changes await the coordinated deployment and do
+not alter private auth, guest control authority, or Firebase rules. `[OWASP]`
+
 **Trade-off:** specialized code around recovery and storage uses useful
 interfaces/adapters, but introducing a repository-wide abstraction rewrite would
 expand scope without improving the current personal-use architecture.

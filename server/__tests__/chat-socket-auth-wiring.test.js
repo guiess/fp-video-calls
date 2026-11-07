@@ -92,6 +92,90 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
+async function telemetryPair() {
+  const alice = await connect();
+  const bob = await connect();
+  const roomId = `telemetry-${alice.socket.id}`;
+  for (const [client, userId] of [[alice, "alice"], [bob, "bob"]]) {
+    client.send("join_room", { roomId, userId, displayName: userId });
+    await vi.waitFor(() => expect(client.hasEvent("room_joined")).toBe(true));
+  }
+  await consentBarrier(bob, roomId, "bob");
+  return { alice, bob, roomId };
+}
+
+async function consentBarrier(client, roomId, userId = "alice") {
+  const before = client.packets.filter(([event]) => event === "room_joined").length;
+  client.send("telemetry_subscribe", { roomId });
+  client.send("join_room", { roomId, userId, displayName: userId });
+  await vi.waitFor(() => expect(client.packets.filter(([event]) => event === "room_joined").length).toBeGreaterThan(before));
+}
+
+describe("integrated telemetry amendment over actual Socket.IO", () => {
+  it("preserves text-v2/metrics and blocks publishers without consent", async () => {
+    const { alice, bob, roomId } = await telemetryPair();
+    const metrics = { roomId, peerId: "bob", ts: Date.now(), metrics: { rttMs: 1 } };
+    alice.send("telemetry_data", metrics);
+    await vi.waitFor(() => expect(alice.packets).toContainEqual(["telemetry_error", { code: "TELEMETRY_FORBIDDEN" }]));
+    await consentBarrier(alice, roomId);
+    alice.send("telemetry_data", metrics);
+    alice.send("telemetry_data", { roomId, peerId: "bob", ts: Date.now(), version: 2, text: "line 1\n\u2603" });
+    await vi.waitFor(() => expect(bob.packets.filter(([event]) => event === "telemetry_data")).toHaveLength(2));
+    expect(bob.packets.find(([event, sample]) => event === "telemetry_data" && sample.version === 2)?.[1])
+      .toMatchObject({ senderId: "alice", senderName: "alice", text: "line 1\n\u2603", roomId });
+  });
+
+  it("rejects unsupported versions and malformed payloads with explicit standard errors", async () => {
+    const { alice, roomId } = await telemetryPair();
+    await consentBarrier(alice, roomId);
+    alice.send("telemetry_data", { roomId, peerId: "bob", ts: Date.now(), version: 3, text: "synthetic" });
+    await vi.waitFor(() => expect(alice.packets).toContainEqual(["telemetry_error", { code: "TELEMETRY_UNSUPPORTED_VERSION" }]));
+    alice.send("telemetry_data", null);
+    await vi.waitFor(() => expect(alice.packets).toContainEqual(["telemetry_error", { code: "TELEMETRY_INVALID" }]));
+  });
+
+  it.each(["unsubscribe", "leave", "close"])("keeps quota across actual %s/rejoin events", async transition => {
+    const { alice, bob, roomId } = await telemetryPair();
+    await consentBarrier(alice, roomId);
+    const startedAt = Date.now();
+    for (let index = 0; index < 20; index++) {
+      alice.send("telemetry_data", { roomId, peerId: "bob", ts: Date.now(), metrics: { rttMs: 1 } });
+    }
+    await vi.waitFor(() => expect(bob.packets.filter(([event]) => event === "telemetry_data")).toHaveLength(20));
+    if (transition === "unsubscribe") alice.send("telemetry_unsubscribe", { roomId });
+    if (transition === "leave") alice.send("leave_room", { roomId, userId: "alice" });
+    if (transition === "close") {
+      await alice.transport.timeout(5000).emitWithAck("close_room", { roomId });
+      bob.send("join_room", { roomId, userId: "bob", displayName: "bob" });
+      bob.send("telemetry_subscribe", { roomId });
+    }
+    alice.send("join_room", { roomId, userId: "alice", displayName: "alice" });
+    await consentBarrier(alice, roomId);
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    alice.send("telemetry_data", { roomId, peerId: "bob", ts: Date.now(), metrics: { rttMs: 1 } });
+    await vi.waitFor(() => expect(alice.packets).toContainEqual(["telemetry_error", { code: "TELEMETRY_RATE_LIMITED" }]));
+    expect(bob.packets.filter(([event]) => event === "telemetry_data")).toHaveLength(20);
+  });
+
+  it("replacement revokes old telemetry delivery and requires fresh consent from the new socket", async () => {
+    const { alice, bob, roomId } = await telemetryPair();
+    await consentBarrier(alice, roomId);
+    const replacement = await connect();
+    replacement.send("join_room", { roomId, userId: "alice", displayName: "alice" });
+    await vi.waitFor(() => expect(replacement.hasEvent("room_joined")).toBe(true));
+    const payload = { roomId, peerId: "bob", ts: Date.now(), version: 2, text: "synthetic" };
+    alice.send("telemetry_data", payload);
+    replacement.send("telemetry_data", payload);
+    for (const client of [alice, replacement]) {
+      await vi.waitFor(() => expect(client.packets).toContainEqual(["telemetry_error", { code: "TELEMETRY_FORBIDDEN" }]));
+    }
+    await consentBarrier(replacement, roomId);
+    replacement.send("telemetry_data", payload);
+    await vi.waitFor(() => expect(bob.hasEvent("telemetry_data")).toBe(true));
+    expect(alice.socket.rooms.has(`room:${roomId}`)).toBe(false);
+  });
+});
+
 describe("index.js private authentication wiring over Socket.IO", () => {
   it("allows guest connection and ordinary room join without Firebase login", async () => {
     const client = await connect();
