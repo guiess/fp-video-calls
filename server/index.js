@@ -802,7 +802,9 @@ app.post("/room/:roomId/close", (_req, res) =>
 );
 
 function isRoomId(value) {
-  return typeof value === "string" && value.length <= MAX_ROOM_ID_LENGTH && /^[A-Za-z0-9_-]+$/.test(value);
+  return typeof value === "string" && value.length <= MAX_ROOM_ID_LENGTH &&
+    /^[^\u0000-\u001f\u007f]+$/.test(value) &&
+    !value.startsWith("user:") && !value.startsWith("room:");
 }
 
 function isParticipantId(value) {

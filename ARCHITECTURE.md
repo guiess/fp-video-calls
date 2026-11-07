@@ -136,7 +136,8 @@ persistent authenticated identities or host capabilities. `[OWASP]` `[CUSTOM]`
 
 Room group channels are internally prefixed with `room:` to isolate them from
 private `user:` and automatic Socket.IO socket-ID channels; wire room IDs stay
-unchanged. Room IDs accept 1-128 ASCII letters, digits, underscores, or hyphens.
+unchanged. Room IDs accept 1-128 characters without control characters and
+reject the reserved `user:` and `room:` prefixes; ordinary custom names remain valid.
 Participant IDs are bounded to 128 characters without control characters.
 Display names are bounded to 200 characters and passwords to 1024 characters.
 `POST /room/:roomId/close` always rejects with HTTP 403

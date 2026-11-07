@@ -291,6 +291,16 @@ describe("socket-bound room controls", () => {
     }));
   });
 
+  it("preserves ordinary custom room IDs outside the reserved namespaces", () => {
+    const member = makeSocket("guest");
+    const room = "Guest room.v2-\u0413\u043e\u0441\u0442\u044c";
+    join(member, room);
+    expect(member.channels.has(`room:${room}`)).toBe(true);
+    expect(member.emit).toHaveBeenLastCalledWith("room_joined", expect.objectContaining({
+      roomInfo: expect.objectContaining({ roomId: room }),
+    }));
+  });
+
   it.each(["user:victim", "room:private", "", null, {}, "r".repeat(129), "room\ninjected"])(
     "rejects invalid or reserved room identifiers: %j", (room) => {
       const member = makeSocket("guest");
