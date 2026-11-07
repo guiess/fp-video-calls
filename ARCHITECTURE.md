@@ -19,7 +19,8 @@ authenticated application flows. They call the Node/Express API over HTTPS and
 connect to Socket.IO over WSS. The server verifies Firebase ID tokens for
 authenticated REST chat routes. Guest rooms and TURN issuance support
 account-free access; private Socket.IO identity requires a verified Firebase ID
-token. Remaining room/call control gaps are described in [SECURITY.md](SECURITY.md).
+token, and room controls are bound to the current roster socket. Remaining call
+ownership gaps are described in [SECURITY.md](SECURITY.md).
 
 The Node service relays SDP offers, SDP answers, ICE candidates, call events,
 typing events, and opted-in telemetry. Audio/video never passes through the
@@ -93,7 +94,7 @@ capacity guarantees.
 |---|---|---|
 | Authenticated REST chat | Firebase ID token middleware | Conversation/message/file metadata and SQLite-backed results |
 | Socket.IO `chat_auth` | Required Firebase ID token; private UID derived solely from verified token; fails closed when Admin is unavailable | User-room events and typing/call delivery |
-| Guest rooms/signaling | Caller-supplied room/user fields plus optional room password | Roster, SDP, ICE, transient room chat |
+| Guest rooms/signaling | Optional room password; controls and sender identity bound to the current roster socket | Roster, SDP, ICE, transient room chat |
 | TURN issuance | Bounded caller-supplied `userId`/`roomId`; no application token | Time-limited TURN username/credential/URLs |
 | Firestore | Collection-specific rules | Profiles, contacts, histories, location, private subcollections |
 | Attachment route | Authenticated upload API; local download route has no auth | Files and bearer/SAS URLs depending on storage mode |
@@ -124,7 +125,24 @@ rooms, files, location, invitations, or TURN.
 password hash. `join_room` loads or creates the room, checks the password,
 updates the roster, and begins signaling. `leave_room`, disconnect, or explicit
 close removes participants; an empty room is removed from memory and its room
-row is deleted. Host/member authority is not bound to a server-issued capability.
+row is deleted. Controls use the socket currently recorded for a participant:
+any joined member may close the room, leave as themselves, pin themselves
+(replacing another primary), and clear only their own pin. Relays require a
+joined sender and a current target in the same room; transient chat uses the
+roster's sender identity and display name. Replacement sockets evict the previous
+socket from the room channel and telemetry subscriptions while preserving
+mic/camera state. Guest IDs remain account-free reconnect identifiers, not
+persistent authenticated identities or host capabilities. `[OWASP]` `[CUSTOM]`
+
+Room group channels are internally prefixed with `room:` to isolate them from
+private `user:` and automatic Socket.IO socket-ID channels; wire room IDs stay
+unchanged. Room IDs accept 1-128 ASCII letters, digits, underscores, or hyphens.
+Participant IDs are bounded to 128 characters without control characters.
+Display names are bounded to 200 characters and passwords to 1024 characters.
+`POST /room/:roomId/close` always rejects with HTTP 403
+`ROOM_SOCKET_REQUIRED`; both web close buttons use the joined signaling socket
+and await a bounded acknowledgement instead. Existing mobile socket-close
+clients continue to receive `ROOM_CLOSED` without requiring an acknowledgement.
 
 ### Authenticated invitation lifecycle
 

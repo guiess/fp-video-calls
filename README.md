@@ -5,7 +5,7 @@ WebRTC audio/video calls, persistent messaging, contacts, files, call history,
 and location sharing. The app is under active development and is intentionally
 not production-ready.
 
-> **Safety notice:** Private socket identity, room/call authorization, and file-access
+> **Safety notice:** Private socket identity, call authorization, and file-access
 > controls still need hardening. Do not use sensitive conversations or confidential files.
 > Remaining authorization and privacy limitations are documented in
 > [SECURITY.md](SECURITY.md).
@@ -80,8 +80,10 @@ Implementation:
 Authenticated call flows support direct/group invitations, web socket delivery,
 FCM delivery to Android, ringing, answer/cancel, room entry, and call history.
 Guest rooms provide persistent-looking room identifiers and optional passwords,
-with account-free access. Some room-control events still need membership and
-host authorization checks; see [SECURITY.md](SECURITY.md).
+with account-free access. Room controls use the currently joined socket, not a
+claimed acting user ID. Any joined member can close the room for everyone;
+members can pin themselves and clear only their own pin. See
+[SECURITY.md](SECURITY.md) for remaining limitations.
 
 Implementation:
 [web call service](web/src/services/callService.ts),

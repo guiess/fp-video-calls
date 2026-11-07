@@ -449,16 +449,14 @@ export default function RoomView({ roomId, username, quality, password, onLeave 
   async function closeRoomForEveryone() {
     if (!roomId.trim()) return;
     try {
-      const cfg: any = (typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined) || {};
-      const runtimeBase = (cfg.SIGNALING_URL as string | undefined)?.trim();
-      const env: any = (import.meta as any)?.env || {};
-      const envBase = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
-      const base = runtimeBase || envBase || `${window.location.protocol}//${window.location.hostname}:3000`;
-      const resp = await fetch(`${base}/room/${encodeURIComponent(roomId.trim())}/close`, { method: "POST", mode: "cors" });
-      if (!resp.ok) { alert(t.failedToCloseRoom); return; }
+      const svc = svcRef.current;
+      if (!svc) { alert(t.closeRoomRequestFailed); return; }
+      await svc.closeRoom();
       handleLeave();
       alert(t.roomClosedForEveryone);
-    } catch { alert(t.closeRoomRequestFailed); }
+    } catch (error) {
+      alert(`${t.closeRoomRequestFailed}${error instanceof Error ? `: ${error.message}` : ""}`);
+    }
   }
 
   function toggleMute() {

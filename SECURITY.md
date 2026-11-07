@@ -21,7 +21,7 @@ a confidential security report are welcome.
 ## Safe use during development
 
 > **M² Calls is under active development and intentionally not production-ready.**
-> Private socket identity, room/call authorization, and file-access controls
+> Private socket identity, call authorization, and file-access controls
 > still need hardening. Do not use sensitive conversations or confidential files.
 > Sensitive diagnostic logging and non-E2E-encrypted text messaging remain limitations.
 
@@ -90,10 +90,15 @@ These are source guarantees, not evidence that this revision is deployed.
 
 ### Other known access-control gaps
 
-- **Room controls:** some events trust room/user identifiers without checking
-  the acting socket's authority. In particular, `close_room` does not verify
-  membership or host status. Account-free joining is intentional; unchecked
-  control actions are not required for guest access.
+- **Guest identity limitation:** room controls require the socket currently
+  recorded in that room's roster. Any joined member may close the room; there
+  is no privileged host role. Leave/self-pin/own-pin-clear and signaling/chat
+  sender identity are socket-bound, with same-room relay targets. Replacing a
+  participant evicts their old socket from the group channel and telemetry
+  subscriptions. Guest joining/replacement remains account-free (and uses the
+  optional room password); account ownership is not established by guest IDs. Internal room
+  channels are isolated from private account and socket-ID channels, and the
+  REST close bypass returns HTTP 403 `ROOM_SOCKET_REQUIRED`.
 - **Call ownership:** invite/answer/cancel routes require login and invitation
   identity is bound to the verified UID. Answer/cancel do not verify the
   requester's relationship to the call.
@@ -211,7 +216,7 @@ documentation must never reproduce detected values.
 
 ## Known risk areas
 
-- missing access checks for private Socket.IO identity, room controls, and call
+- missing access checks for private Socket.IO identity and call
   identity/ownership;
 - attachment-sharing policy and storage-mode-specific access controls;
 - dependency/supply-chain findings requiring separate triage;

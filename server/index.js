@@ -174,6 +174,11 @@ const io = new SocketIOServer(server, {
 const rooms = new Map();
 // participants info extended: { socketId, displayName, micMuted?: boolean }
 
+const MAX_ROOM_ID_LENGTH = 128;
+const MAX_PARTICIPANT_ID_LENGTH = 128;
+const MAX_DISPLAY_NAME_LENGTH = 200;
+const MAX_ROOM_PASSWORD_LENGTH = 1024;
+
 const OBJECT_PAYLOAD_EVENTS = new Set([
   "chat_typing", "join_room", "set_primary", "leave_room",
   "close_room", "offer", "answer", "ice_candidate", "chat_message",
@@ -453,6 +458,7 @@ app.post("/room", (req, res) => {
 // Room meta (for password/quality)
 app.get("/room/:roomId/meta", (req, res) => {
   const { roomId } = req.params;
+  if (!isRoomId(roomId)) return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   let room = rooms.get(roomId);
   // Fall back to DB if not in memory
   if (!room) {
@@ -513,7 +519,13 @@ io.on("connection", (socket) => {
 
   // join_room { roomId, userId, displayName, password?, videoQuality? }
   socket.on("join_room", ({ roomId, userId, displayName, password, videoQuality }) => {
-    if (!roomId || !userId) return socket.emit("error", { code: "BAD_REQUEST" });
+    if (!isRoomId(roomId) || !isParticipantId(userId) ||
+        (displayName !== undefined && (typeof displayName !== "string" || displayName.length > MAX_DISPLAY_NAME_LENGTH)) ||
+        (password !== undefined && (typeof password !== "string" || password.length > MAX_ROOM_PASSWORD_LENGTH))) {
+      return socket.emit("error", { code: "BAD_REQUEST" });
+    }
+    const currentUserId = getUserIdBySocket(roomId, socket.id);
+    if (currentUserId && currentUserId !== userId) return rejectRoomControl(socket, "ROOM_FORBIDDEN");
 
     // Normalize requested quality defensively
     const reqQ = typeof videoQuality === "string" ? videoQuality.trim().toLowerCase() : "";
@@ -572,13 +584,18 @@ io.on("connection", (socket) => {
     const isReconnect = room.participants.has(userId);
     const prevMicMuted = isReconnect ? !!room.participants.get(userId)?.micMuted : false;
     const prevCameraOff = isReconnect ? !!room.participants.get(userId)?.cameraOff : false;
+    const previousSocketId = room.participants.get(userId)?.socketId;
+    if (previousSocketId && previousSocketId !== socket.id) {
+      io.sockets.sockets.get(previousSocketId)?.leave(roomChannel(roomId));
+      room.telemetrySubscribers?.delete(previousSocketId);
+    }
     room.participants.set(userId, {
       socketId: socket.id,
       displayName,
       micMuted: prevMicMuted,
       cameraOff: prevCameraOff
     });
-    socket.join(roomId);
+    socket.join(roomChannel(roomId));
 
     // Notify caller with existing participants (include micMuted for initial badges)
     const participants = Array.from(room.participants.entries()).map(([id, p]) => ({
@@ -596,37 +613,40 @@ io.on("connection", (socket) => {
 
     // Only notify others on first join (skip for reconnects to avoid duplicate user_joined)
     if (!isReconnect) {
-      socket.to(roomId).emit("user_joined", { userId, displayName, micMuted: false });
+      socket.to(roomChannel(roomId)).emit("user_joined", { userId, displayName, micMuted: false });
     }
   });
 
-  // Self-pin / primary participant. userId === null clears the primary.
-  // Any client sending a new primary replaces the previous one.
+  // Members may replace the primary with themselves, or clear their own pin.
   socket.on("set_primary", ({ roomId, userId }) => {
+    const actorId = requireRoomMember(socket, roomId);
+    if (!actorId) return;
     const room = rooms.get(roomId);
-    if (!room) return;
-    const next = (typeof userId === "string" && userId.length > 0) ? userId : null;
-    // Reject self-pin from a user not in the room
-    if (next && !room.participants.has(next)) return;
-    if (room.primaryUserId === next) return;
-    room.primaryUserId = next;
-    console.log(`[room:primary] ${roomId} primary=${next ?? "(none)"}`);
-    io.to(roomId).emit("primary_changed", { userId: next });
+    if (userId !== actorId && (userId !== null || room.primaryUserId !== actorId)) {
+      return rejectRoomControl(socket, "ROOM_FORBIDDEN");
+    }
+    if (room.primaryUserId === userId) return;
+    room.primaryUserId = userId;
+    console.log(`[room:primary] ${roomId} primary=${userId ?? "(none)"}`);
+    io.to(roomChannel(roomId)).emit("primary_changed", { userId });
   });
 
   socket.on("leave_room", ({ roomId, userId }) => {
+    const actorId = requireRoomMember(socket, roomId);
+    if (!actorId) return;
+    if (userId !== undefined && userId !== actorId) return rejectRoomControl(socket, "ROOM_FORBIDDEN");
     const room = rooms.get(roomId);
     telemetryRateByRoom.delete(roomId);
     if (room) {
-      room.participants.delete(userId);
+      room.participants.delete(actorId);
       room.telemetrySubscribers?.delete(socket.id);
-      if (room.primaryUserId === userId) {
+      if (room.primaryUserId === actorId) {
         room.primaryUserId = null;
-        socket.to(roomId).emit("primary_changed", { userId: null });
+        socket.to(roomChannel(roomId)).emit("primary_changed", { userId: null });
       }
-      socket.leave(roomId);
-      socket.to(roomId).emit("user_left", { userId });
-      console.log(`[room:leave] ${userId} left ${roomId} (${room.participants.size} remaining)`);
+      socket.leave(roomChannel(roomId));
+      socket.to(roomChannel(roomId)).emit("user_left", { userId: actorId });
+      console.log(`[room:leave] ${actorId} left ${roomId} (${room.participants.size} remaining)`);
       if (room.participants.size === 0) {
         rooms.delete(roomId);
         try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
@@ -635,15 +655,17 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Admin: close room for everybody
-  socket.on("close_room", ({ roomId }) => {
+  // Any currently joined member can close the room for everybody.
+  socket.on("close_room", ({ roomId }, ack) => {
+    if (!requireRoomMember(socket, roomId, ack)) return;
     telemetryRateByRoom.delete(roomId);
     const room = rooms.get(roomId);
-    if (!room) return;
-    io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
-    for (const [uid, info] of room.participants.entries()) {
-      try { io.sockets.sockets.get(info.socketId)?.leave(roomId); } catch {}
-      socket.to(roomId).emit("user_left", { userId: uid });
+    // Ack-aware clients perform their own teardown; legacy clients receive ROOM_CLOSED.
+    const recipients = typeof ack === "function" ? socket.to(roomChannel(roomId)) : io.to(roomChannel(roomId));
+    if (typeof ack === "function") ack({ ok: true });
+    recipients.emit("error", { code: "ROOM_CLOSED", message: "Room was closed by a member" });
+    for (const info of room.participants.values()) {
+      io.sockets.sockets.get(info.socketId)?.leave(roomChannel(roomId));
     }
     rooms.delete(roomId);
     try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
@@ -652,54 +674,57 @@ io.on("connection", (socket) => {
 
   // WebRTC signaling relay
   socket.on("offer", ({ roomId, targetId, offer }) => {
-    const fromId = getUserIdBySocket(roomId, socket.id);
+    const fromId = requireRoomMember(socket, roomId);
+    if (!fromId) return;
     console.log(`[signal] offer ${fromId} -> ${targetId} in ${roomId}`);
-    relayToUser(roomId, targetId, "offer_received", { fromId, offer });
+    relayToUser(socket, { roomId, targetId, event: "offer_received", payload: { fromId, offer } });
   });
   socket.on("answer", ({ roomId, targetId, answer }) => {
-    const fromId = getUserIdBySocket(roomId, socket.id);
+    const fromId = requireRoomMember(socket, roomId);
+    if (!fromId) return;
     console.log(`[signal] answer ${fromId} -> ${targetId} in ${roomId}`);
-    relayToUser(roomId, targetId, "answer_received", { fromId, answer });
+    relayToUser(socket, { roomId, targetId, event: "answer_received", payload: { fromId, answer } });
   });
   socket.on("ice_candidate", ({ roomId, targetId, candidate }) => {
-    relayToUser(roomId, targetId, "ice_candidate_received", { fromId: getUserIdBySocket(roomId, socket.id), candidate });
+    const fromId = requireRoomMember(socket, roomId);
+    if (!fromId) return;
+    relayToUser(socket, { roomId, targetId, event: "ice_candidate_received", payload: { fromId, candidate } });
   });
 
   // Simple room chat channel
-  socket.on("chat_message", ({ roomId, userId, displayName, text, ts }) => {
+  socket.on("chat_message", ({ roomId, text, ts }) => {
+    const userId = requireRoomMember(socket, roomId);
+    if (!userId) return;
     const room = rooms.get(roomId);
-    if (!room) return;
     const safeText = typeof text === "string" ? text.slice(0, 2000) : "";
-    const name = displayName || (room.participants.get(userId)?.displayName ?? "Guest");
-    io.to(roomId).emit("chat_message", { roomId, fromId: userId, displayName: name, text: safeText, ts: ts || Date.now() });
+    const name = room.participants.get(userId).displayName || "Guest";
+    io.to(roomChannel(roomId)).emit("chat_message", { roomId, fromId: userId, displayName: name, text: safeText, ts: ts || Date.now() });
   });
 
   // Broadcast mic mute/unmute state to room participants
   socket.on("mic_state_changed", ({ roomId, muted }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
-    const userId = getUserIdBySocket(roomId, socket.id);
+    const userId = requireRoomMember(socket, roomId);
     if (!userId) return;
+    const room = rooms.get(roomId);
     const p = room.participants.get(userId);
     if (p) {
       p.micMuted = !!muted;
       room.participants.set(userId, p);
     }
-    io.to(roomId).emit("peer_mic_state", { userId, muted: !!muted });
+    io.to(roomChannel(roomId)).emit("peer_mic_state", { userId, muted: !!muted });
   });
 
   // Broadcast camera on/off state to room participants (mirrors mic state).
   socket.on("camera_state_changed", ({ roomId, off }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
-    const userId = getUserIdBySocket(roomId, socket.id);
+    const userId = requireRoomMember(socket, roomId);
     if (!userId) return;
+    const room = rooms.get(roomId);
     const p = room.participants.get(userId);
     if (p) {
       p.cameraOff = !!off;
       room.participants.set(userId, p);
     }
-    io.to(roomId).emit("peer_camera_state", { userId, off: !!off });
+    io.to(roomChannel(roomId)).emit("peer_camera_state", { userId, off: !!off });
   });
 
   // ── Telemetry relay ──────────────────────────────────────────────
@@ -757,9 +782,9 @@ io.on("connection", (socket) => {
         room.participants.delete(userId);
         if (room.primaryUserId === userId) {
           room.primaryUserId = null;
-          socket.to(roomId).emit("primary_changed", { userId: null });
+          socket.to(roomChannel(roomId)).emit("primary_changed", { userId: null });
         }
-        socket.to(roomId).emit("user_left", { userId });
+        socket.to(roomChannel(roomId)).emit("user_left", { userId });
         console.log(`[room:disconnect] ${userId} disconnected from ${roomId} (${room.participants.size} remaining)`);
         if (room.participants.size === 0) {
           rooms.delete(roomId);
@@ -771,21 +796,37 @@ io.on("connection", (socket) => {
   });
 });
 
-// REST API: close room endpoint
-app.post("/room/:roomId/close", (req, res) => {
-  const { roomId } = req.params;
-  const room = rooms.get(roomId);
-  if (!room) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-  io.to(roomId).emit("error", { code: "ROOM_CLOSED", message: "Room was closed by host" });
-  for (const [uid, info] of room.participants.entries()) {
-    try { io.sockets.sockets.get(info.socketId)?.leave(roomId); } catch {}
-  }
-  rooms.delete(roomId);
-  try { chatDb.prepare("DELETE FROM rooms WHERE id = ?").run(roomId); } catch {}
-  console.log(`[room:close] ${roomId} via REST`);
-  return res.json({ ok: true });
-}
+// REST has no joined socket to authorize; never mutate a room via this endpoint.
+app.post("/room/:roomId/close", (_req, res) =>
+  res.status(403).json({ ok: false, error: "ROOM_SOCKET_REQUIRED" })
 );
+
+function isRoomId(value) {
+  return typeof value === "string" && value.length <= MAX_ROOM_ID_LENGTH && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isParticipantId(value) {
+  return typeof value === "string" && value.length <= MAX_PARTICIPANT_ID_LENGTH && /^[^\u0000-\u001f\u007f]+$/.test(value);
+}
+
+function roomChannel(roomId) {
+  return `room:${roomId}`;
+}
+
+function rejectRoomControl(socket, code, ack) {
+  if (typeof ack === "function") ack({ ok: false, error: code });
+  else socket.emit("error", { code });
+}
+
+function requireRoomMember(socket, roomId, ack) {
+  if (!isRoomId(roomId)) {
+    rejectRoomControl(socket, "BAD_REQUEST", ack);
+    return null;
+  }
+  const userId = getUserIdBySocket(roomId, socket.id);
+  if (!userId) rejectRoomControl(socket, "ROOM_FORBIDDEN", ack);
+  return userId;
+}
 
 function getUserIdBySocket(roomId, socketId) {
   const room = rooms.get(roomId);
@@ -800,11 +841,12 @@ function rejectTelemetry(socket, code) {
   socket.emit("telemetry_error", { code });
 }
 
-function relayToUser(roomId, targetUserId, event, payload) {
+function relayToUser(socket, { roomId, targetId, event, payload }) {
   const room = rooms.get(roomId);
-  if (!room) return;
-  const target = room.participants.get(targetUserId);
-  if (!target) return;
+  const target = room.participants.get(targetId);
+  if (!target || !io.sockets.sockets.has(target.socketId)) {
+    return rejectRoomControl(socket, "ROOM_TARGET_NOT_FOUND");
+  }
   io.to(target.socketId).emit(event, payload);
 }
 

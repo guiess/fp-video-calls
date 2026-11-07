@@ -57,6 +57,14 @@ const MAX_RECEIVED_TELEMETRY_SAMPLES = 100;
 const MAX_PEER_GENERATION = 1_000_000_000;
 const PEER_GENERATION_FIELD = "peerGeneration";
 const MIRROR_METADATA_TIMEOUT_MS = 5_000;
+const ROOM_CLOSE_TIMEOUT_MS = 5_000;
+
+export class RoomControlError extends Error {
+  constructor(code: string) {
+    super(code);
+    this.name = "RoomControlError";
+  }
+}
 
 export class PeerRecoveryCancelledError extends Error {
   constructor() {
@@ -130,6 +138,7 @@ export class WebRTCService {
   private password: string | undefined = undefined;
   private quality: "720p" | "1080p" = "720p";
   private hasJoined: boolean = false;
+  private joinedRoomId: string | null = null;
   // TURN credential refresh timer
   private turnRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTtlSeconds: number = 0;
@@ -160,6 +169,24 @@ export class WebRTCService {
   setPrimary(targetUserId: string | null) {
     if (!this.socket) return;
     this.socket.emit("set_primary", { roomId: this.roomId, userId: targetUserId });
+  }
+
+  /** Close the currently joined room. Rejects if disconnected, denied, or unacknowledged. */
+  async closeRoom(): Promise<void> {
+    const socket = this.socket;
+    const roomId = this.joinedRoomId;
+    if (!socket?.connected || !roomId) {
+      throw new RoomControlError("ROOM_SOCKET_REQUIRED");
+    }
+    return new Promise((resolve, reject) => {
+      socket.timeout(ROOM_CLOSE_TIMEOUT_MS).emit("close_room", { roomId },
+        (error: Error | null, reply?: { ok: boolean; error?: string }) => {
+          if (error) return reject(new RoomControlError("ROOM_CLOSE_TIMEOUT"));
+          if (!reply?.ok) return reject(new RoomControlError(reply?.error || "ROOM_CLOSE_FAILED"));
+          this.joinedRoomId = null;
+          resolve();
+        });
+    });
   }
 
   getPrimary(): string | null { return this.primaryUserId; }
@@ -201,8 +228,12 @@ export class WebRTCService {
 
   private bindSocketEvents() {
     if (!this.socket) return;
-    this.socket.on("error", (e: any) => this.handlers.onError?.(e?.code ?? "ERROR", e?.message));
+    this.socket.on("error", (e: any) => {
+      if (e?.code === "ROOM_CLOSED") this.joinedRoomId = null;
+      this.handlers.onError?.(e?.code ?? "ERROR", e?.message);
+    });
     this.socket.on("room_joined", ({ participants, roomInfo, primaryUserId }) => {
+      this.joinedRoomId = roomInfo?.roomId || this.roomId;
       this.primaryUserId = (typeof primaryUserId === "string" && primaryUserId) ? primaryUserId : null;
       this.handlers.onRoomJoined?.(participants, roomInfo);
       this.handlers.onPrimaryChanged?.(this.primaryUserId);
@@ -234,6 +265,7 @@ export class WebRTCService {
       this.handlers.onSignalingStateChange?.("connected");
     });
     this.socket.on("disconnect", () => {
+      this.joinedRoomId = null;
       this.handlers.onSignalingStateChange?.("disconnected");
     });
 
@@ -1397,6 +1429,7 @@ export class WebRTCService {
   }
  
   leave() {
+    this.joinedRoomId = null;
     this.joinAbortController?.abort();
     this.joinAbortController = null;
     this.lifecycleGeneration += 1;
