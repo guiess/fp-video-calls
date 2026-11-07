@@ -57,6 +57,8 @@ do not verify the requester's relationship to the call.
 Only original invitees may answer the authenticated inviter. The inviter may
 cancel original recipients still ringing; an invitee may decline only their own
 invitation to the original caller through the existing `/api/call/cancel` route.
+Explicitly invited same-account devices remain eligible; inviter status alone
+never grants answer authority.
 One group invitee declining still ends the caller's ringing wait; this does not
 redesign group UX or confer room/host privileges. Destination/room/UUID mismatches
 fail before socket or FCM lookup/delivery. Repeated valid actions are idempotent

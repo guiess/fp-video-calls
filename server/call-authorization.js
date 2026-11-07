@@ -108,7 +108,7 @@ export class CallRegistry {
 
   /** Reserve ownership synchronously, before any async profile/delivery work. */
   begin(inviterUid, invitation) {
-    if (!isUid(inviterUid) || invitation.calleeUids.includes(inviterUid)) {
+    if (!isUid(inviterUid)) {
       throw new CallAuthorizationError("BAD_REQUEST");
     }
     this.prune();

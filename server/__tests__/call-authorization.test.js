@@ -51,6 +51,18 @@ describe("bounded invitation ownership", () => {
     expect(registry.act("answer", "bob", answer).destinations).toEqual(["caller"]);
   });
 
+  it("does not reject an explicitly invited same-account device or grant caller status alone answer authority", () => {
+    const registry = new CallRegistry({ createId: () => "same-account-call" });
+    const call = registry.begin("caller", parseCallInvite({
+      roomId: "same-account-room", calleeUids: ["caller"],
+    }));
+    registry.activate(call);
+    const body = { roomId: call.roomId, callUUID: call.callUUID, callerUid: "caller" };
+    expectCode(() => registry.act("answer", "outsider", body), "CALL_FORBIDDEN");
+    expect(registry.act("answer", "caller", body).destinations).toEqual(["caller"]);
+    expect(registry.act("answer", "caller", body).destinations).toEqual([]);
+  });
+
   it("preserves group decline to the caller while other invitees may still answer", () => {
     const { registry, call } = fixture();
     registry.activate(call);
