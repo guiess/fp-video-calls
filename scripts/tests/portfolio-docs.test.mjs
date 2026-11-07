@@ -112,7 +112,8 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   assert.match(security, /e74e890d5777db112ea8cedfb4d0d932169b3254/);
   assert.match(security.replace(/\s+/g, " "), /Answer\/cancel do not verify the requester's relationship to the call/);
   assert.match(security, /account ownership is not established by guest IDs/);
-  assert.match(security.replace(/\s+/g, " "), /Live user acceptance testing remains pending/);
+  assert.match(security.replace(/\s+/g, " "), /Live user acceptance testing is complete for the features checked/);
+  assert.match(security.replace(/\s+/g, " "), /Self-pin\/primary behavior was not manually checked/);
   const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
   assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });

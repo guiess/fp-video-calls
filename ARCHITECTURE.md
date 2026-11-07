@@ -8,7 +8,8 @@
 
 Private-socket authentication, socket-bound room controls, and trusted invitation
 identity are deployed on Azure at the source revision above. Deployed telemetry
-compatibility is preserved. Live user acceptance testing remains pending.
+compatibility is preserved. Live user acceptance testing is complete for the
+features checked; self-pin/primary behavior was not manually checked.
 
 ![M² Calls system overview showing clients, signaling, media, storage, and trust boundaries](docs/assets/architecture/system-overview.svg)
 

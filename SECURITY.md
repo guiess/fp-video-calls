@@ -36,8 +36,9 @@ calling, with passwords checked when enabled.
 
 Private-socket authentication, socket-bound room controls, and trusted invitation
 identity are deployed on Azure, verified 2026-11-06 at application revision
-`e74e890d5777db112ea8cedfb4d0d932169b3254`. Live user acceptance testing remains
-pending; this deployment does not imply production readiness.
+`e74e890d5777db112ea8cedfb4d0d932169b3254`. Live user acceptance testing is complete
+for the features checked. Self-pin/primary behavior was not manually checked;
+this is not comprehensive security or production-readiness assurance.
 The deployed location policy below is separate and unchanged.
 
 REST call invitations bind `callerId` to the verified Firebase token UID and
