@@ -13,6 +13,7 @@ const harness = vi.hoisted(() => ({
   createRoom: vi.fn(), invite: vi.fn(), cancel: vi.fn(), save: vi.fn(), back: vi.fn(),
   setState: vi.fn(),
   subscribe: vi.fn(),
+  navigate: vi.fn(),
 }));
 vi.mock("react", async importOriginal => {
   const original = await importOriginal<typeof import("react")>();
@@ -27,7 +28,7 @@ vi.mock("react", async importOriginal => {
     useEffect: (effect: () => (() => void) | void) => harness.effects.push(effect),
   };
 });
-vi.mock("react-router-dom", () => ({ useSearchParams: () => {
+vi.mock("react-router-dom", () => ({ useNavigate: () => harness.navigate, useSearchParams: () => {
   const params = new Map([["callees", "alice,bob"], ["name", "Callees"], ["type", "group"]]);
   if (harness.incomingRoomId) params.set("roomId", harness.incomingRoomId);
   return [params];
@@ -80,6 +81,10 @@ function mount(component = OutgoingCallScreen) {
     start: () => {
       const cleanup = effect();
       if (typeof cleanup === "function") harness.cleanups.push(cleanup);
+      for (const subscription of harness.effects.slice(1, 2)) {
+        const release = subscription();
+        if (typeof release === "function") harness.cleanups.push(release);
+      }
       return cleanup;
     },
   };
@@ -94,7 +99,10 @@ beforeEach(() => {
   harness.cancel.mockResolvedValue(undefined);
   vi.stubGlobal("window", { history: { back: harness.back }, location: { href: "" } });
 });
-afterEach(() => { harness.cleanups.splice(0).forEach(cleanup => cleanup()); });
+afterEach(() => {
+  harness.cleanups.splice(0).forEach(cleanup => cleanup());
+  vi.useRealTimers();
+});
 
 describe.each([
   ["legacy outgoing", OutgoingCallScreen],
@@ -163,6 +171,40 @@ describe.each([
     if (typeof cleanup === "function") cleanup();
     expect(harness.cancel).not.toHaveBeenCalled();
   });
+
+  it("captures an early group decline before the invite response and reconciles only its UUID", async () => {
+    const response = deferred<{ callUUID: string }>();
+    harness.createRoom.mockResolvedValue({ roomId: "group", password: "synthetic" });
+    harness.invite.mockReturnValue(response.promise);
+    const screen = mount(component);
+    screen.start();
+    await vi.waitFor(() => expect(harness.invite).toHaveBeenCalled());
+    const events = harness.subscribe.mock.calls.at(-1)![0];
+    events.onCallCancel({ roomId: "group", callUUID: "unrelated" });
+    expect(harness.setState).not.toHaveBeenCalledWith("ended");
+    events.onCallCancel({ roomId: "group", callUUID: "group-uuid" });
+    response.resolve({ callUUID: "group-uuid" });
+    await vi.waitFor(() => expect(harness.setState).toHaveBeenCalledWith(
+      component === ActiveCallScreen ? "ended" : "declined"));
+    expect(harness.cancel).not.toHaveBeenCalled();
+    expect(harness.save).toHaveBeenCalledWith(expect.objectContaining({
+      callUUID: "group-uuid", status: "DECLINED",
+    }));
+  });
+
+  it("does not terminate the current call for another UUID with the same room", async () => {
+    harness.phase = "ringing";
+    harness.createRoom.mockResolvedValue({ roomId: "shared", password: "synthetic" });
+    harness.invite.mockResolvedValue({ callUUID: "call-B" });
+    const screen = mount(component);
+    screen.start();
+    await vi.waitFor(() => expect(harness.save).toHaveBeenCalled());
+    const before = harness.setState.mock.calls.length;
+    const events = harness.subscribe.mock.calls.at(-1)![0];
+    events.onCallCancel({ roomId: "shared", callUUID: "call-A" });
+    expect(harness.setState).toHaveBeenCalledTimes(before);
+    expect(harness.save).not.toHaveBeenCalledWith(expect.objectContaining({ status: "DECLINED" }));
+  });
 });
 
 it("incoming active-room teardown does not send an outgoing invitation cancellation", async () => {
@@ -174,4 +216,23 @@ it("incoming active-room teardown does not send an outgoing invitation cancellat
   if (typeof cleanup === "function") cleanup();
   expect(harness.invite).not.toHaveBeenCalled();
   expect(harness.cancel).not.toHaveBeenCalled();
+});
+
+it("uses SPA cancellation navigation and retains UUID cleanup after the 500ms exit/unmount", async () => {
+  const response = deferred<{ callUUID: string }>();
+  harness.createRoom.mockResolvedValue({ roomId: "old", password: "synthetic" });
+  harness.invite.mockReturnValue(response.promise);
+  const screen = mount(ActiveCallScreen);
+  const cleanup = screen.start();
+  await vi.waitFor(() => expect(harness.invite).toHaveBeenCalled());
+  vi.useFakeTimers();
+  screen.cancel();
+  await vi.advanceTimersByTimeAsync(501);
+  expect(harness.navigate).toHaveBeenCalledWith("/app");
+  expect(window.location.href).toBe("");
+  if (typeof cleanup === "function") cleanup();
+  response.resolve({ callUUID: "old-uuid" });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(harness.cancel).toHaveBeenCalledWith(["alice", "bob"], "old", "old-uuid");
+  expect(harness.setState).not.toHaveBeenCalledWith("ringing");
 });

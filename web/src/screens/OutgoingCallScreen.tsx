@@ -72,6 +72,14 @@ export default function OutgoingCallScreen() {
         return;
       }
       callUUIDRef.current = result.callUUID;
+      if (attempt.terminalEvent === "declined") {
+        finishDeclinedAttempt();
+        return;
+      }
+      if (attempt.terminalEvent === "answered") {
+        finishAnsweredAttempt();
+        return;
+      }
       setState("ringing");
 
       // Save call record to Firestore
@@ -129,32 +137,34 @@ export default function OutgoingCallScreen() {
     window.location.reload();
   }
 
+  function finishDeclinedAttempt() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    generationRef.current?.invitation?.finish();
+    setState("declined");
+    saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "DECLINED", direction: "outgoing", createdAt: Date.now(), endedAt: Date.now() });
+  }
+
+  function finishAnsweredAttempt() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    generationRef.current?.invitation?.finish();
+    setState("answered");
+    saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "ACTIVE", direction: "outgoing", createdAt: Date.now(), answeredAt: Date.now() });
+    setTimeout(() => handleJoinRoom(), 500);
+  }
+
   // Listen for call_cancel (callee declined) and call_answered via socket
   useEffect(() => {
-    if (state !== "ringing") return;
-
     const unsub = subscribeChatEvents({
       onCallCancel: (data) => {
-        if (data.roomId === roomIdRef.current || data.callUUID === callUUIDRef.current) {
-          if (timerRef.current) clearTimeout(timerRef.current);
-          generationRef.current?.invitation?.finish();
-          setState("declined");
-          saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "DECLINED", direction: "outgoing", createdAt: Date.now(), endedAt: Date.now() });
-        }
+        if (generationRef.current?.invitation?.observeCancellation(data)) finishDeclinedAttempt();
       },
       onCallAnswered: (data) => {
-        if (data.roomId === roomIdRef.current || data.callUUID === callUUIDRef.current) {
-          if (timerRef.current) clearTimeout(timerRef.current);
-          generationRef.current?.invitation?.finish();
-          setState("answered");
-          saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "ACTIVE", direction: "outgoing", createdAt: Date.now(), answeredAt: Date.now() });
-          setTimeout(() => handleJoinRoom(), 500);
-        }
+        if (generationRef.current?.invitation?.observeAnswer(data)) finishAnsweredAttempt();
       },
     });
 
     return unsub;
-  }, [state]);
+  }, []);
 
   const stateText: Record<CallState, string> = {
     setting_up: t.settingUpCall,

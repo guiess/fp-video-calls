@@ -17,6 +17,7 @@ const COMPLETE_PACKAGE = [
     "chat-socket-auth.js",
     "call-authorization.js",
     "call-routes.js",
+    "call-delivery.js",
     "chat-db.js",
     "chat-routes.js",
     "blob-storage.js",

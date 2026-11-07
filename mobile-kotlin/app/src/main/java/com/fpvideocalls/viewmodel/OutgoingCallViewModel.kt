@@ -29,6 +29,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.flow
 import java.io.IOException
 import java.util.UUID
 import javax.inject.Inject
@@ -77,6 +81,7 @@ class OutgoingCallViewModel @Inject constructor(
         audioHelper.startRingback()
 
         viewModelScope.launch {
+            var cancellationCollector: Job? = null
             try {
                 val pw = UUID.randomUUID().toString()
 
@@ -85,6 +90,13 @@ class OutgoingCallViewModel @Inject constructor(
                 if (cancelled || callGeneration != generation) return@launch
                 val attempt = OutgoingInvitationAttempt(room.roomId, originalRecipients)
                 currentAttempt = attempt
+                val declined = CompletableDeferred<Unit>()
+                cancellationCollector = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    CallEventBus.events.filterIsInstance<CallEvent.Cancel>().collect { event ->
+                        if (currentAttempt === attempt && callGeneration == generation &&
+                            attempt.observeCancellation(event.callUUID, event.roomId)) declined.complete(Unit)
+                    }
+                }
                 _status.value = OutgoingCallStatus.CALLING
 
                 // Send invite — server generates the callUUID seen by callee
@@ -102,6 +114,11 @@ class OutgoingCallViewModel @Inject constructor(
                     isCurrent = { currentAttempt === attempt && callGeneration == generation }
                 )
                 if (cancelled || currentAttempt !== attempt || callGeneration != generation) return@launch
+                if (attempt.hasDeclined) {
+                    audioHelper.stopRingback()
+                    _status.value = OutgoingCallStatus.DECLINED
+                    return@launch
+                }
 
                 // Register outgoing call in state manager using the server's callUUID
                 CallStateManager.startOutgoing(
@@ -149,10 +166,10 @@ class OutgoingCallViewModel @Inject constructor(
                     .filter { it.isNotEmpty() }
                     .map { true }
 
-                val cancelSignal = CallEventBus.events
-                    .filterIsInstance<CallEvent.Cancel>()
-                    .filter { it.roomId == room.roomId || it.callUUID == callId }
-                    .map { false }
+                val cancelSignal = flow {
+                    declined.await()
+                    emit(false)
+                }
 
                 val answered: Boolean? = withTimeoutOrNull(Constants.OUTGOING_CALL_TIMEOUT_MS) {
                     merge(joinSignal, cancelSignal).first()
@@ -191,6 +208,8 @@ class OutgoingCallViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "initCall failed", e)
                 if (!cancelled && callGeneration == generation) _status.value = OutgoingCallStatus.ERROR
+            } finally {
+                cancellationCollector?.cancel()
             }
         }
     }

@@ -142,6 +142,18 @@ and rejects prohibited entries. The package should contain `package.json` and
 
 App Service deployment remains a source/Oryx boundary:
 
+**Existing approved target:** `app-voice-video-server` uses `NODE|20-lts`.
+Preserve that runtime, its startup command, WebSockets/AlwaysOn and settings;
+qualify the actual candidate and current-source rollback on Linux Node 20.
+The Node 22 guidance below is for development or separately approved new
+deployments, not authorization to change this existing target's runtime.
+For the held rollout, require synchronous `--track-status true` startup tracking
+with `RuntimeSuccessful`, followed by fresh protocol/native checks. Preserve the
+current fd/e74 source plus lockfile and text-v2 telemetry for source-based Oryx
+rollback; never use a pre-PR20 archive or restore data/uploads/logs/secrets.
+The separate HTTPS owner serializes only `httpsOnly=true`; treat that approved
+flag transition as expected, and roll back only that flag if its own checks fail.
+
 1. select a Linux App Service stack supporting Node 22;
 2. enable WebSockets;
 3. set `SCM_DO_BUILD_DURING_DEPLOYMENT=true` and `ENABLE_ORYX_BUILD=true`

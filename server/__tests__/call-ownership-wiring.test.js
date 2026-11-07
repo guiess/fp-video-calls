@@ -110,6 +110,7 @@ beforeEach(() => {
   state.send.mockResolvedValue("synthetic-message");
 });
 afterEach(async () => {
+  vi.useRealTimers();
   for (const socket of clients.splice(0)) socket.close();
   await vi.waitFor(() => expect(state.io.sockets.sockets.size).toBe(0));
 });
@@ -125,6 +126,50 @@ afterAll(async () => {
 });
 
 describe("real private Socket.IO call ownership wiring", () => {
+  it("bounds the raw call payload before authentication/provider work without affecting other API bodies", async () => {
+    const response = await fetch(`http://127.0.0.1:${state.server.address().port}/api/call/invite`, {
+      method: "POST", headers: { authorization: "Bearer caller", "content-type": "application/json" },
+      body: JSON.stringify({ roomId: nextRoom(), calleeUids: ["alice"], callerName: "x".repeat(65_536) }),
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, error: "CALL_PAYLOAD_TOO_LARGE" });
+    expect(state.verifyIdToken).not.toHaveBeenCalled();
+    expect(state.getUser).not.toHaveBeenCalled();
+  });
+
+  it("settles a never-resolving authentication request and fences its late verified identity", async () => {
+    vi.useFakeTimers();
+    const verified = deferred();
+    state.verifyIdToken.mockReturnValue(verified.promise);
+    const pending = post("invite", "caller", { roomId: nextRoom(), calleeUids: ["alice"] });
+    await vi.advanceTimersByTimeAsync(15_000);
+    const result = await pending;
+    expect(result.statusCode).toBe(504);
+    expect(result.body.error).toBe("CALL_AUTH_TIMEOUT");
+    verified.resolve({ uid: "caller" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.getUser).not.toHaveBeenCalled();
+    expect(state.send).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("settles never-resolving initial delivery and suppresses its late token continuation", async () => {
+    vi.useFakeTimers();
+    const token = deferred();
+    state.getToken.mockReturnValue(token.promise);
+    const pending = post("invite", "caller", { roomId: nextRoom(), calleeUids: ["alice"] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.getToken).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const result = await pending;
+    expect(result.statusCode).toBe(504);
+    expect(result.body.error).toBe("CALL_DELIVERY_TIMEOUT");
+    token.resolve({ exists: true, data: () => ({ fcmToken: "synthetic" }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.send).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it("delivers direct/group calls only to original accounts and permits reconnect/multidevice answers", async () => {
     const caller = await connect("caller");
     const alice = await connect("alice");
@@ -221,7 +266,50 @@ describe("real private Socket.IO call ownership wiring", () => {
     const failed = await post("answer", "alice", body);
     expect(failed.statusCode).toBe(502);
     expect(failed.body).toEqual({ ok: false, error: "CALL_NOTIFICATION_FAILED" });
-    expect((await post("answer", "alice", body)).statusCode).toBe(409);
+    expect((await post("answer", "alice", body)).statusCode).toBe(502);
+  });
+
+  it("keeps other recipients and queued actions valid after one action notification fails", async () => {
+    const call = await invite();
+    state.send.mockClear();
+    const first = deferred();
+    state.send.mockImplementationOnce(() => first.promise.then(() => { throw new Error("synthetic failure"); }));
+    const alice = post("answer", "alice", { ...call, callerUid: "caller" });
+    await vi.waitFor(() => expect(state.send).toHaveBeenCalledTimes(1));
+    const bob = post("answer", "bob", { ...call, callerUid: "caller" });
+    first.resolve();
+    expect((await alice).statusCode).toBe(502);
+    expect((await bob).statusCode).toBe(200);
+    expect(state.send.mock.calls.filter(([message]) => message.data.type === "call_answered")).toHaveLength(2);
+    expect((await post("answer", "alice", { ...call, callerUid: "caller" })).statusCode).toBe(502);
+    expect((await post("answer", "bob", { ...call, callerUid: "caller" })).statusCode).toBe(200);
+  });
+
+  it("still cancels a distinct pending recipient after a failed answer notification", async () => {
+    const call = await invite();
+    state.send.mockRejectedValueOnce(new Error("synthetic stale token"));
+    expect((await post("answer", "alice", { ...call, callerUid: "caller" })).statusCode).toBe(502);
+    const cancelled = await post("cancel", "caller", { ...call, calleeUids: ["bob"] });
+    expect(cancelled.statusCode).toBe(200);
+    expect(state.send.mock.calls.at(-1)[0].data.type).toBe("call_cancel");
+  });
+
+  it("does not close a group action deadline early when one recipient fails and another is still pending", async () => {
+    const call = await invite();
+    state.send.mockClear();
+    const remaining = deferred();
+    state.send.mockRejectedValueOnce(new Error("synthetic stale token"))
+      .mockReturnValueOnce(remaining.promise);
+    let settled = false;
+    const pending = post("cancel", "caller", { ...call, calleeUids: ["alice", "bob"] })
+      .then(result => { settled = true; return result; });
+    await vi.waitFor(() => expect(state.send).toHaveBeenCalledTimes(2));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    remaining.resolve("synthetic-message");
+    expect((await pending).statusCode).toBe(502);
+    expect((await post("cancel", "caller", { ...call, calleeUids: ["bob"] })).statusCode).toBe(200);
+    expect((await post("cancel", "caller", { ...call, calleeUids: ["alice"] })).statusCode).toBe(502);
   });
 
   it("serializes concurrent valid repetitions without returning success ahead of delivery", async () => {
@@ -302,6 +390,7 @@ describe("real private Socket.IO call ownership wiring", () => {
     const pending = post("invite", "caller", { roomId, calleeUids: ["alice"] });
     await vi.waitFor(() => expect(state.getToken).toHaveBeenCalled());
     const cancellation = post("cancel", "caller", { roomId, calleeUids: ["alice"] });
+    await new Promise(resolve => setImmediate(resolve));
     token.resolve({ exists: true, data: () => ({ fcmToken: "synthetic" }) });
     await Promise.all([pending, cancellation]);
     expect(state.send.mock.calls.map(([message]) => message.data.type)).toEqual(["call_cancel"]);

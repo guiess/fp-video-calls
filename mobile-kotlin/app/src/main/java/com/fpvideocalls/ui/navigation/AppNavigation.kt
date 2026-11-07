@@ -69,8 +69,10 @@ fun AppNavigation(
                             }
                         }
                         is CallNavigationEvent.DismissIncomingCall -> {
-                            if (navController.currentDestination?.route == Routes.INCOMING_CALL) {
+                            if (navController.currentDestination?.route == Routes.INCOMING_CALL &&
+                                com.fpvideocalls.model.CallIdentityPolicy.matchesUUID(pendingCallData.value?.callUUID, event.callUUID)) {
                                 navController.popBackStack()
+                                pendingCallData.value = null
                             }
                         }
                         is CallNavigationEvent.AnswerCall -> {

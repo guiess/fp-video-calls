@@ -79,6 +79,15 @@ repeats and prevent ambiguous UUID-less requests from selecting another call.
 Capacity exhaustion returns HTTP 503 `CALL_CAPACITY`, without evicting live calls.
 These bounds are intentionally process-local, not a scalability promise. `[OWASP]` `[YAGNI]`
 
+Call JSON is limited to 64 KiB independently of attachment routes. Call-only
+authentication has a 15-second deadline; initial delivery/actions have absolute
+deadlines, with at most 512 retained HTTP call requests, 1024 queued operations
+and 256 physical provider operations. Timed-out provider work retains its slot
+until actual settlement, so expiry cannot silently free unlimited pending work.
+Already-submitted FCM operations cannot be retracted. Notification outcomes are
+cached per original recipient: a failure does not invalidate unrelated group
+actions, and repeats return the original outcome rather than false success.
+
 Missing/empty UUIDs are accepted only when signed-in role, room and destinations
 identify exactly one recorded call; unknown/stale calls return HTTP 403
 `CALL_FORBIDDEN`, ambiguous calls HTTP 409 `CALL_AMBIGUOUS`, conflicting lifecycle
@@ -96,6 +105,13 @@ finishes submitted invite/cleanup transport after screen-scope cancellation.
 This requires rollout of the changed web and Android clients for the earlier
 request-order race; existing clients keep their API contract. It does not
 guarantee no momentary ringing or cleanup when the response never arrives.
+Outgoing clients subscribe before invitation submission and reconcile bounded
+early-event candidates only after receiving the canonical UUID. Internal web
+cancel navigation stays within React Router so it does not destroy a pending
+cleanup continuation. Incoming and outgoing web consumers require UUID **and**
+room matches; Android ringing, overlay, notification actions and navigation
+dismissals are likewise UUID-scoped, without empty-UUID wildcards. Old A's
+legitimate cancellation cannot dismiss B merely because the rooms coincide.
 Restart/deploy loses
 pending authority and requires redial, as explicitly accepted. No client API
 version change or Firebase rules change is introduced. `[OWASP]` `[CUSTOM]`

@@ -17,6 +17,7 @@ data class InvitationCancellation(
 class OutgoingInvitationAttempt(val roomId: String, calleeUids: List<String>) {
     companion object {
         private const val MAX_UUID_LENGTH = 128
+        private const val MAX_EARLY_EVENTS = 32
     }
     val calleeUids: List<String> = Collections.unmodifiableList(calleeUids.toList())
     var isCancelled: Boolean = false
@@ -24,6 +25,9 @@ class OutgoingInvitationAttempt(val roomId: String, calleeUids: List<String>) {
     private var isFinished = false
     private var callUUID: String? = null
     private var cancelledUUID: String? = null
+    private val earlyCancellations = mutableSetOf<String>()
+    var hasDeclined = false
+        private set
 
     @Synchronized
     fun markCancelled(): InvitationCancellation? {
@@ -39,6 +43,11 @@ class OutgoingInvitationAttempt(val roomId: String, calleeUids: List<String>) {
             uuid.none { it.code in 0..31 || it.code in 127..159 }) { "Invalid invitation UUID" }
         require(callUUID == null || callUUID == uuid) { "Invitation UUID changed" }
         callUUID = uuid
+        if (earlyCancellations.contains(uuid)) {
+            hasDeclined = true
+            finish()
+        }
+        earlyCancellations.clear()
         if (!isCancelled || cancelledUUID == uuid) return null
         cancelledUUID = uuid
         return InvitationCancellation(roomId, calleeUids, uuid)
@@ -47,6 +56,22 @@ class OutgoingInvitationAttempt(val roomId: String, calleeUids: List<String>) {
     @Synchronized
     fun finish() {
         if (!isCancelled) isFinished = true
+    }
+
+    /** An early event is only a candidate until the server returns this attempt's UUID. */
+    @Synchronized
+    fun observeCancellation(uuid: String, room: String): Boolean {
+        val identity = CallIdentityPolicy.parse(uuid, room) ?: return false
+        if (room != roomId || isCancelled || isFinished) return false
+        val known = callUUID
+        if (known == null) {
+            if (earlyCancellations.size < MAX_EARLY_EVENTS) earlyCancellations.add(identity.callUUID)
+            return false
+        }
+        if (!CallIdentityPolicy.matches(CallIdentity(known, roomId), identity)) return false
+        hasDeclined = true
+        finish()
+        return true
     }
 
     /** Finish submitted transport and UUID cleanup even if the original screen scope is cancelled. */

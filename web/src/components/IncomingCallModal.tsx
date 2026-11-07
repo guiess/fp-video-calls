@@ -4,6 +4,7 @@ import { subscribeChatEvents } from "../services/chatSocket";
 import { useAuth } from "../contexts/AuthContext";
 import { saveCallRecord } from "../services/callHistoryService";
 import { cancelCall, sendCallAnswer } from "../services/callService";
+import { matchesCallEvent } from "../services/callIdentity";
 
 interface IncomingCall {
   callUUID: string;
@@ -20,6 +21,7 @@ export default function IncomingCallModal() {
   const navigate = useNavigate();
   const [call, setCall] = useState<IncomingCall | null>(null);
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+  const callRef = useRef<IncomingCall | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -27,6 +29,8 @@ export default function IncomingCallModal() {
     const unsub = subscribeChatEvents({
       onCallInvite: (invite) => {
         if (invite.callerId === user.uid) return; // ignore own calls
+        stopRingtone();
+        callRef.current = invite;
         setCall(invite);
         // Play ringtone
         try {
@@ -36,15 +40,16 @@ export default function IncomingCallModal() {
         } catch {}
       },
       onCallCancel: (data) => {
-        if (call && (data.roomId === call.roomId || data.callUUID === call.callUUID)) {
+        if (callRef.current && matchesCallEvent(callRef.current, data)) {
           stopRingtone();
+          callRef.current = null;
           setCall(null);
         }
       },
     });
 
     return unsub;
-  }, [user, call]);
+  }, [user]);
 
   function stopRingtone() {
     if (ringtoneRef.current) {
@@ -54,9 +59,10 @@ export default function IncomingCallModal() {
   }
 
   function handleAccept(audioOnly = false) {
-    if (!call) return;
+    if (!call || callRef.current !== call) return;
     stopRingtone();
     const c = call;
+    callRef.current = null;
     setCall(null);
     // Notify the caller that we answered
     sendCallAnswer(c.callerId, c.roomId, c.callUUID);
@@ -71,6 +77,7 @@ export default function IncomingCallModal() {
   }
 
   function handleDecline() {
+    if (!call || callRef.current !== call) return;
     if (call) {
       // Notify the caller so they stop ringing
       cancelCall([call.callerId], call.roomId, call.callUUID);
@@ -82,6 +89,7 @@ export default function IncomingCallModal() {
       });
     }
     stopRingtone();
+    callRef.current = null;
     setCall(null);
   }
 
@@ -89,6 +97,7 @@ export default function IncomingCallModal() {
   useEffect(() => {
     if (!call) return;
     const timer = setTimeout(() => {
+      if (callRef.current !== call) return;
       // Save as MISSED
       if (call) {
         saveCallRecord({
@@ -99,6 +108,7 @@ export default function IncomingCallModal() {
         });
       }
       stopRingtone();
+      callRef.current = null;
       setCall(null);
     }, 45000);
     return () => clearTimeout(timer);

@@ -73,4 +73,38 @@ describe("delayed invitation cancellation compatibility", () => {
       expect(() => Reflect.apply(attempt.receiveUUID, attempt, [value])).toThrow(RangeError);
     }
   });
+
+  it("latches an early decline without applying it until the exact response UUID is known", async () => {
+    const cancel = vi.fn();
+    const attempt = new OutgoingInvitation(original, cancel);
+    expect(attempt.observeCancellation({ roomId: original.roomId, callUUID: "uuid" })).toBe(false);
+    expect(attempt.terminalEvent).toBeUndefined();
+    await attempt.receiveUUID("uuid");
+    expect(attempt.terminalEvent).toBe("declined");
+    await attempt.cancel();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("does not let an early other UUID sharing the room finish a newer invitation", async () => {
+    const attempt = new OutgoingInvitation(original, vi.fn());
+    attempt.observeCancellation({ roomId: original.roomId, callUUID: "old" });
+    await attempt.receiveUUID("new");
+    expect(attempt.terminalEvent).toBeUndefined();
+    expect(attempt.observeCancellation({ roomId: original.roomId, callUUID: "old" })).toBe(false);
+    expect(attempt.observeCancellation({ roomId: "wrong", callUUID: "new" })).toBe(false);
+    expect(attempt.terminalEvent).toBeUndefined();
+  });
+
+  it("retains first-terminal ordering and a measurable bounded early-event buffer", async () => {
+    const attempt = new OutgoingInvitation(original, vi.fn());
+    attempt.observeAnswer({ roomId: original.roomId, callUUID: "uuid" });
+    attempt.observeCancellation({ roomId: original.roomId, callUUID: "uuid" });
+    for (let index = 0; index < 40; index++) {
+      attempt.observeCancellation({ roomId: original.roomId, callUUID: `other-${index}` });
+    }
+    expect(attempt.pendingEventCount).toBe(32);
+    await attempt.receiveUUID("uuid");
+    expect(attempt.terminalEvent).toBe("answered");
+    expect(attempt.pendingEventCount).toBe(0);
+  });
 });

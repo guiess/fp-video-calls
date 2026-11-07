@@ -123,6 +123,7 @@ export class CallRegistry {
       state: "preparing", expiresAt: this.now() + CALL_LIMITS.SETUP_MS,
       hasCompletedDelivery: false,
       delivery: Promise.resolve(), timers: new Set(),
+      receipts: new Map(),
     };
     this.#records.set(record.callUUID, record);
     return record;
@@ -162,7 +163,10 @@ export class CallRegistry {
       ? cancelRecipients(record, body.calleeUids)
       : changeRecipient(record, uid, actionKind === "answer" ? "answered" : "declined");
     if (!record.recipients.some(recipient => this.canInvite(record, recipient))) this.clearTimers(record);
-    return { record, kind: actionKind, actorUid: uid, destinations };
+    const receiptUids = isCallerCancel
+      ? body.calleeUids.filter(recipient => record.statuses.get(recipient) === "cancelled")
+      : [uid];
+    return { record, kind: actionKind, actorUid: uid, destinations, receiptUids };
   }
 
   resolve(kind, uid, body) {

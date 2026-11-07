@@ -96,4 +96,24 @@ class OutgoingInvitationAttemptTest {
         try { attempt.receiveUUID("new"); fail("Changed UUID must be rejected") }
         catch (_: IllegalArgumentException) { }
     }
+
+    @Test fun `decline before invite response is latched but only applied to the returned UUID`() = runTest {
+        val attempt = OutgoingInvitationAttempt("room", listOf("alice", "bob"))
+        assertFalse(attempt.observeCancellation("old", "room"))
+        assertFalse(attempt.observeCancellation("uuid", "room"))
+        assertFalse(attempt.hasDeclined)
+        attempt.awaitInvitation({ "uuid" }, { fail("Decline must not cancel other group invitees") }, { true })
+        assertTrue(attempt.hasDeclined)
+        assertNull(attempt.markCancelled())
+    }
+
+    @Test fun `old UUID sharing room never becomes a new attempt decline`() {
+        val attempt = OutgoingInvitationAttempt("room", listOf("alice"))
+        attempt.observeCancellation("old", "room")
+        attempt.receiveUUID("new")
+        assertFalse(attempt.hasDeclined)
+        assertFalse(attempt.observeCancellation("old", "room"))
+        assertFalse(attempt.observeCancellation("new", "other"))
+        assertFalse(attempt.hasDeclined)
+    }
 }

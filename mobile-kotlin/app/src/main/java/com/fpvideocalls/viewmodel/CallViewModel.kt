@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.data.FirestoreRepository
 import com.fpvideocalls.model.CallRecordStatus
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.model.CallIdentity
+import com.fpvideocalls.model.CallIdentityPolicy
 import com.fpvideocalls.service.CallStateManager
 import com.fpvideocalls.service.NotificationHelper
 import com.fpvideocalls.util.CallEvent
@@ -20,12 +22,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
 import javax.inject.Inject
 
 sealed class CallNavigationEvent {
     data class ShowIncomingCall(val data: IncomingCallData) : CallNavigationEvent()
     data class AnswerCall(val data: IncomingCallData) : CallNavigationEvent()
-    object DismissIncomingCall : CallNavigationEvent()
+    data class DismissIncomingCall(val callUUID: String) : CallNavigationEvent()
 }
 
 @HiltViewModel
@@ -42,7 +45,7 @@ class CallViewModel @Inject constructor(
     val navigationEvents: SharedFlow<CallNavigationEvent> = _navigationEvents.asSharedFlow()
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             CallEventBus.events.collect { event ->
                 when (event) {
                     is CallEvent.Invite -> {
@@ -52,11 +55,14 @@ class CallViewModel @Inject constructor(
                     }
                     is CallEvent.Cancel -> {
                         Log.d("CallViewModel", "Call cancelled: ${event.callUUID}")
-                        _incomingCall.value = null
-                        _navigationEvents.emit(CallNavigationEvent.DismissIncomingCall)
+                        dismissIncomingIfMatching(event.callUUID, event.roomId)
                         saveCallHistory(event.callUUID)
                     }
                     is CallEvent.Answer -> {
+                        if (!CallIdentityPolicy.matchesUUID(CallStateManager.activeCallUUID, event.data.callUUID)) {
+                            Log.w("CallViewModel", "Ignoring answer for an obsolete incoming call")
+                            return@collect
+                        }
                         Log.d("CallViewModel", "Call answered from notification: ${event.data.callerName}")
                         CallStateManager.answerCall(event.data.callUUID)
                         _incomingCall.value = null
@@ -77,13 +83,14 @@ class CallViewModel @Inject constructor(
                     is CallEvent.Decline -> {
                         Log.d("CallViewModel", "Call declined: ${event.callUUID}")
                         // Get call info from UI state or CallStateManager
-                        val callData = _incomingCall.value
+                        val callData = _incomingCall.value?.takeIf {
+                            CallIdentityPolicy.matchesUUID(it.callUUID, event.callUUID)
+                        }
                         val record = CallStateManager.getRecord(event.callUUID)
                         val callerUid = callData?.callerId ?: record?.callerUid
                         val roomId = callData?.roomId ?: record?.roomId
                         CallStateManager.declineCall(event.callUUID)
-                        _incomingCall.value = null
-                        _navigationEvents.emit(CallNavigationEvent.DismissIncomingCall)
+                        dismissIncomingIfMatching(event.callUUID)
                         // Notify caller that we declined
                         if (callerUid != null && !roomId.isNullOrEmpty()) {
                             viewModelScope.launch {
@@ -106,8 +113,7 @@ class CallViewModel @Inject constructor(
                     is CallEvent.Timeout -> {
                         Log.d("CallViewModel", "Call timed out: ${event.callUUID}")
                         val record = CallStateManager.timeoutCall(event.callUUID)
-                        _incomingCall.value = null
-                        _navigationEvents.emit(CallNavigationEvent.DismissIncomingCall)
+                        dismissIncomingIfMatching(event.callUUID)
                         saveCallHistory(event.callUUID)
                         // Show missed call notification if timed out before answer
                         if (record != null && record.status == CallRecordStatus.MISSED) {
@@ -125,6 +131,16 @@ class CallViewModel @Inject constructor(
 
     fun clearIncomingCall() {
         _incomingCall.value = null
+    }
+
+    private suspend fun dismissIncomingIfMatching(uuid: String, roomId: String? = null) {
+        val current = _incomingCall.value ?: return
+        val matches = if (roomId != null) {
+            CallIdentityPolicy.matches(CallIdentity(current.callUUID, current.roomId), CallIdentity(uuid, roomId))
+        } else CallIdentityPolicy.matchesUUID(current.callUUID, uuid)
+        if (!matches) return
+        _incomingCall.value = null
+        _navigationEvents.emit(CallNavigationEvent.DismissIncomingCall(uuid))
     }
 
     /** Decline the current incoming call and notify the caller via API */

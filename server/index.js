@@ -13,7 +13,7 @@ import admin from "firebase-admin";
 import chatRoutes from "./chat-routes.js";
 import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
-import { registerCallRoutes } from "./call-routes.js";
+import { registerCallRoutes, registerCallBodyParser } from "./call-routes.js";
 import { registerChatAuthentication } from "./chat-socket-auth.js";
 import { isBlobStorageConfigured } from "./blob-storage.js";
 import { isPlainObject } from "./telemetry-validation.js";
@@ -113,6 +113,7 @@ app.use((req, res, next) => {
   next();
 });
 
+registerCallBodyParser(app, express.json);
 app.use(express.json({ limit: "100mb" }));
 
 // Security headers
