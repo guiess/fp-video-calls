@@ -44,7 +44,7 @@ These results do not update the live revision or constitute live UAT.
 | TURN and telemetry | `node --test server/turn-config.test.js server/turn-config.qa.test.js server/turn-credentials.test.js server/telemetry-validation.test.js server/telemetry-relay.test.js` | 30 tests passed |
 | Web unit tests | From `web`: `node node_modules/vitest/vitest.mjs run` | 175 tests passed, including canonical incoming events, early declines and `/app/call` SPA exit/unmount cleanup |
 | Web production build | From `web`: `node node_modules/vite/bin/vite.js build` | Passed; existing translation-key and bundle warnings remain |
-| Android full unit suites/debug build | From `mobile-kotlin`: `.\gradlew.bat --no-daemon test :app:assembleDebug --console=plain` | 360 debug + 360 release tests passed; debug APK built locally |
+| Android full unit suites/debug build | From `mobile-kotlin`: `.\gradlew.bat --no-daemon test :app:assembleDebug --console=plain` | 367 debug + 367 release tests passed; debug APK built locally |
 | Docs/package tests | `node --test scripts/tests/portfolio-docs.test.mjs scripts/tests/server-package.test.mjs scripts/tests/release-manifest.test.mjs` | 29 tests passed |
 | Source-package contract | `node scripts/validate-server-package.mjs server` | Passed, including all new runtime helpers; pre-existing checked-in ZIP is not the new deployment artifact |
 
@@ -75,6 +75,11 @@ and Android ringing/overlay/ViewModel/navigation consumers. The 197 APK above
 is baseline evidence only; a new final-SHA APK must be rebuilt and signature
 checked before any distribution. Review re-verification and Linux Node 20
 qualification are required before release, with all live changes still held.
+The subsequent Android compatibility correction validates notification/overlay
+answers against the authenticated server before recovering absent process-local
+state. Conflicting/terminal calls are rejected, background declines update their
+own local record without requiring a ViewModel, and in-app rendered actions
+carry the displayed identity instead of mutating a newer incoming call.
 
 The installed Android source baseline was built and installed on 2026-11-06:
 

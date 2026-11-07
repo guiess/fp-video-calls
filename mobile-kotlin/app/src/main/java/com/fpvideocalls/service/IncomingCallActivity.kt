@@ -95,29 +95,17 @@ class IncomingCallActivity : ComponentActivity() {
                     callData = callData,
                     onAnswer = { cameraOff ->
                         Log.d(TAG, "Call answered, cameraOff=$cameraOff")
-                        if (!CallIdentityPolicy.matchesUUID(CallStateManager.activeCallUUID, callData.callUUID)) {
+                        lifecycleScope.launch(NonCancellable) {
+                          try {
+                            if (!IncomingCallActions.answer(callData, callApiService)) {
                             Log.w(TAG, "Ignoring answer from an obsolete overlay")
-                            finish()
-                            return@IncomingCallScreen
-                        }
+                            return@launch
+                            }
                         CallRingingService.stopIfActive(identity)
-                        NotificationHelper.cancelNotification(this, callData.callUUID)
+                        NotificationHelper.cancelNotification(this@IncomingCallActivity, callData.callUUID)
                         CallStateManager.answerCall(callData.callUUID)
                         ActiveCallService.pendingCameraOff = cameraOff
-                        // Notify caller that we answered
-                        lifecycleScope.launch {
-                            try {
-                                callApiService.sendCallAnswer(
-                                    callerUid = callData.callerId,
-                                    roomId = callData.roomId,
-                                    callUUID = callData.callUUID
-                                )
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Failed to send answer to caller", e)
-                            }
-                        }
-
-                        val launchIntent = Intent(this, MainActivity::class.java).apply {
+                        val launchIntent = Intent(this@IncomingCallActivity, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                             action = "ANSWER"
                             putExtra("type", "call_invite")
@@ -132,9 +120,14 @@ class IncomingCallActivity : ComponentActivity() {
                         }
                         startActivity(launchIntent)
                         finish()
+                          } catch (_: IOException) {
+                            Log.w(TAG, "Incoming overlay answer was not confirmed")
+                          }
+                        }
                     },
                     onDecline = {
                         Log.d(TAG, "Call declined")
+                        IncomingCallActions.decline(callData)
                         CallEventBus.post(CallEvent.Decline(callData.callUUID))
                         CallRingingService.stopIfActive(identity)
                         NotificationHelper.cancelNotification(this, callData.callUUID)

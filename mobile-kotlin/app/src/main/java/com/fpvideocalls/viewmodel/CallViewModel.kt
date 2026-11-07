@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import java.io.IOException
 import javax.inject.Inject
 
 sealed class CallNavigationEvent {
@@ -129,8 +131,28 @@ class CallViewModel @Inject constructor(
         }
     }
 
-    fun clearIncomingCall() {
+    fun clearIncomingCall(expected: CallIdentity): Boolean {
+        val current = _incomingCall.value ?: return false
+        if (!CallIdentityPolicy.matches(CallIdentity(current.callUUID, current.roomId), expected)) return false
         _incomingCall.value = null
+        return true
+    }
+
+    fun answerIncomingCall(data: IncomingCallData, cameraOff: Boolean): Boolean {
+        val expected = CallIdentity(data.callUUID, data.roomId)
+        val current = _incomingCall.value ?: return false
+        if (!CallIdentityPolicy.matches(CallIdentity(current.callUUID, current.roomId), expected)) return false
+        viewModelScope.launch(NonCancellable) {
+            try {
+                if (!com.fpvideocalls.service.IncomingCallActions.answer(data, callApiService)) return@launch
+                if (!clearIncomingCall(expected)) return@launch
+                com.fpvideocalls.service.ActiveCallService.pendingCameraOff = cameraOff
+                com.fpvideocalls.service.CallRingingService.stopIfActive(expected)
+                NotificationHelper.cancelNotification(getApplication(), data.callUUID)
+                _navigationEvents.emit(CallNavigationEvent.AnswerCall(data))
+            } catch (_: IOException) { Log.w("CallViewModel", "Incoming answer was not confirmed") }
+        }
+        return true
     }
 
     private suspend fun dismissIncomingIfMatching(uuid: String, roomId: String? = null) {
@@ -144,24 +166,23 @@ class CallViewModel @Inject constructor(
     }
 
     /** Decline the current incoming call and notify the caller via API */
-    fun declineIncomingCall() {
-        val callData = _incomingCall.value
-        _incomingCall.value = null
-        if (callData != null) {
-            CallStateManager.declineCall(callData.callUUID)
-            viewModelScope.launch {
-                try {
-                    callApiService.cancelCall(
-                        calleeUids = listOf(callData.callerId),
-                        roomId = callData.roomId,
-                        callUUID = callData.callUUID
-                    )
-                } catch (e: Exception) {
-                    Log.w("CallViewModel", "Failed to send decline to caller", e)
-                }
+    fun declineIncomingCall(expected: CallIdentity): Boolean {
+        val callData = _incomingCall.value ?: return false
+        if (!clearIncomingCall(expected)) return false
+        CallStateManager.declineCall(callData.callUUID)
+        viewModelScope.launch {
+            try {
+                callApiService.cancelCall(
+                    calleeUids = listOf(callData.callerId),
+                    roomId = callData.roomId,
+                    callUUID = callData.callUUID
+                )
+            } catch (e: Exception) {
+                Log.w("CallViewModel", "Failed to send decline to caller", e)
             }
-            saveCallHistory(callData.callUUID)
         }
+        saveCallHistory(callData.callUUID)
+        return true
     }
 
     private fun saveCallHistory(callUUID: String) {

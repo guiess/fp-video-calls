@@ -59,5 +59,19 @@ class CallCancellationTransportTest {
         } catch (error: IOException) {
             assertEquals("Call invite failed: invalid UUID", error.message)
         }
+
+    }
+
+    @Test fun `answer server rejection is honored before cold process restoration`() = runTest {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(403).message("Forbidden").body("{}".toResponseBody()).build()
+        }.build()
+        try {
+            CallApiService(client).sendCallAnswer("caller", "room", "uuid")
+            fail("Rejected answer must not appear validated")
+        } catch (error: IOException) {
+            assertEquals("Call answer rejected: HTTP 403", error.message)
+        }
     }
 }

@@ -16,6 +16,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 @AndroidEntryPoint
 class CallActionReceiver : BroadcastReceiver() {
@@ -34,11 +35,15 @@ class CallActionReceiver : BroadcastReceiver() {
             ACTION_ANSWER -> {
                 val callData = extractCallData(intent)
                 val identity = CallIdentityPolicy.parse(callData.callUUID, callData.roomId)
-                if (identity == null || !CallIdentityPolicy.matchesUUID(CallStateManager.activeCallUUID, callData.callUUID)) {
+                if (identity == null) {
                     Log.w("CallActionReceiver", "Ignoring obsolete notification answer")
                     return
                 }
-                CallEventBus.post(CallEvent.Answer(callData))
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                  try {
+                    if (!IncomingCallActions.answer(callData, callApiService)) return@launch
+                    CallEventBus.post(CallEvent.Answer(callData))
 
                 // Stop ringing service and cancel ringing notification
                 CallRingingService.stopIfActive(identity)
@@ -59,6 +64,10 @@ class CallActionReceiver : BroadcastReceiver() {
                     putExtra("roomPassword", callData.roomPassword ?: "")
                 }
                 context.startActivity(launchIntent)
+                  } catch (_: IOException) {
+                    Log.w("CallActionReceiver", "Notification answer was not confirmed")
+                  } finally { pending.finish() }
+                }
             }
 
             ACTION_DECLINE -> {
@@ -70,6 +79,7 @@ class CallActionReceiver : BroadcastReceiver() {
                     Log.w("CallActionReceiver", "Ignoring notification decline without canonical identity")
                     return
                 }
+                IncomingCallActions.decline(extractCallData(intent))
                 CallEventBus.post(CallEvent.Decline(callUUID))
 
                 // Stop ringing service

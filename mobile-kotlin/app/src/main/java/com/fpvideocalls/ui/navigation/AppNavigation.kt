@@ -308,25 +308,18 @@ fun AppNavigation(
         // Incoming call
         composable(Routes.INCOMING_CALL) {
             val callData = pendingCallData.value ?: return@composable
-            val currentUser by authViewModel.user.collectAsState()
             val context = LocalContext.current
 
             IncomingCallScreen(
                 callData = callData,
                 onAnswer = { cameraOff ->
-                    CallStateManager.answerCall(callData.callUUID)
-                    callViewModel.clearIncomingCall()
-                    context.stopService(Intent(context, CallRingingService::class.java))
-                    ActiveCallService.pendingCameraOff = cameraOff
-                    navController.navigate(
-                        Routes.inCall(callData.roomId, currentUser?.displayName ?: "Me", currentUser?.uid ?: callData.callerId, callData.callType.value, callData.roomPassword)
-                    ) {
-                        popUpTo(Routes.MAIN) { inclusive = false }
-                    }
+                    callViewModel.answerIncomingCall(callData, cameraOff)
                 },
                 onDecline = {
-                    context.stopService(Intent(context, CallRingingService::class.java))
-                    callViewModel.declineIncomingCall()
+                    val expected = com.fpvideocalls.model.CallIdentity(callData.callUUID, callData.roomId)
+                    if (!callViewModel.declineIncomingCall(expected)) return@IncomingCallScreen
+                    CallRingingService.stopIfActive(expected)
+                    com.fpvideocalls.service.NotificationHelper.cancelNotification(context, callData.callUUID)
                     navController.popBackStack()
                 }
             )
