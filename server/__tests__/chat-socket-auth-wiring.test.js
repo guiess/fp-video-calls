@@ -147,6 +147,41 @@ describe("index.js private authentication wiring over Socket.IO", () => {
     expect(state.verifyIdToken).toHaveBeenLastCalledWith("fresh-token");
   });
 
+  it.each(["user:verified-user", "room:private-test"])(
+    "prevents a guest from subscribing to reserved private/internal channels through room ID %s",
+    async (roomId) => {
+      state.verifyIdToken.mockResolvedValue({ uid: "verified-user" });
+      const owner = await connect();
+      const guest = await connect();
+      owner.send("chat_auth", { token: "valid-token" });
+      await vi.waitFor(() => expect(owner.socket._chatUid).toBe("verified-user"));
+      guest.send("join_room", { roomId, userId: "guest", displayName: "Guest" });
+      await guest.expectError("BAD_REQUEST");
+      state.io.to("user:verified-user").emit("private-namespace-probe", {});
+      state.io.to(guest.socket.id).emit("guest-delivery-barrier", {});
+      await vi.waitFor(() => expect(owner.hasEvent("private-namespace-probe")).toBe(true));
+      await vi.waitFor(() => expect(guest.hasEvent("guest-delivery-barrier")).toBe(true));
+      expect(guest.hasEvent("private-namespace-probe")).toBe(false);
+      expect(guest.socket.rooms.size).toBe(1);
+      expect(guest.socket._chatUid).toBeUndefined();
+    },
+  );
+
+  it("isolates a guest room whose wire ID equals another socket's automatic channel", async () => {
+    const owner = await connect();
+    const guest = await connect();
+    const roomId = owner.socket.id;
+    guest.send("join_room", { roomId, userId: "guest", displayName: "Guest" });
+    await vi.waitFor(() => expect(guest.hasEvent("room_joined")).toBe(true));
+    expect(guest.socket.rooms.has(`room:${roomId}`)).toBe(true);
+    expect(guest.socket.rooms.has(roomId)).toBe(false);
+    state.io.to(owner.socket.id).emit("socket-channel-probe", {});
+    state.io.to(guest.socket.id).emit("guest-delivery-barrier", {});
+    await vi.waitFor(() => expect(owner.hasEvent("socket-channel-probe")).toBe(true));
+    await vi.waitFor(() => expect(guest.hasEvent("guest-delivery-barrier")).toBe(true));
+    expect(guest.hasEvent("socket-channel-probe")).toBe(false);
+  });
+
   it.each([null, {}, { uid: "victim" }, { token: "invalid-token" }])(
     "revokes previous private identity even for payloads rejected by the old global guard: %j",
     async (payload) => {

@@ -100,6 +100,15 @@ test("product documentation does not frame the Android app as an old release", a
   }
 });
 
+test("authorization docs distinguish integrated source fixes from pending deployment", async () => {
+  for (const filename of ["README.md", "SECURITY.md", "ARCHITECTURE.md"]) {
+    const text = (await readFile(path.join(REPOSITORY_ROOT, filename), "utf8")).replace(/\s+/g, " ");
+    assert.match(text, /await coordinated server\/web deployment/);
+    assert.doesNotMatch(text, /token-optional private Socket\.IO identity|unchecked room controls/);
+    assert.doesNotMatch(text, /missing access checks for private Socket\.IO identity/);
+  }
+});
+
 test("setup and security guidance retain the corrected implementation boundaries", async () => {
   const load = (filename) => readFile(path.join(REPOSITORY_ROOT, filename), "utf8");
   const [build, security, android, deployment, releases] = await Promise.all([

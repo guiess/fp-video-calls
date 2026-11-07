@@ -21,7 +21,7 @@ a confidential security report are welcome.
 ## Safe use during development
 
 > **M² Calls is under active development and intentionally not production-ready.**
-> Private socket identity, call authorization, and file-access controls
+> Call ownership and file-access controls
 > still need hardening. Do not use sensitive conversations or confidential files.
 > Sensitive diagnostic logging and non-E2E-encrypted text messaging remain limitations.
 
@@ -33,6 +33,11 @@ confidential records.
 Authenticated REST chat routes verify Firebase ID tokens and check conversation
 membership for conversation access. Guest rooms deliberately support account-free
 calling, with passwords checked when enabled.
+
+Private-socket authentication, socket-bound room controls, and trusted invitation
+identity are implemented in source and await coordinated server/web deployment.
+Do not assume the live app includes these fixes. The deployed location policy
+below is separate and unchanged.
 
 REST call invitations bind `callerId` to the verified Firebase token UID and
 resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
@@ -96,8 +101,8 @@ These are source guarantees, not evidence that this revision is deployed.
   sender identity are socket-bound, with same-room relay targets. Replacing a
   participant evicts their old socket from the group channel and telemetry
   subscriptions. Guest joining/replacement remains account-free (and uses the
-  optional room password); account ownership is not established by guest IDs. Internal room
-  channels are isolated from private account and socket-ID channels, and the
+  optional room password); account ownership is not established by guest IDs.
+  Internal room channels are isolated from private account and socket-ID channels, and the
   REST close bypass returns HTTP 403 `ROOM_SOCKET_REQUIRED`.
 - **Call ownership:** invite/answer/cancel routes require login and invitation
   identity is bound to the verified UID. Answer/cancel do not verify the
@@ -216,8 +221,7 @@ documentation must never reproduce detected values.
 
 ## Known risk areas
 
-- missing access checks for private Socket.IO identity and call
-  identity/ownership;
+- call answer/cancel ownership checks and account-free guest identity limitations;
 - attachment-sharing policy and storage-mode-specific access controls;
 - dependency/supply-chain findings requiring separate triage;
 - configuration drift among SWA, App Service, Firebase, Blob/local storage, and

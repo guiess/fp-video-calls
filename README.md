@@ -5,10 +5,14 @@ WebRTC audio/video calls, persistent messaging, contacts, files, call history,
 and location sharing. The app is under active development and is intentionally
 not production-ready.
 
-> **Safety notice:** Private socket identity, call authorization, and file-access
+> **Safety notice:** Call ownership and file-access
 > controls still need hardening. Do not use sensitive conversations or confidential files.
 > Remaining authorization and privacy limitations are documented in
 > [SECURITY.md](SECURITY.md).
+
+Private-socket authentication, socket-bound room controls, and trusted invitation
+identity are implemented in source and await coordinated server/web deployment.
+Do not assume the live app includes these fixes.
 
 ## Availability
 
@@ -161,8 +165,10 @@ Implementation:
 - Current active web and Android text-send paths use reversible Base64 encoding
   with empty encrypted-key maps. Base64 encoding is not end-to-end encryption;
   cryptographic helpers exist but are not the universal active send path.
-- Known access-control gaps include token-optional private Socket.IO identity,
-  unchecked room controls, and call identity/ownership checks.
+- Source now requires verified private Socket.IO identity, binds room controls
+  to the current joined socket, and derives invitation identity from Firebase.
+  Call answer/cancel ownership checks remain incomplete; account-free guest
+  participant IDs do not establish account ownership.
   Attachment access depends on the storage
   mode. Account-free guest calling, temporary download links, and guest TURN
   credentials are design choices, with access and abuse controls described in

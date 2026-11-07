@@ -1,10 +1,14 @@
 # M² Calls architecture
 
 - **Source baseline:** repository commit
-  `482a83a83db50d75792610fc009f0fb87d24971d`, reviewed 2026-11-06
+  `d10575397265edbb36e16600cc16b072ed8efc72`, reviewed 2026-11-06
 - **Purpose:** system architecture and runtime reference
 - **Scope:** implemented source behavior and explicit unknowns, not an
   aspirational redesign
+
+Private-socket authentication, socket-bound room controls, and trusted invitation
+identity are implemented in source and await coordinated server/web deployment.
+Do not assume the live app includes these fixes.
 
 ![M² Calls system overview showing clients, signaling, media, storage, and trust boundaries](docs/assets/architecture/system-overview.svg)
 
