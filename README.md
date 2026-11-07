@@ -5,7 +5,7 @@ WebRTC audio/video calls, persistent messaging, contacts, files, call history,
 and location sharing. The app is under active development and is intentionally
 not production-ready.
 
-> **Safety notice:** Call ownership and file-access
+> **Safety notice:** Live call ownership and file-access
 > controls still need hardening. Do not use sensitive conversations or confidential files.
 > Remaining authorization and privacy limitations are documented in
 > [SECURITY.md](SECURITY.md).
@@ -167,7 +167,8 @@ Implementation:
   cryptographic helpers exist but are not the universal active send path.
 - Source now requires verified private Socket.IO identity, binds room controls
   to the current joined socket, and derives invitation identity from Firebase.
-  Call answer/cancel ownership checks remain incomplete; account-free guest
+  Current source adds bounded call answer/cancel/decline ownership checks,
+  but this change is not deployed or live-user tested. Account-free guest
   participant IDs do not establish account ownership.
   Attachment access depends on the storage
   mode. Account-free guest calling, temporary download links, and guest TURN

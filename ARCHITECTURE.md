@@ -158,8 +158,35 @@ through Firebase Auth, ignoring legacy body identity fields. Missing profile
 fields use `User`/no photo; a failed profile lookup returns HTTP 500
 `CALLER_PROFILE_LOOKUP_FAILED` before any socket or FCM delivery. The same
 `call_invite` identity and call UUID reach user Socket.IO rooms and FCM. Android
-can display full-screen ringing and enter the room. Cancel/answer ownership
-checks remain a separate limitation.
+can display full-screen ringing and enter the room.
+
+Current source (not yet deployed) records authenticated inviter, original
+recipients, room, UUID and per-invitee lifecycle before profile lookup.
+Answer is invitee-to-inviter; cancel is inviter-to-original-ringing-recipients;
+decline remains invitee-to-inviter using the legacy cancel endpoint. Group
+decline still ends the caller's ringing wait. UUID-less actions require exactly
+one matching recorded role/room/destination set. Async lookups and reconnect
+retries recheck lifecycle before delivery, with cancellation ordered after
+already-started invitation sends. Unknown pre-reservation cancellations fail
+closed rather than creating speculative authority. `[OWASP]` `[CUSTOM]`
+
+[Call authority](server/call-authorization.js) and
+[route delivery adapter](server/call-routes.js) separate policy from Firebase/
+Socket.IO. The bounded process-local registry holds at most 1024 records and
+32 recipients per call: 15-second profile preparation, at most 60 seconds of
+initial delivery, one 60-second caller ringing window after the invite response,
+and 1-second cleanup. Terminal records deduplicate until their original
+deadline; restart/deploy requires redial. The policy does not change guest
+identity, room controls, telemetry, durable call history, or Firebase rules.
+Detailed source/live boundaries and errors are in [SECURITY.md](SECURITY.md).
+`[HEXAGONAL]` `[YAGNI]`
+
+The approved source-only web/Android amendment resends cancelled invitations
+with the received UUID and immutable original room/recipients, never a newer
+call's context. Android finishes already-submitted transport despite screen
+coroutine cancellation. Deployment of the changed clients is needed for that
+early request-order race; a response that never arrives cannot trigger resend.
+Normal optional-UUID server compatibility remains. `[CUSTOM]`
 
 ### Persistent and transient chat
 

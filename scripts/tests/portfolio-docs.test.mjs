@@ -110,7 +110,11 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   }
   const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
   assert.match(security, /e74e890d5777db112ea8cedfb4d0d932169b3254/);
-  assert.match(security.replace(/\s+/g, " "), /Answer\/cancel do not verify the requester's relationship to the call/);
+  assert.match(security.replace(/\s+/g, " "), /At that deployed revision, answer\/cancel do not verify the requester's relationship to the call/);
+  assert.match(security, /Source-only call ownership/);
+  assert.match(security, /1024 invitation records/);
+  assert.match(security, /60-second ringing window/);
+  assert.match(security, /exactly one recorded call/);
   assert.match(security, /account ownership is not established by guest IDs/);
   assert.match(security.replace(/\s+/g, " "), /Live user acceptance testing is complete for the features checked/);
   assert.match(security.replace(/\s+/g, " "), /Self-pin\/primary behavior was not manually checked/);

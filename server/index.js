@@ -5,7 +5,6 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Server as SocketIOServer } from "socket.io";
-import crypto from "crypto";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import helmet from "helmet";
@@ -14,7 +13,7 @@ import admin from "firebase-admin";
 import chatRoutes from "./chat-routes.js";
 import { UPLOAD_DIR } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
-import { requireAuth } from "./auth-middleware.js";
+import { registerCallRoutes } from "./call-routes.js";
 import { registerChatAuthentication } from "./chat-socket-auth.js";
 import { isBlobStorageConfigured } from "./blob-storage.js";
 import { isPlainObject } from "./telemetry-validation.js";
@@ -238,178 +237,8 @@ app.get("/api/turn", (req, res) => {
   }
 });
 
-// ── Mobile call invite / cancel (Firebase FCM) ────────────────────────────
-
-/** Lookup a user's FCM token from Firestore (new path, with fallback to old path) */
-async function getFcmToken(uid) {
-  const newDoc = await admin.firestore().collection("users").doc(uid).collection("private").doc("userData").get();
-  if (newDoc.exists && newDoc.data().fcmToken) return newDoc.data().fcmToken;
-  // Fallback: old path for users who haven't re-opened the app since migration
-  const oldDoc = await admin.firestore().collection("users").doc(uid).get();
-  return oldDoc.exists ? (oldDoc.data().fcmToken || null) : null;
-}
-
-/**
- * POST /api/call/invite
- * Body: { calleeUids: string[], roomId, callType, roomPassword? }
- * Legacy callerId/callerName/callerPhoto fields are accepted but ignored.
- * Socket and FCM caller identity comes only from the verified UID and Firebase Auth.
- */
-app.post("/api/call/invite", requireAuth, async (req, res) => {
-  const { calleeUids, roomId, callType, roomPassword } = req.body || {};
-  if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
-    console.log("[call/invite] BAD_REQUEST");
-    return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
-  }
-  const callerId = req.uid;
-  let callerProfile;
-  try {
-    callerProfile = await admin.auth().getUser(callerId);
-  } catch {
-    console.error("[call/invite] Caller profile lookup failed");
-    return res.status(500).json({ ok: false, error: "CALLER_PROFILE_LOOKUP_FAILED" });
-  }
-  const callUUID = crypto.randomUUID();
-  try {
-    // Emit socket event for web clients
-    const invitePayload = {
-      callUUID,
-      callerId: String(callerId),
-      callerName: callerProfile.displayName || "User",
-      callerPhoto: callerProfile.photoURL || "",
-      roomId: String(roomId),
-      callType: String(callType || "direct"),
-      roomPassword: String(roomPassword || ""),
-    };
-    const emptyRoomUids = [];
-    for (const uid of calleeUids) {
-      const room = `user:${uid}`;
-      const sockets = await io.in(room).fetchSockets();
-      console.log(`[call/invite] emitting call_invite to ${room}, sockets in room: ${sockets.length}`);
-      io.to(room).emit("call_invite", invitePayload);
-      if (sockets.length === 0) emptyRoomUids.push(uid);
-    }
-
-    // Retry socket emit for users with 0 sockets (may be reconnecting after idle)
-    if (emptyRoomUids.length > 0) {
-      const retryEmit = async (delaySec) => {
-        await new Promise(r => setTimeout(r, delaySec * 1000));
-        for (const uid of emptyRoomUids) {
-          const room = `user:${uid}`;
-          const sockets = await io.in(room).fetchSockets();
-          if (sockets.length > 0) {
-            console.log(`[call/invite] RETRY emit to ${room} after ${delaySec}s, sockets: ${sockets.length}`);
-            io.to(room).emit("call_invite", invitePayload);
-          }
-        }
-      };
-      retryEmit(2);
-      retryEmit(5);
-    }
-
-    // Send FCM push notifications (only if Firebase Admin is configured)
-    let sent = 0, failed = 0;
-    if (firebaseReady) {
-      const results = await Promise.allSettled(
-        calleeUids.map(async (uid) => {
-          const token = await getFcmToken(uid);
-          console.log(`[call/invite] FCM token for ${uid}: ${token ? "found" : "NOT FOUND"}`);
-          if (!token) return;
-          await admin.messaging().send({
-            token,
-            android: { priority: "high" },
-            data: {
-              ...invitePayload,
-              type: "call_invite",
-              calleeUid: String(uid),
-            },
-          });
-        })
-      );
-      failed = results.filter(r => r.status === "rejected").length;
-      sent = calleeUids.length - failed;
-    }
-    return res.json({ ok: true, callUUID, sent, failed });
-  } catch (e) {
-    console.error("[call/invite] failed", e);
-    return res.status(500).json({ ok: false, error: "SEND_FAILED" });
-  }
-});
-
-/**
- * POST /api/call/cancel
- * Body: { calleeUids: string[], roomId }
- * Sends a cancel FCM message so the callee's ringing screen dismisses.
- */
-app.post("/api/call/cancel", requireAuth, async (req, res) => {
-  const { calleeUids, roomId, callUUID } = req.body || {};
-  if (!Array.isArray(calleeUids) || calleeUids.length === 0 || !roomId) {
-    return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
-  }
-  try {
-    // Emit socket event for web clients (always works)
-    for (const uid of calleeUids) {
-      io.to(`user:${uid}`).emit("call_cancel", {
-        roomId: String(roomId),
-        callUUID: String(callUUID || ""),
-      });
-    }
-
-    // Send FCM cancel (only if Firebase Admin is configured)
-    if (firebaseReady) {
-      await Promise.allSettled(
-        calleeUids.map(async (uid) => {
-          const token = await getFcmToken(uid);
-          console.log(`[call/cancel] FCM token for ${uid}: ${token ? "found" : "NOT FOUND"}`);
-          if (!token) return;
-          await admin.messaging().send({
-            token,
-            android: { priority: "high" },
-            data: { type: "call_cancel", roomId: String(roomId), callUUID: String(callUUID || "") },
-          });
-        })
-      );
-    }
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error("[call/cancel] failed", e);
-    return res.status(500).json({ ok: false, error: "SEND_FAILED" });
-  }
-});
-
-/**
- * POST /api/call/answer
- * Body: { callerUid: string, roomId: string, callUUID?: string }
- * Notifies the caller that the callee answered so the caller can join the room.
- */
-app.post("/api/call/answer", requireAuth, async (req, res) => {
-  const { callerUid, roomId, callUUID } = req.body || {};
-  if (!callerUid || !roomId) {
-    return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
-  }
-  io.to(`user:${callerUid}`).emit("call_answered", {
-    roomId: String(roomId),
-    callUUID: String(callUUID || ""),
-  });
-
-  if (firebaseReady) {
-    try {
-      const token = await getFcmToken(callerUid);
-      if (token) {
-        await admin.messaging().send({
-          token,
-          android: { priority: "high" },
-          data: { type: "call_answered", roomId: String(roomId), callUUID: String(callUUID || "") },
-        });
-      }
-    } catch (e) {
-      console.warn("[call/answer] FCM failed:", e.message);
-    }
-  }
-
-  console.log(`[call/answer] notified caller ${callerUid} for room ${roomId}`);
-  return res.json({ ok: true });
-});
+// Invitation ownership is process-local; restart/deploy requires redial.
+registerCallRoutes(app, { io, server, admin, firebaseReady });
 
 // ── File serving — local storage only (blob files use SAS URLs in message data) ─
 app.get("/api/chat/files/:name", (req, res) => {

@@ -147,7 +147,7 @@ class CallApiService @Inject constructor(
         val responseBody = response.body?.string() ?: throw Exception("Call invite failed: empty response")
         if (!response.isSuccessful) throw Exception("Call invite failed: ${response.code}")
         val result = JSONObject(responseBody)
-        result.optString("callUUID", "")
+        result.opt("callUUID") as? String ?: throw IOException("Call invite failed: invalid UUID")
     }
 
     suspend fun cancelCall(
@@ -165,9 +165,9 @@ class CallApiService @Inject constructor(
             .addAuth()
             .post(body.toString().toRequestBody(json))
             .build()
-        try {
-            client.newCall(request).execute()
-        } catch (_: Exception) {}
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("Call cancellation rejected: HTTP ${response.code}")
+        }
     }
 
     suspend fun sendCallAnswer(

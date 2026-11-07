@@ -54,11 +54,14 @@ export async function sendCallInvite(opts: {
 /** Cancel an outgoing call */
 export async function cancelCall(calleeUids: string[], roomId: string, callUUID?: string): Promise<void> {
   try {
-    await apiFetch("/api/call/cancel", {
+    const response = await apiFetch("/api/call/cancel", {
       method: "POST",
       body: JSON.stringify({ calleeUids, roomId, callUUID }),
     });
-  } catch {}
+    if (!response.ok) console.warn("[call/cancel] Request rejected", response.status);
+  } catch {
+    console.warn("[call/cancel] Request failed");
+  }
 }
 
 /** Notify the caller that the callee answered */

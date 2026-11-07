@@ -29,7 +29,44 @@ These package/advisory counts require separate dependency triage.
 
 ## Current Android source build
 
-The current Android source was built and installed on 2026-11-06:
+### Local call-ownership integration (2026-11-07)
+
+The approved ownership ticket and web/Android delayed-response cancellation
+amendment were implemented locally against fresh `main`
+`fd2817b6e15775971f5d8fb5b6168e6d0bb36474`. No code/settings deployment,
+APK installation/publication, push or PR occurred during this implementation.
+These results do not update the live revision or constitute live UAT.
+
+| Area | Local command | Result |
+|---|---|---|
+| Call policy/trusted identity/real private Socket.IO | From `server`: `node node_modules/vitest/vitest.mjs run __tests__/call-authorization.test.js __tests__/call-ownership-wiring.test.js __tests__/call-invite.test.js` | 80 tests passed |
+| Full server suite | From `server`: `node node_modules/vitest/vitest.mjs run` | 226 passed, 1 unchanged WebP/JPEG expectation failure |
+| TURN and telemetry | `node --test server/turn-config.test.js server/turn-config.qa.test.js server/turn-credentials.test.js server/telemetry-validation.test.js server/telemetry-relay.test.js` | 30 tests passed |
+| Web unit tests | From `web`: `node node_modules/vitest/vitest.mjs run` | 152 tests passed, including actual outgoing-screen hook wiring |
+| Web production build | From `web`: `node node_modules/vite/bin/vite.js build` | Passed; existing translation-key and bundle warnings remain |
+| Android full unit suites/debug build | From `mobile-kotlin`: `.\gradlew.bat --no-daemon test :app:assembleDebug --console=plain` | 352 debug + 352 release tests passed; debug APK built locally |
+| Docs/package tests | `node --test scripts/tests/portfolio-docs.test.mjs scripts/tests/server-package.test.mjs scripts/tests/release-manifest.test.mjs` | 29 tests passed |
+| Source-package contract | `node scripts/validate-server-package.mjs server` | Passed, including both new runtime helpers; pre-existing checked-in ZIP is not the new deployment artifact |
+
+Server/web tests used Node 22.23.4; in-memory native SQLite qualification passed.
+The unchanged Windows npm-test shim was bypassed with the direct Vitest entry.
+An explicit application TypeScript check still reports 11 pre-existing errors
+in translations, AppShell, ChatConversationScreen and LocationPanel; no changed
+application file adds a diagnostic. Kotlin/SDK warning baselines remain.
+The only dependency addition is test-only `org.json:json:20240303`, needed to
+exercise real Android JSON/OkHttp cancellation rather than Android's null JVM
+stubs. No production dependency or runtime version was upgraded. `[TDD]` `[CUSTOM]`
+
+Local tests cover original roles/destinations, UUID-less unique/ambiguous/stale
+matching, per-invitee group lifecycle, idempotent repeats, capacity/expiry,
+slow delivery versus the caller's actual ringing timer, reconnect/multidevice,
+profile/socket/token/send races and immutable late-response cleanup.
+Registry restart deliberately requires redial. The early request-order race
+needs the updated web/Android clients; no-response cleanup or zero momentary
+ringing is promised. Coordinated QA/security/review, rollout, Android
+distribution and live-user acceptance remain separate pending steps.
+
+The installed Android source baseline was built and installed on 2026-11-06:
 
 - source commit: `482a83a83db50d75792610fc009f0fb87d24971d`;
 - build command: `.\gradlew.bat --no-daemon :app:assembleDebug --console=plain`;
