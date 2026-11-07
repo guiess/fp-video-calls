@@ -11,8 +11,8 @@ not production-ready.
 > [SECURITY.md](SECURITY.md).
 
 Private-socket authentication, socket-bound room controls, and trusted invitation
-identity are implemented in source and await coordinated server/web deployment.
-Do not assume the live app includes these fixes.
+identity are deployed on Azure. Existing guest calling and opted-in telemetry
+compatibility are preserved; remaining limitations are described below.
 
 ## Availability
 
@@ -159,7 +159,7 @@ Implementation:
 
 ## Current limitations
 
-- The live deployment revision, Azure SKU, active Blob/local storage mode,
+- Azure SKU, active Blob/local storage mode,
   coturn listener/firewall agreement, retention configuration, and monitoring
   configuration are not established by repository evidence.
 - Current active web and Android text-send paths use reversible Base64 encoding

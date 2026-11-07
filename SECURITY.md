@@ -35,9 +35,10 @@ membership for conversation access. Guest rooms deliberately support account-fre
 calling, with passwords checked when enabled.
 
 Private-socket authentication, socket-bound room controls, and trusted invitation
-identity are implemented in source and await coordinated server/web deployment.
-Do not assume the live app includes these fixes. The deployed location policy
-below is separate and unchanged.
+identity are deployed on Azure, verified 2026-11-06 at application revision
+`e74e890d5777db112ea8cedfb4d0d932169b3254`. Live user acceptance testing remains
+pending; this deployment does not imply production readiness.
+The deployed location policy below is separate and unchanged.
 
 REST call invitations bind `callerId` to the verified Firebase token UID and
 resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
@@ -91,7 +92,8 @@ sends a rejected empty auth attempt to clear any previous private subscription.
 Android already obtains a token for each connection and reconnect, and its
 application auth-state listener replaces/disconnects the socket on identity
 changes. No Firebase login is required for a socket connection or guest calls.
-These are source guarantees, not evidence that this revision is deployed.
+The deployed server and web apply these checks; Android retains its existing
+token lifecycle without a new APK release.
 
 ### Other known access-control gaps
 
@@ -128,8 +130,8 @@ shape/size and is covered by the `/api/` IP rate limiter. This is not a private
 chat authorization defect. Credential issuance and relay quotas still need
 appropriate abuse and bandwidth-cost controls for the deployment.
 
-Location authorization is deployed as described above. The deployed server
-revision, Firebase Storage rules, active storage mode, and coturn quota settings
+Location authorization and the application revision are deployed as described
+above. Firebase Storage rules, active storage mode, and coturn quota settings
 are not established here.
 
 Source:
@@ -204,8 +206,8 @@ are removed. `TELEMETRY_FORBIDDEN`, `TELEMETRY_UNSUPPORTED_VERSION`,
 `TELEMETRY_INVALID` and `TELEMETRY_RATE_LIMITED` distinguish rejections.
 The per-socket/room quota is twenty samples per ten seconds and survives
 unsubscribe, leave, close and rejoin; disconnect clears it and consent.
-New replacement sockets require fresh consent. Source preservation is pending
-coordinated deployment, not a change to guest account identity or location rules.
+New replacement sockets require fresh consent. These telemetry compatibility
+checks are deployed without changing guest account identity or location rules.
 
 ## Device permissions
 

@@ -1,14 +1,14 @@
 # M² Calls architecture
 
 - **Source baseline:** repository commit
-  `d10575397265edbb36e16600cc16b072ed8efc72`, reviewed 2026-11-06
+  `e74e890d5777db112ea8cedfb4d0d932169b3254`, reviewed 2026-11-06
 - **Purpose:** system architecture and runtime reference
 - **Scope:** implemented source behavior and explicit unknowns, not an
   aspirational redesign
 
 Private-socket authentication, socket-bound room controls, and trusted invitation
-identity are implemented in source and await coordinated server/web deployment.
-Do not assume the live app includes these fixes.
+identity are deployed on Azure at the source revision above. Deployed telemetry
+compatibility is preserved. Live user acceptance testing remains pending.
 
 ![M² Calls system overview showing clients, signaling, media, storage, and trust boundaries](docs/assets/architecture/system-overview.svg)
 
@@ -54,7 +54,7 @@ Android devices.
 | Firebase Auth/Firestore/FCM | Identity, profiles/contacts/history/location, private device data, notifications | Provider-managed; rules vary by collection | [firestore.rules](firestore.rules) |
 | Blob/local attachment adapter | Upload, download, delete, SAS/local URL selection | Deployment-selected at server startup | [server/blob-storage.js](server/blob-storage.js) |
 | coturn | STUN/TURN allocations and relayed media | Separate VM/network/security boundary | [server TURN contract](server/turn-config.js) |
-| Azure SWA/App Service | Web hosting and Node hosting | Live configuration and deployed revision are not recorded in this repository | [deployment guide](docs/azure-deploy.md) |
+| Azure SWA/App Service | Web hosting and Node hosting | Deployed application revision is recorded above; broader live configuration remains unverified | [deployment guide](docs/azure-deploy.md) |
 
 **Trade-off:** one Node process plus SQLite and in-memory state keeps the
 personal-use deployment manageable, but it couples scaling/failover to process
@@ -203,7 +203,7 @@ sender/recipient roster, socket, and internal `room:` channel membership.
 Unsupported versions have a distinct error. Twenty samples per ten seconds
 are tracked per socket/room across unsubscribe, leave, close and rejoin;
 disconnect clears the counter and consent. Replacement sockets never inherit
-consent. These compatibility changes await the coordinated deployment and do
+consent. These compatibility checks are deployed and do
 not alter private auth, guest control authority, or Firebase rules. `[OWASP]`
 
 **Trade-off:** specialized code around recovery and storage uses useful
@@ -251,7 +251,7 @@ in this repository.
 **Trade-off:** manual server/TURN operations keep the deployment simple, but
 provide less repeatability than infrastructure as code.
 
-**Limitation:** live resource configuration, deployed revision, rollback timing,
+**Limitation:** broader live resource configuration, rollback timing,
 data recovery, monitoring, quotas, and cost alerts remain operator-verified or
 unknown until recorded.
 

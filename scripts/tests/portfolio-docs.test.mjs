@@ -100,13 +100,21 @@ test("product documentation does not frame the Android app as an old release", a
   }
 });
 
-test("authorization docs distinguish integrated source fixes from pending deployment", async () => {
+test("authorization docs reflect deployed fixes without claiming remaining gaps are resolved", async () => {
   for (const filename of ["README.md", "SECURITY.md", "ARCHITECTURE.md"]) {
     const text = (await readFile(path.join(REPOSITORY_ROOT, filename), "utf8")).replace(/\s+/g, " ");
-    assert.match(text, /await coordinated server\/web deployment/);
+    assert.match(text, /are deployed on Azure/);
+    assert.doesNotMatch(text, /await coordinated server\/web deployment|await the coordinated deployment|preservation is pending coordinated deployment|Do not assume the live app includes these fixes/);
     assert.doesNotMatch(text, /token-optional private Socket\.IO identity|unchecked room controls/);
     assert.doesNotMatch(text, /missing access checks for private Socket\.IO identity/);
   }
+  const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
+  assert.match(security, /e74e890d5777db112ea8cedfb4d0d932169b3254/);
+  assert.match(security.replace(/\s+/g, " "), /Answer\/cancel do not verify the requester's relationship to the call/);
+  assert.match(security, /account ownership is not established by guest IDs/);
+  assert.match(security.replace(/\s+/g, " "), /Live user acceptance testing remains pending/);
+  const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
+  assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });
 
 test("setup and security guidance retain the corrected implementation boundaries", async () => {
