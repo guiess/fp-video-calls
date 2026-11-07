@@ -42,7 +42,7 @@ These results do not update the live revision or constitute live UAT.
 | Call policy/trusted identity/real private Socket.IO | From `server`: `node node_modules/vitest/vitest.mjs run __tests__/call-authorization.test.js __tests__/call-ownership-wiring.test.js __tests__/call-invite.test.js` | 80 tests passed |
 | Full server suite | From `server`: `node node_modules/vitest/vitest.mjs run` | 226 passed, 1 unchanged WebP/JPEG expectation failure |
 | TURN and telemetry | `node --test server/turn-config.test.js server/turn-config.qa.test.js server/turn-credentials.test.js server/telemetry-validation.test.js server/telemetry-relay.test.js` | 30 tests passed |
-| Web unit tests | From `web`: `node node_modules/vitest/vitest.mjs run` | 152 tests passed, including actual outgoing-screen hook wiring |
+| Web unit tests | From `web`: `node node_modules/vitest/vitest.mjs run` | 158 tests passed, including `/app/call` ActiveCallScreen and legacy outgoing-screen hook wiring |
 | Web production build | From `web`: `node node_modules/vite/bin/vite.js build` | Passed; existing translation-key and bundle warnings remain |
 | Android full unit suites/debug build | From `mobile-kotlin`: `.\gradlew.bat --no-daemon test :app:assembleDebug --console=plain` | 352 debug + 352 release tests passed; debug APK built locally |
 | Docs/package tests | `node --test scripts/tests/portfolio-docs.test.mjs scripts/tests/server-package.test.mjs scripts/tests/release-manifest.test.mjs` | 29 tests passed |

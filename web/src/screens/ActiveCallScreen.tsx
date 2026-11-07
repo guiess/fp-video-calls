@@ -6,6 +6,7 @@ import { WebRTCService, SignalingHandlers } from "../services/webrtc";
 import { createRoom, sendCallInvite, cancelCall } from "../services/callService";
 import { saveCallRecord } from "../services/callHistoryService";
 import { subscribeChatEvents } from "../services/chatSocket";
+import { OutgoingInvitation } from "../services/outgoingInvitation";
 import VideoGrid, { RemoteTile } from "../components/VideoGrid";
 import {
   clearRemoteStream,
@@ -18,6 +19,11 @@ function safeRandomId() {
 }
 
 type CallPhase = "setting_up" | "ringing" | "in_call" | "ended" | "error";
+type InvitationGeneration = { isCancelled: boolean; invitation?: OutgoingInvitation };
+
+function reportCancellationFailure() {
+  console.warn("[call/cancel] Cancellation request failed");
+}
 
 export default function ActiveCallScreen() {
   const [params] = useSearchParams();
@@ -52,6 +58,7 @@ export default function ActiveCallScreen() {
   const passwordRef = useRef<string>(incomingPassword || "");
   const callUUIDRef = useRef<string>("");
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const invitationGenerationRef = useRef<InvitationGeneration>();
   const userIdRef = useRef(safeRandomId());
   const hadRemoteRef = useRef(false);
   const phaseRef = useRef(phase);
@@ -262,6 +269,8 @@ export default function ActiveCallScreen() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    const generation: InvitationGeneration = { isCancelled: false };
+    invitationGenerationRef.current = generation;
 
     async function init() {
       const svc = new WebRTCService();
@@ -286,7 +295,7 @@ export default function ActiveCallScreen() {
           password: passwordRef.current || undefined,
           quality,
         });
-        if (cancelled) {
+        if (cancelled || generation.isCancelled || invitationGenerationRef.current !== generation) {
           svc.leave();
           return;
         }
@@ -301,12 +310,15 @@ export default function ActiveCallScreen() {
         // Caller: create room, send invite, join room immediately (like mobile),
         // show ringing overlay until onUserJoined fires
         const room = await createRoom(quality);
-        if (!room || cancelled) {
-          if (!cancelled) setPhase("error");
+        if (!room || cancelled || generation.isCancelled || invitationGenerationRef.current !== generation) {
+          if (!cancelled && !generation.isCancelled && invitationGenerationRef.current === generation) setPhase("error");
           return;
         }
         roomIdRef.current = room.roomId;
         passwordRef.current = room.password;
+        const attempt = new OutgoingInvitation({ roomId: room.roomId, calleeUids },
+          (context, uuid) => cancelCall([...context.calleeUids], context.roomId, uuid));
+        generation.invitation = attempt;
 
         const result = await sendCallInvite({
           callerId: user!.uid,
@@ -317,8 +329,17 @@ export default function ActiveCallScreen() {
           callType,
           roomPassword: room.password,
         });
-        if (!result || cancelled) {
-          if (!cancelled) setPhase("error");
+        if (result) {
+          try { await attempt.receiveUUID(result.callUUID); } catch {
+            reportCancellationFailure();
+            if (!generation.isCancelled && invitationGenerationRef.current === generation) {
+              setPhase("error");
+              return;
+            }
+          }
+        }
+        if (!result || cancelled || generation.isCancelled || invitationGenerationRef.current !== generation) {
+          if (!cancelled && !generation.isCancelled && invitationGenerationRef.current === generation) setPhase("error");
           return;
         }
         callUUIDRef.current = result.callUUID;
@@ -347,7 +368,7 @@ export default function ActiveCallScreen() {
           password: room.password,
           quality,
         });
-        if (cancelled) {
+        if (cancelled || generation.isCancelled || invitationGenerationRef.current !== generation) {
           svc.leave();
           return;
         }
@@ -362,9 +383,10 @@ export default function ActiveCallScreen() {
 
         // Timeout after 45s
         timerRef.current = setTimeout(() => {
-          if (cancelled) return;
+          if (cancelled || generation.isCancelled || invitationGenerationRef.current !== generation) return;
+          generation.isCancelled = true;
           setPhase("ended");
-          cancelCall(calleeUids, roomIdRef.current, callUUIDRef.current);
+          void attempt.cancel().catch(reportCancellationFailure);
           saveCallRecord({
             callId: callUUIDRef.current, callUUID: callUUIDRef.current,
             callerUid: user!.uid, callerName: user!.displayName || "User",
@@ -379,6 +401,12 @@ export default function ActiveCallScreen() {
     init();
     return () => {
       cancelled = true;
+      generation.isCancelled = true;
+      if (invitationGenerationRef.current === generation && hadRemoteRef.current) {
+        generation.invitation?.finish();
+      }
+      void generation.invitation?.cancel().catch(reportCancellationFailure);
+      if (invitationGenerationRef.current !== generation) return;
       if (timerRef.current) clearTimeout(timerRef.current);
       try { svcRef.current?.leave(); } catch {}
       svcRef.current = null;
@@ -396,6 +424,7 @@ export default function ActiveCallScreen() {
         if (data.roomId === roomIdRef.current || data.callUUID === callUUIDRef.current) {
           console.log("[ActiveCallScreen] MATCH — ending call");
           if (timerRef.current) clearTimeout(timerRef.current);
+          invitationGenerationRef.current?.invitation?.finish();
           try { svcRef.current?.leave(); } catch {}
           setPhase("ended");
           saveCallRecord({
@@ -414,11 +443,13 @@ export default function ActiveCallScreen() {
   }, [phase]);
 
   function handleEndCall() {
+    const generation = invitationGenerationRef.current;
+    if (generation) {
+      generation.isCancelled = true;
+      void generation.invitation?.cancel().catch(reportCancellationFailure);
+    }
     if (timerRef.current) clearTimeout(timerRef.current);
     try { svcRef.current?.leave(); } catch {}
-    if (!isIncoming && callUUIDRef.current) {
-      cancelCall(calleeUids, roomIdRef.current, callUUIDRef.current);
-    }
     setPhase("ended");
     setTimeout(() => { window.location.href = "/app"; }, 500);
   }
