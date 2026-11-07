@@ -611,24 +611,14 @@ export default function App() {
   async function closeRoomForEveryone() {
     if (!roomId.trim()) { alert("Enter room id"); return; }
     try {
-      const cfg: any = (typeof window !== "undefined" ? (window as any).APP_CONFIG : undefined) || {};
-      const runtimeBase = (cfg.SIGNALING_URL as string | undefined)?.trim();
-      const env: any = (import.meta as any)?.env || {};
-      const envBase = (env.VITE_SIGNALING_URL as string | undefined)?.trim();
-      const base = runtimeBase || envBase || `${window.location.protocol}//${window.location.hostname}:3000`;
-      const resp = await fetch(`${base}/room/${encodeURIComponent(roomId.trim())}/close`, {
-        method: "POST",
-        mode: "cors"
-      });
-      if (!resp.ok) {
-        alert("Failed to close room");
-        return;
-      }
+      const svc = svcRef.current;
+      if (!svc) { alert("Close room request failed: ROOM_SOCKET_REQUIRED"); return; }
+      await svc.closeRoom();
       // Locally leave and reset UI
       leave();
       alert("Room closed for everyone");
-    } catch (e) {
-      alert("Close room request failed");
+    } catch (error) {
+      alert(`Close room request failed${error instanceof Error ? `: ${error.message}` : ""}`);
     }
   }
 

@@ -21,7 +21,7 @@ a confidential security report are welcome.
 ## Safe use during development
 
 > **M² Calls is under active development and intentionally not production-ready.**
-> Private socket identity, room/call authorization, and file-access controls
+> Call ownership and file-access controls
 > still need hardening. Do not use sensitive conversations or confidential files.
 > Sensitive diagnostic logging and non-E2E-encrypted text messaging remain limitations.
 
@@ -33,6 +33,20 @@ confidential records.
 Authenticated REST chat routes verify Firebase ID tokens and check conversation
 membership for conversation access. Guest rooms deliberately support account-free
 calling, with passwords checked when enabled.
+
+Private-socket authentication, socket-bound room controls, and trusted invitation
+identity are deployed on Azure, verified 2026-11-06 at application revision
+`e74e890d5777db112ea8cedfb4d0d932169b3254`. Live user acceptance testing is complete
+for the features checked. Self-pin/primary behavior was not manually checked;
+this is not comprehensive security or production-readiness assurance.
+The deployed location policy below is separate and unchanged.
+
+REST call invitations bind `callerId` to the verified Firebase token UID and
+resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
+Firestore contacts. Legacy body identity fields are ignored. Missing trusted
+name/photo fields use `User`/no photo; lookup failures return HTTP 500
+`CALLER_PROFILE_LOOKUP_FAILED` before any invitation delivery. Socket and Android
+FCM invitations share this canonical identity. `[OWASP]`
 
 ### Location authorization
 
@@ -55,19 +69,47 @@ Readers must use owner-scoped paths/queries, not collection-group queries.
 This policy is deployed to project `fp-video-calls`, database `(default)`.
 Deployment details are in the [verification records](docs/validation-status.md#firestore-location-rules).
 
+### Private socket identity
+
+`chat_auth` requires a Firebase ID token and derives the private user-room UID
+from the verified token, ignoring any claimed `uid`. Missing/malformed tokens
+emit `error` with `AUTH_REQUIRED`; invalid tokens emit `AUTH_FAILED`; unavailable
+Firebase Admin emits `FIREBASE_NOT_CONFIGURED`. Tokens are bounded to 16 KiB
+and verified UIDs to Firebase's 128-character limit; control characters are
+rejected. Tokens and provider errors are not logged. `[OWASP]`
+
+Every attempt clears the previous private identity and leaves its private room
+before verification. Only the latest connected attempt can establish identity;
+room mutations are serialized so delayed verification or adapter joins cannot
+restore an older subscription. Adapter failures disconnect the socket rather
+than risk retaining private delivery. Ordinary token rejection does not
+disconnect guests or remove their call-room membership. `[OWASP]`
+
+Web obtains fresh tokens on connection/reconnection and observes auth restore,
+account changes, and sign-out. Identity changes reset the private socket
+connection without clearing event subscribers; stale token requests are
+discarded. Token acquisition failure is logged without provider details and
+sends a rejected empty auth attempt to clear any previous private subscription.
+Android already obtains a token for each connection and reconnect, and its
+application auth-state listener replaces/disconnects the socket on identity
+changes. No Firebase login is required for a socket connection or guest calls.
+The deployed server and web apply these checks; Android retains its existing
+token lifecycle without a new APK release.
+
 ### Other known access-control gaps
 
-- **Private socket identity:** `chat_auth` verifies a token only when Firebase
-  Admin is ready and a token is supplied. Otherwise a claimed UID can join a
-  private user-event room without proving that identity.
-- **Room controls:** some events trust room/user identifiers without checking
-  the acting socket's authority. In particular, `close_room` does not verify
-  membership or host status. Account-free joining is intentional; unchecked
-  control actions are not required for guest access.
-- **Call identity and ownership:** invite/answer/cancel routes require login,
-  but invite identity fields are accepted from the request rather than bound
-  to the verified UID. Answer/cancel do not verify the requester's relationship
-  to the call.
+- **Guest identity limitation:** room controls require the socket currently
+  recorded in that room's roster. Any joined member may close the room; there
+  is no privileged host role. Leave/self-pin/own-pin-clear and signaling/chat
+  sender identity are socket-bound, with same-room relay targets. Replacing a
+  participant evicts their old socket from the group channel and telemetry
+  subscriptions. Guest joining/replacement remains account-free (and uses the
+  optional room password); account ownership is not established by guest IDs.
+  Internal room channels are isolated from private account and socket-ID channels, and the
+  REST close bypass returns HTTP 403 `ROOM_SOCKET_REQUIRED`.
+- **Call ownership:** invite/answer/cancel routes require login and invitation
+  identity is bound to the verified UID. Answer/cancel do not verify the
+  requester's relationship to the call.
 
 ### Attachment access by storage mode
 
@@ -89,8 +131,8 @@ shape/size and is covered by the `/api/` IP rate limiter. This is not a private
 chat authorization defect. Credential issuance and relay quotas still need
 appropriate abuse and bandwidth-cost controls for the deployment.
 
-Location authorization is deployed as described above. The deployed server
-revision, Firebase Storage rules, active storage mode, and coturn quota settings
+Location authorization and the application revision are deployed as described
+above. Firebase Storage rules, active storage mode, and coturn quota settings
 are not established here.
 
 Source:
@@ -152,6 +194,22 @@ signed URLs, or other secrets. Open issue
 usability; issue [#17](https://github.com/guiess/fp-video-calls/issues/17)
 tracks extensibility/delay diagnostics.
 
+The relay preserves deployed v1 metrics and v2 text diagnostics. V2 text is
+opaque: Unicode/LF remain unchanged, while other C0 controls, C1/bidi controls
+and unpaired surrogates are rejected. Text is limited to 2048 UTF-16 code units;
+both incoming and derived envelopes must fit 4096 bytes. Exact schema,
+timestamp, bounded roster sender and derived header checks apply. Shape checks
+are not a content/PII scrubber; the prohibition above still applies. `[OWASP]`
+
+Publishing requires the sender's own opt-in. Delivery rechecks each subscriber's
+current socket, roster and internal `room:` channel authority; stale recipients
+are removed. `TELEMETRY_FORBIDDEN`, `TELEMETRY_UNSUPPORTED_VERSION`,
+`TELEMETRY_INVALID` and `TELEMETRY_RATE_LIMITED` distinguish rejections.
+The per-socket/room quota is twenty samples per ten seconds and survives
+unsubscribe, leave, close and rejoin; disconnect clears it and consent.
+New replacement sockets require fresh consent. These telemetry compatibility
+checks are deployed without changing guest account identity or location rules.
+
 ## Device permissions
 
 The Android manifest requests:
@@ -182,8 +240,7 @@ documentation must never reproduce detected values.
 
 ## Known risk areas
 
-- missing access checks for private Socket.IO identity, room controls, and call
-  identity/ownership;
+- call answer/cancel ownership checks and account-free guest identity limitations;
 - attachment-sharing policy and storage-mode-specific access controls;
 - dependency/supply-chain findings requiring separate triage;
 - configuration drift among SWA, App Service, Firebase, Blob/local storage, and

@@ -8,7 +8,7 @@
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js",
     "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
-    "test:telemetry": "node --test telemetry-validation.test.js",
+    "test:telemetry": "node --test telemetry-validation.test.js telemetry-relay.test.js",
     "test:turn": "node --test turn-config.test.js turn-config.qa.test.js turn-credentials.test.js",
     "test:watch": "node --experimental-vm-modules node_modules/.bin/vitest"
   },
@@ -28,6 +28,7 @@
     "uuid": "9.0.1"
   },
   "devDependencies": {
+    "socket.io-client": "4.7.5",
     "vitest": "^3.1.0"
   },
   "engines": {

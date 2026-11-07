@@ -9,6 +9,7 @@ const REQUIRED_FILES = [
   "package-lock.json",
   "index.js",
   "auth-middleware.js",
+  "chat-socket-auth.js",
   "chat-db.js",
   "chat-routes.js",
   "blob-storage.js",
@@ -18,6 +19,7 @@ const REQUIRED_FILES = [
   "turn-config.js",
   "turn-credentials.js",
   "telemetry-validation.js",
+  "telemetry-relay.js",
 ];
 const PROHIBITED_PATHS = [
   /(^|\/)node_modules(\/|$)/i,

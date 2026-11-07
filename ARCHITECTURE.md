@@ -1,10 +1,15 @@
 # M² Calls architecture
 
 - **Source baseline:** repository commit
-  `482a83a83db50d75792610fc009f0fb87d24971d`, reviewed 2026-11-06
+  `e74e890d5777db112ea8cedfb4d0d932169b3254`, reviewed 2026-11-06
 - **Purpose:** system architecture and runtime reference
 - **Scope:** implemented source behavior and explicit unknowns, not an
   aspirational redesign
+
+Private-socket authentication, socket-bound room controls, and trusted invitation
+identity are deployed on Azure at the source revision above. Deployed telemetry
+compatibility is preserved. Live user acceptance testing is complete for the
+features checked; self-pin/primary behavior was not manually checked.
 
 ![M² Calls system overview showing clients, signaling, media, storage, and trust boundaries](docs/assets/architecture/system-overview.svg)
 
@@ -18,8 +23,9 @@ Browser and Android clients obtain identity from Firebase Authentication for
 authenticated application flows. They call the Node/Express API over HTTPS and
 connect to Socket.IO over WSS. The server verifies Firebase ID tokens for
 authenticated REST chat routes. Guest rooms and TURN issuance support
-account-free access; private Socket.IO identity and some room/call controls have
-missing checks described in [SECURITY.md](SECURITY.md).
+account-free access; private Socket.IO identity requires a verified Firebase ID
+token, and room controls are bound to the current roster socket. Remaining call
+ownership gaps are described in [SECURITY.md](SECURITY.md).
 
 The Node service relays SDP offers, SDP answers, ICE candidates, call events,
 typing events, and opted-in telemetry. Audio/video never passes through the
@@ -49,7 +55,7 @@ Android devices.
 | Firebase Auth/Firestore/FCM | Identity, profiles/contacts/history/location, private device data, notifications | Provider-managed; rules vary by collection | [firestore.rules](firestore.rules) |
 | Blob/local attachment adapter | Upload, download, delete, SAS/local URL selection | Deployment-selected at server startup | [server/blob-storage.js](server/blob-storage.js) |
 | coturn | STUN/TURN allocations and relayed media | Separate VM/network/security boundary | [server TURN contract](server/turn-config.js) |
-| Azure SWA/App Service | Web hosting and Node hosting | Live configuration and deployed revision are not recorded in this repository | [deployment guide](docs/azure-deploy.md) |
+| Azure SWA/App Service | Web hosting and Node hosting | Deployed application revision is recorded above; broader live configuration remains unverified | [deployment guide](docs/azure-deploy.md) |
 
 **Trade-off:** one Node process plus SQLite and in-memory state keeps the
 personal-use deployment manageable, but it couples scaling/failover to process
@@ -92,8 +98,8 @@ capacity guarantees.
 | Boundary | Authentication/authorization observed | Data visible |
 |---|---|---|
 | Authenticated REST chat | Firebase ID token middleware | Conversation/message/file metadata and SQLite-backed results |
-| Socket.IO `chat_auth` | Token verified only when Firebase Admin is ready **and** a token is supplied | User-room events and typing/call delivery |
-| Guest rooms/signaling | Caller-supplied room/user fields plus optional room password | Roster, SDP, ICE, transient room chat |
+| Socket.IO `chat_auth` | Required Firebase ID token; private UID derived solely from verified token; fails closed when Admin is unavailable | User-room events and typing/call delivery |
+| Guest rooms/signaling | Optional room password; controls and sender identity bound to the current roster socket | Roster, SDP, ICE, transient room chat |
 | TURN issuance | Bounded caller-supplied `userId`/`roomId`; no application token | Time-limited TURN username/credential/URLs |
 | Firestore | Collection-specific rules | Profiles, contacts, histories, location, private subcollections |
 | Attachment route | Authenticated upload API; local download route has no auth | Files and bearer/SAS URLs depending on storage mode |
@@ -124,15 +130,36 @@ rooms, files, location, invitations, or TURN.
 password hash. `join_room` loads or creates the room, checks the password,
 updates the roster, and begins signaling. `leave_room`, disconnect, or explicit
 close removes participants; an empty room is removed from memory and its room
-row is deleted. Host/member authority is not bound to a server-issued capability.
+row is deleted. Controls use the socket currently recorded for a participant:
+any joined member may close the room, leave as themselves, pin themselves
+(replacing another primary), and clear only their own pin. Relays require a
+joined sender and a current target in the same room; transient chat uses the
+roster's sender identity and display name. Replacement sockets evict the previous
+socket from the room channel and telemetry subscriptions while preserving
+mic/camera state. Guest IDs remain account-free reconnect identifiers, not
+persistent authenticated identities or host capabilities. `[OWASP]` `[CUSTOM]`
+
+Room group channels are internally prefixed with `room:` to isolate them from
+private `user:` and automatic Socket.IO socket-ID channels; wire room IDs stay
+unchanged. Room IDs accept 1-128 characters without control characters and
+reject the reserved `user:` and `room:` prefixes; ordinary custom names remain valid.
+Participant IDs are bounded to 128 characters without control characters.
+Display names are bounded to 200 characters and passwords to 1024 characters.
+`POST /room/:roomId/close` always rejects with HTTP 403
+`ROOM_SOCKET_REQUIRED`; both web close buttons use the joined signaling socket
+and await a bounded acknowledgement instead. Existing mobile socket-close
+clients continue to receive `ROOM_CLOSED` without requiring an acknowledgement.
 
 ### Authenticated invitation lifecycle
 
-An authenticated REST request supplies caller/callee/room fields. The server
-delivers `call_invite` through user Socket.IO rooms and FCM, then supports
-cancel/answer notifications. Android can display full-screen ringing and enter
-the room. The authenticated token is not consistently used as the authoritative
-caller identity for every supplied field.
+An authenticated REST request supplies callee/room fields. The server binds the
+invitation caller UID to the verified Firebase ID token and resolves name/photo
+through Firebase Auth, ignoring legacy body identity fields. Missing profile
+fields use `User`/no photo; a failed profile lookup returns HTTP 500
+`CALLER_PROFILE_LOOKUP_FAILED` before any socket or FCM delivery. The same
+`call_invite` identity and call UUID reach user Socket.IO rooms and FCM. Android
+can display full-screen ringing and enter the room. Cancel/answer ownership
+checks remain a separate limitation.
 
 ### Persistent and transient chat
 
@@ -169,6 +196,16 @@ membership and does not persist relay samples. Android may retain bounded local
 telemetry. Prohibited fields are defined by
 [server telemetry validation](server/telemetry-validation.js) and
 [Android recovery policy](mobile-kotlin/app/src/main/java/com/fpvideocalls/webrtc/RecoveryTelemetryPolicy.kt).
+
+The source preserves deployed v1 metric envelopes and v2 opaque diagnostic
+text, including Unicode/LF, with 2048 text-code-unit and 4096 payload-byte limits.
+[The relay](server/telemetry-relay.js) requires publisher consent and current
+sender/recipient roster, socket, and internal `room:` channel membership.
+Unsupported versions have a distinct error. Twenty samples per ten seconds
+are tracked per socket/room across unsubscribe, leave, close and rejoin;
+disconnect clears the counter and consent. Replacement sockets never inherit
+consent. These compatibility checks are deployed and do
+not alter private auth, guest control authority, or Firebase rules. `[OWASP]`
 
 **Trade-off:** specialized code around recovery and storage uses useful
 interfaces/adapters, but introducing a repository-wide abstraction rewrite would
@@ -215,7 +252,7 @@ in this repository.
 **Trade-off:** manual server/TURN operations keep the deployment simple, but
 provide less repeatability than infrastructure as code.
 
-**Limitation:** live resource configuration, deployed revision, rollback timing,
+**Limitation:** broader live resource configuration, rollback timing,
 data recovery, monitoring, quotas, and cost alerts remain operator-verified or
 unknown until recorded.
 

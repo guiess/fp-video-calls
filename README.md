@@ -5,10 +5,14 @@ WebRTC audio/video calls, persistent messaging, contacts, files, call history,
 and location sharing. The app is under active development and is intentionally
 not production-ready.
 
-> **Safety notice:** Private socket identity, room/call authorization, and file-access
+> **Safety notice:** Call ownership and file-access
 > controls still need hardening. Do not use sensitive conversations or confidential files.
 > Remaining authorization and privacy limitations are documented in
 > [SECURITY.md](SECURITY.md).
+
+Private-socket authentication, socket-bound room controls, and trusted invitation
+identity are deployed on Azure. Existing guest calling and opted-in telemetry
+compatibility are preserved; remaining limitations are described below.
 
 ## Availability
 
@@ -80,8 +84,10 @@ Implementation:
 Authenticated call flows support direct/group invitations, web socket delivery,
 FCM delivery to Android, ringing, answer/cancel, room entry, and call history.
 Guest rooms provide persistent-looking room identifiers and optional passwords,
-with account-free access. Some room-control events still need membership and
-host authorization checks; see [SECURITY.md](SECURITY.md).
+with account-free access. Room controls use the currently joined socket, not a
+claimed acting user ID. Any joined member can close the room for everyone;
+members can pin themselves and clear only their own pin. See
+[SECURITY.md](SECURITY.md) for remaining limitations.
 
 Implementation:
 [web call service](web/src/services/callService.ts),
@@ -153,14 +159,16 @@ Implementation:
 
 ## Current limitations
 
-- The live deployment revision, Azure SKU, active Blob/local storage mode,
+- Azure SKU, active Blob/local storage mode,
   coturn listener/firewall agreement, retention configuration, and monitoring
   configuration are not established by repository evidence.
 - Current active web and Android text-send paths use reversible Base64 encoding
   with empty encrypted-key maps. Base64 encoding is not end-to-end encryption;
   cryptographic helpers exist but are not the universal active send path.
-- Known access-control gaps include token-optional private Socket.IO identity,
-  unchecked room controls, and call identity/ownership checks.
+- Source now requires verified private Socket.IO identity, binds room controls
+  to the current joined socket, and derives invitation identity from Firebase.
+  Call answer/cancel ownership checks remain incomplete; account-free guest
+  participant IDs do not establish account ownership.
   Attachment access depends on the storage
   mode. Account-free guest calling, temporary download links, and guest TURN
   credentials are design choices, with access and abuse controls described in
