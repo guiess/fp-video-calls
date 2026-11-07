@@ -10,8 +10,13 @@ interface IncomingAnswerPorts {
     fun record(uuid: String): CallRecord?
     fun cancelled(uuid: String): Boolean
     suspend fun confirm(data: IncomingCallData)
-    fun restore(data: IncomingCallData): Boolean
-    fun markAnswered(uuid: String): Boolean
+    fun begin(data: IncomingCallData): IncomingAnswerAttempt?
+    fun commit(data: IncomingCallData, attempt: IncomingAnswerAttempt): Boolean
+    fun finish(attempt: IncomingAnswerAttempt)
+}
+
+class IncomingAnswerAttempt internal constructor(val identity: com.fpvideocalls.model.CallIdentity) {
+    internal var invalidated = false
 }
 
 /** Recover absent process state only after the authenticated server confirms this exact invitation. */
@@ -26,9 +31,11 @@ class IncomingAnswerCoordinator(private val ports: IncomingAnswerPorts) {
 
     suspend fun answer(data: IncomingCallData): Boolean {
         if (!canAnswer(data)) return false
-        ports.confirm(data)
-        if (!canAnswer(data)) return false
-        if (ports.record(data.callUUID) == null && !ports.restore(data)) return false
-        return ports.markAnswered(data.callUUID)
+        val attempt = ports.begin(data) ?: return false
+        try {
+            ports.confirm(data)
+            if (ports.cancelled(data.callUUID)) return false
+            return ports.commit(data, attempt)
+        } finally { ports.finish(attempt) }
     }
 }

@@ -41,6 +41,13 @@ for the features checked. Self-pin/primary behavior was not manually checked;
 this is not comprehensive security or production-readiness assurance.
 The deployed location policy below is separate and unchanged.
 
+The independent HTTPS-only setting change is deployed, verified 2026-11-07:
+HTTP redirects retain the same host/path/query, and HTTPS health, unauthenticated
+API/CORS and guest WSS protocol checks passed. The Node 20 runtime, startup,
+WebSockets/AlwaysOn and application code/data were unchanged. This is transport
+preflight evidence, not full authenticated or manual-user coverage. The
+source-only call-ownership rollout below remains separately held.
+
 REST call invitations bind `callerId` to the verified Firebase token UID and
 resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
 Firestore contacts. Legacy body identity fields are ignored. Missing trusted

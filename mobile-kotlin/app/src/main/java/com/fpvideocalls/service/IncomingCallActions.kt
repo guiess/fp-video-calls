@@ -10,7 +10,7 @@ object IncomingCallActions {
         val identity = CallIdentityPolicy.parse(data.callUUID, data.roomId) ?: return false
         val record = CallStateManager.getRecord(identity.callUUID)
         if (record != null && record.roomId != identity.roomId) return false
-        return CallStateManager.declineCall(identity.callUUID) != null
+        return CallStateManager.recordIncomingDecline(data) != null
     }
 
     suspend fun answer(data: IncomingCallData, api: CallApiService): Boolean {
@@ -19,8 +19,10 @@ object IncomingCallActions {
             override fun record(uuid: String) = CallStateManager.getRecord(uuid)
             override fun cancelled(uuid: String) = IncomingCallState.isCancelledRecently(uuid)
             override suspend fun confirm(data: IncomingCallData) = api.sendCallAnswer(data.callerId, data.roomId, data.callUUID)
-            override fun restore(data: IncomingCallData) = CallStateManager.startIncoming(data)
-            override fun markAnswered(uuid: String) = CallStateManager.answerCall(uuid) != null
+            override fun begin(data: IncomingCallData) = CallStateManager.beginIncomingAnswer(data)
+            override fun commit(data: IncomingCallData, attempt: IncomingAnswerAttempt) =
+                CallStateManager.commitIncomingAnswer(data, attempt)
+            override fun finish(attempt: IncomingAnswerAttempt) = CallStateManager.finishIncomingAnswer(attempt)
         }
         return IncomingAnswerCoordinator(ports).answer(data)
     }

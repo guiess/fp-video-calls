@@ -61,13 +61,12 @@ class CallViewModel @Inject constructor(
                         saveCallHistory(event.callUUID)
                     }
                     is CallEvent.Answer -> {
-                        if (!CallIdentityPolicy.matchesUUID(CallStateManager.activeCallUUID, event.data.callUUID)) {
+                        if (!CallStateManager.isCurrentActiveIncoming(CallIdentity(event.data.callUUID, event.data.roomId))) {
                             Log.w("CallViewModel", "Ignoring answer for an obsolete incoming call")
                             return@collect
                         }
                         Log.d("CallViewModel", "Call answered from notification: ${event.data.callerName}")
-                        CallStateManager.answerCall(event.data.callUUID)
-                        _incomingCall.value = null
+                        clearIncomingCall(CallIdentity(event.data.callUUID, event.data.roomId))
                         _navigationEvents.emit(CallNavigationEvent.AnswerCall(event.data))
                         // Notify caller that we answered
                         viewModelScope.launch {

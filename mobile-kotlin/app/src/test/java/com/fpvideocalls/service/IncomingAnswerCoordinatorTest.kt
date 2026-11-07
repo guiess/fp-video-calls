@@ -14,6 +14,7 @@ class IncomingAnswerCoordinatorTest {
     private var isCancelled = false
     private var shouldReject = false
     private var afterConfirmation: (() -> Unit)? = null
+    private var beforeCommit: (() -> Unit)? = null
     private val ports = object : IncomingAnswerPorts {
         override fun activeUUID() = CallStateManager.activeCallUUID
         override fun record(uuid: String) = CallStateManager.getRecord(uuid)
@@ -23,8 +24,12 @@ class IncomingAnswerCoordinatorTest {
             if (shouldReject) throw IOException("Synthetic server rejection")
             afterConfirmation?.invoke()
         }
-        override fun restore(data: IncomingCallData) = CallStateManager.startIncoming(data)
-        override fun markAnswered(uuid: String) = CallStateManager.answerCall(uuid) != null
+        override fun begin(data: IncomingCallData) = CallStateManager.beginIncomingAnswer(data)
+        override fun commit(data: IncomingCallData, attempt: IncomingAnswerAttempt): Boolean {
+            beforeCommit?.invoke()
+            return CallStateManager.commitIncomingAnswer(data, attempt)
+        }
+        override fun finish(attempt: IncomingAnswerAttempt) = CallStateManager.finishIncomingAnswer(attempt)
     }
 
     @After fun cleanup() { CallStateManager.resetForTest() }
@@ -82,5 +87,25 @@ class IncomingAnswerCoordinatorTest {
         assertFalse(IncomingAnswerCoordinator(ports).answer(invitation))
         assertEquals("B", CallStateManager.activeCallUUID)
         assertNull(CallStateManager.getRecord("A"))
+    }
+
+    @Test fun `terminal A and B replacing it immediately before commit cannot be overwritten`() = runTest {
+        CallStateManager.resetForTest()
+        CallStateManager.startIncoming(invitation)
+        beforeCommit = {
+            CallStateManager.timeoutCall("A")
+            CallStateManager.startIncoming(other)
+        }
+        assertFalse(IncomingAnswerCoordinator(ports).answer(invitation))
+        assertEquals("B", CallStateManager.activeCallUUID)
+        assertEquals(CallRecordStatus.MISSED, CallStateManager.getRecord("A")?.status)
+    }
+
+    @Test fun `cold decline during pending confirmation invalidates the answer for its entire lifetime`() = runTest {
+        CallStateManager.resetForTest()
+        afterConfirmation = { IncomingCallActions.decline(invitation) }
+        assertFalse(IncomingAnswerCoordinator(ports).answer(invitation))
+        assertNull(CallStateManager.activeCallUUID)
+        assertEquals(CallRecordStatus.DECLINED, CallStateManager.getRecord("A")?.status)
     }
 }

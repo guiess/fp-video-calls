@@ -77,6 +77,8 @@ fun AppNavigation(
                         }
                         is CallNavigationEvent.AnswerCall -> {
                             val data = event.data
+                            if (!CallStateManager.isCurrentActiveIncoming(
+                                    com.fpvideocalls.model.CallIdentity(data.callUUID, data.roomId))) return@collect
                             val displayName = user?.displayName ?: data.callerName
                             val userId = user?.uid ?: data.callerId
                             navController.navigate(

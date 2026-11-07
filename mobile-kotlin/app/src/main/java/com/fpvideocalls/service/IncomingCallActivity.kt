@@ -103,7 +103,6 @@ class IncomingCallActivity : ComponentActivity() {
                             }
                         CallRingingService.stopIfActive(identity)
                         NotificationHelper.cancelNotification(this@IncomingCallActivity, callData.callUUID)
-                        CallStateManager.answerCall(callData.callUUID)
                         ActiveCallService.pendingCameraOff = cameraOff
                         val launchIntent = Intent(this@IncomingCallActivity, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
