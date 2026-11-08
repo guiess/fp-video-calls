@@ -45,8 +45,9 @@ The independent HTTPS-only setting change is deployed, verified 2026-11-07:
 HTTP redirects retain the same host/path/query, and HTTPS health, unauthenticated
 API/CORS and guest WSS protocol checks passed. The Node 20 runtime, startup,
 WebSockets/AlwaysOn and application code/data were unchanged. This is transport
-preflight evidence, not full authenticated or manual-user coverage. The
-call-ownership deployment below does not constitute authenticated live-user acceptance.
+preflight evidence, not full authenticated or manual-user coverage. These dated
+transport checks do not establish authenticated user acceptance; the later scoped
+user acceptance is recorded below.
 
 REST call invitations bind `callerId` to the verified Firebase token UID and
 resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
@@ -325,7 +326,7 @@ documentation must never reproduce detected values.
 
 ## Known risk areas
 
-- call answer/cancel ownership checks and account-free guest identity limitations;
+- account-free guest identity limitations;
 - attachment-sharing policy and storage-mode-specific access controls;
 - dependency/supply-chain findings requiring separate triage;
 - configuration drift among SWA, App Service, Firebase, Blob/local storage, and
