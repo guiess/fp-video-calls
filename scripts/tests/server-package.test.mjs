@@ -20,6 +20,7 @@ const COMPLETE_PACKAGE = [
     "call-delivery.js",
     "chat-db.js",
     "chat-routes.js",
+    "attachment-registry.js",
     "blob-storage.js",
     "turn-config.js",
     "turn-credentials.js",

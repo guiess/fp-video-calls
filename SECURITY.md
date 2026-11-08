@@ -17,8 +17,8 @@ Current missing protections and limits:
 
 - **Text/files:** active text and attachment paths lack end-to-end encryption.
 - **Guest identity:** guest IDs do not establish account ownership; room passwords and socket-bound controls do not change that.
-- **Firebase Storage:** checked-in rules lack conversation membership checks; live Storage deployment is not established here.
-- **Filesystem downloads:** if selected, file URLs require neither login nor expiry; conversation-private downloads need membership checks.
+- **Attachment rollout:** the source controls below require the coordinated server rollout; do not assume they protect an older deployed revision.
+- **Bearer downloads:** possession of an issued read link grants access until expiry; these are not per-request membership checks or E2E encryption.
 - **Location retention:** no guaranteed server-enforced expiry; history cleanup is client-triggered without an established physical deletion deadline.
 - **Dependencies/runtime:** recorded dependency findings need triage; [Node 20 is end-of-life](https://nodejs.org/en/about/previous-releases).
 
@@ -136,11 +136,77 @@ REST close bypass returns `403 ROOM_SOCKET_REQUIRED`.
 
 ### Attachment access by storage mode
 
+The following describes the hardened **source**, not a claim of deployment.
+
 | Mode | Access boundary |
 |---|---|
-| Firebase Storage rules | Any authenticated user can read/write chat objects without membership checks; the active server adapter instead selects Blob or filesystem |
-| Azure Blob | Expiring SAS URLs: possession grants downloads, an intentional bearer-link design |
-| Filesystem | Unguessable URLs without login or expiry; private downloads would need membership checks |
+| Firebase Storage rules | Deny all direct client reads/lists/creates/updates/deletes, including authenticated clients; source-only policy for the unused target, not a live Firebase remediation |
+| Azure Blob | Issue 60-minute read-only SAS URLs only for a ready upload binding and current conversation membership; possession remains an intentional bearer capability |
+| Filesystem | Issue 60-minute signed bearer URLs from the same authorized bindings; validate the binding, signature and expiry before any file read; unsigned/unbound UUID paths are denied |
+
+`server/attachment-registry.js` supplies object-specific authorization to chat
+routes. An additive SQLite `attachments` table records a server-generated key,
+backend, uploader, conversation, upload display name, exact stored byte count,
+MIME label, state and independent per-object download signing secret. Names and
+MIME labels are upload/processor metadata, **not content-format verification**.
+Messages link explicitly through the additive `attachment_key` column; their
+client-supplied filename, size, URL, sender/conversation history and object
+existence are never ownership evidence. Protect the database and backups as
+sensitive data; signing secrets never enter API results or logs. `[OWASP]`
+`[CUSTOM]`
+
+Multipart and legacy Node base64 uploads retain `downloadUrl` (canonical
+message reference), `signedUrl` (usable read capability), `fileSize` and `resized`.
+Current web and Android send the canonical reference, then use the resolved
+message URL for downloads; no new platform secret is required. Upload filenames
+are normalized to NFC, bounded to 255 UTF-16 code units, and reject controls/path
+separators; conversation identifiers are bounded to 128 characters. Existing
+configured size/extension limits and image-processing behavior remain in force.
+Zero-byte multipart files and line-wrapped/unpadded raw base64 remain supported.
+Wildcard-allowed unusual filename suffixes retain their display label but are
+omitted from the generated storage key, which stays bounded and path-safe.
+
+Quota reservations and message-reference changes are transactional. Quota counts
+each new upload once, including not-yet-messaged uploads and pending/quarantined
+reservations, instead of summing client message sizes. Conditional object
+creation never overwrites an existing key. Only confirmed successful storage
+creation can become `ready`; a failed/ambiguous write stays `unverified` (or
+`uploading` after interruption), unavailable and quota-reserved, with **no blind
+compensation delete**. There is no automatic recovery of these uncertain writes.
+If a confirmed upload's receipt completion or signing fails, safe compensation
+quarantines the known object before deleting it. `[OWASP]` `[CUSTOM]`
+
+Deleting one of multiple legitimate references does not delete the object.
+Last-reference/conversation cleanup claims bound objects transactionally before
+storage I/O, blocking concurrent reuse. A failed physical deletion returns
+`503 ATTACHMENT_DELETE_FAILED`, retains `deleting` state and quota, and can be
+retried through the existing cleanup endpoint. That endpoint now considers only
+the caller's bound objects with current membership, or the owner's previously
+quarantined objects after their conversation was deleted. Its statistics/names
+are scoped accordingly; it never enumerates the storage container. Inactive
+backend bindings are revoked on conversation deletion, but are not deleted
+through the wrong adapter. `[OWASP]` `[CUSTOM]`
+
+**Legacy policy (explicitly approved):** no historical ownership backfill is
+performed. Unverified old objects remain untouched; new messages cannot reuse
+them, and the server cannot renew links, read, sign or delete them. History and
+shared-file results return a null URL plus
+`attachmentError: "ATTACHMENT_UNAVAILABLE"` without failing text chat or the
+whole history. Both camelCase and legacy snake_case URL fields are cleared.
+Deleting an unverified message removes only the message and reports the same
+attachment error; last-member cleanup reports `unavailableAttachments`. Re-upload
+is required. Old objects are excluded from authoritative quota totals, so those
+totals are not a physical storage inventory. Previously issued Blob SAS URLs
+remain usable until natural expiry; they are not retroactively revoked.
+
+**Operations:** retain the additive table/column on rollback. Reverting to old
+route code reopens its authorization gap and must be reported explicitly. Do
+not provision Firebase Storage or deploy these rules to an absent/unapproved
+target. The isolated synthetic denial suite reuses `tests/firestore` tooling:
+`npm run test:storage` there, with Java available; its dedicated config binds
+Storage/hub/logging to loopback ports 9198/4408/4508 and the demo project
+`demo-attachment-denial`. It changes no live Firebase rules, Firestore, IAM or
+user objects.
 
 ### Guest TURN credentials
 

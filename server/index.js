@@ -11,7 +11,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import admin from "firebase-admin";
 import chatRoutes from "./chat-routes.js";
-import { UPLOAD_DIR } from "./chat-routes.js";
+import { serveLocalAttachment } from "./chat-routes.js";
 import chatDb from "./chat-db.js";
 import { registerCallRoutes, registerCallBodyParser } from "./call-routes.js";
 import { registerChatAuthentication } from "./chat-socket-auth.js";
@@ -242,15 +242,7 @@ app.get("/api/turn", (req, res) => {
 registerCallRoutes(app, { io, server, admin, firebaseReady });
 
 // ── File serving — local storage only (blob files use SAS URLs in message data) ─
-app.get("/api/chat/files/:name", (req, res) => {
-  const fileName = path.basename(req.params.name);
-  const filePath = path.join(UPLOAD_DIR, fileName);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-  }
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  return res.sendFile(filePath);
-});
+app.get("/api/chat/files/:name", serveLocalAttachment);
 
 // ── Chat API routes (authenticated via Firebase ID tokens) ──────────────────
 chatRoutes._io = io; // Share Socket.IO instance for real-time broadcast

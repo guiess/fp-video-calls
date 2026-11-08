@@ -17,7 +17,7 @@ vi.mock("../chat-db.js", () => ({
 }));
 vi.mock("../chat-routes.js", async () => {
   const { Router } = await import("express");
-  return { default: Router(), UPLOAD_DIR: "." };
+  return { default: Router(), serveLocalAttachment: (_req, res) => res.sendStatus(403) };
 });
 vi.mock("socket.io", async (importOriginal) => {
   const original = await importOriginal();

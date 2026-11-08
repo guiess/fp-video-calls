@@ -59,6 +59,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, timestamp DESC);
   CREATE INDEX IF NOT EXISTS idx_participants_user ON conversation_participants(user_uid);
 
+  CREATE TABLE IF NOT EXISTS attachments (
+    object_key TEXT PRIMARY KEY,
+    media_url TEXT NOT NULL UNIQUE,
+    backend TEXT NOT NULL CHECK(backend IN ('blob', 'local')),
+    uploader_uid TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_size INTEGER NOT NULL CHECK(file_size >= 0),
+    content_type TEXT NOT NULL,
+    download_secret TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('uploading', 'ready', 'deleting', 'deleted', 'unverified')),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_attachments_uploader ON attachments(uploader_uid, state);
+  CREATE INDEX IF NOT EXISTS idx_attachments_conversation ON attachments(conversation_id, state);
+
   CREATE TABLE IF NOT EXISTS rooms (
     id TEXT PRIMARY KEY,
     video_quality TEXT NOT NULL DEFAULT '720p',
@@ -76,6 +92,12 @@ try {
   db.exec("ALTER TABLE messages ADD COLUMN plaintext TEXT");
   console.log("[chat-db] Added plaintext column to messages table");
 }
+
+// No legacy backfill: message ownership does not establish object ownership.
+if (!db.pragma("table_info(messages)").some(column => column.name === "attachment_key")) {
+  db.exec("ALTER TABLE messages ADD COLUMN attachment_key TEXT REFERENCES attachments(object_key)");
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_messages_attachment ON messages(attachment_key)");
 
 // Add reply_to_id column if not exists (migration)
 try {

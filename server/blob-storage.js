@@ -22,6 +22,22 @@ const CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING || "";
 let _containerClient = null;
 let _blobServiceClient = null;
 
+/** A conditional create found an older object; it must never be compensated/deleted. */
+export class StorageObjectConflictError extends Error {
+  constructor() {
+    super("Generated upload key already exists");
+    this.name = "StorageObjectConflictError";
+    this.code = "STORAGE_OBJECT_EXISTS";
+  }
+}
+
+/** Encode an upload's display label for an HTTP Content-Disposition parameter. */
+export function getContentDisposition(fileName) {
+  const encoded = encodeURIComponent(fileName).replace(/['()*]/g,
+    character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `inline; filename*=UTF-8''${encoded}`;
+}
+
 /**
  * Returns true if Azure Blob Storage is configured.
  * @returns {boolean}
@@ -68,9 +84,17 @@ export async function uploadBlob(fileName, buffer, contentType, originalName) {
   const blockBlobClient = containerClient.getBlockBlobClient(fileName);
   const headers = { blobContentType: contentType };
   if (originalName) {
-    headers.blobContentDisposition = `inline; filename="${originalName}"`;
+    headers.blobContentDisposition = getContentDisposition(originalName);
   }
-  await blockBlobClient.uploadData(buffer, { blobHTTPHeaders: headers });
+  try {
+    await blockBlobClient.uploadData(buffer, {
+      blobHTTPHeaders: headers,
+      conditions: { ifNoneMatch: "*" },
+    });
+  } catch (error) {
+    if (error.statusCode === 412) throw new StorageObjectConflictError();
+    throw error;
+  }
   return blockBlobClient.url;
 }
 
@@ -123,8 +147,7 @@ export async function generateSasUrl(fileName, expiresInMinutes = 60) {
   // Extract the shared key credential from the connection string
   const keyMatch = CONNECTION_STRING.match(/AccountKey=([^;]+)/);
   if (!keyMatch) {
-    // Fall back to returning the blob URL directly (works if container has public access)
-    return blockBlobClient.url;
+    throw new TypeError("Blob read capability requires a shared-key signing credential");
   }
 
   const sharedKeyCredential = new StorageSharedKeyCredential(
@@ -171,7 +194,12 @@ export async function listBlobs() {
  */
 export function uploadLocal(fileName, buffer, uploadDir) {
   const filePath = path.join(uploadDir, fileName);
-  fs.writeFileSync(filePath, buffer);
+  try {
+    fs.writeFileSync(filePath, buffer, { flag: "wx" });
+  } catch (error) {
+    if (error.code === "EEXIST") throw new StorageObjectConflictError();
+    throw error;
+  }
   return `/api/chat/files/${fileName}`;
 }
 

@@ -28,7 +28,7 @@ vi.mock("express", () => ({
 vi.mock("http", () => ({ default: { createServer: () => ({ listen: vi.fn() }) } }));
 vi.mock("https", () => ({ default: { createServer: () => ({ listen: vi.fn() }) } }));
 vi.mock("socket.io", () => ({ Server: class { constructor() { return harness.io; } } }));
-vi.mock("../chat-routes.js", () => ({ default: {}, UPLOAD_DIR: "unused" }));
+vi.mock("../chat-routes.js", () => ({ default: {}, serveLocalAttachment: (_req, res) => res.sendStatus(403) }));
 vi.mock("../chat-db.js", () => ({
   default: {
     prepare: (sql) => ({

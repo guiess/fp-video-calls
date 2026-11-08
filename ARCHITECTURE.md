@@ -51,7 +51,7 @@ Android devices.
 | React/TypeScript web | Authenticated shell, guest rooms, calling, chat, location views, diagnostics | Browser trust boundary; public runtime config | [web/src](web/src) |
 | Kotlin/Compose Android | Calling, FCM/full-screen ringing, chat, contacts, location collection/history, diagnostics | Device permissions and local persistence | [mobile app source](mobile-kotlin/app/src/main) |
 | Node/Express/Socket.IO | REST chat/call API, room signaling, telemetry relay, TURN credential issuance | Mixed authenticated and guest boundaries | [server/index.js](server/index.js) |
-| SQLite | Conversations, messages, receipts, members, room settings, previews | Durable local server file; backup behavior unknown | [server/chat-db.js](server/chat-db.js) |
+| SQLite | Conversations, messages, upload bindings, receipts, members, room settings, previews | Durable local server file; backup behavior unknown | [server/chat-db.js](server/chat-db.js) |
 | Firebase Auth/Firestore/FCM | Identity, profiles/contacts/history/location, private device data, notifications | Provider-managed; rules vary by collection | [firestore.rules](firestore.rules) |
 | Blob/local attachment adapter | Upload, download, delete, SAS/local URL selection | Deployment-selected at server startup | [server/blob-storage.js](server/blob-storage.js) |
 | coturn | STUN/TURN allocations and relayed media | Separate VM/network/security boundary | [server TURN contract](server/turn-config.js) |
@@ -102,16 +102,19 @@ capacity guarantees.
 | Guest rooms/signaling | Optional room password; controls and sender identity bound to the current roster socket | Roster, SDP, ICE, transient room chat |
 | TURN issuance | Bounded caller-supplied `userId`/`roomId`; no application token | Time-limited TURN username/credential/URLs |
 | Firestore | Collection-specific rules | Profiles, contacts, histories, location, private subcollections |
-| Attachment route | Authenticated upload API; local download route has no auth | Files and bearer/SAS URLs depending on storage mode |
+| Attachment route | Source: server-owned upload binding and current membership before capability issuance; signed local reads deny raw/unbound paths | Files and 60-minute read bearer/SAS URLs; coordinated rollout pending |
 
 Data inventory and retention evidence are maintained in
 [SECURITY.md](SECURITY.md). Deployed Firestore rules restrict current location
 and history reads to the signed-in owner or selected recipients, with owner-only
 writes and deletes. The private recipient settings and tracking lifecycle are
-described below. Storage rules allow broad authenticated
-reads under chat paths. The server upload adapter uses Blob or filesystem
-storage; Blob downloads use expiring bearer links, while filesystem links do
-not expire. These storage modes have different access-control requirements.
+described below. Checked-in Storage rules now deny all direct clients; this is
+source-only hardening, not a Firebase deployment. The server upload adapter uses
+Blob or filesystem storage. Current source uses authoritative SQLite upload
+bindings for acceptance, quota, link issuance and cleanup, with expiring bearer
+links for both modes. Legacy unverified objects are not backfilled, signed, read
+or deleted; re-upload is required. See the [attachment contract](SECURITY.md#attachment-access-by-storage-mode)
+for failure states, capability limits and the deployment boundary.
 Guest TURN issuance supports account-free calls and requires separate abuse
 controls.
 

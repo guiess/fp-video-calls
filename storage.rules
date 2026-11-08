@@ -1,14 +1,8 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /chat/{conversationId}/{messageId}/{fileName} {
-      // Any authenticated user can read (files are referenced by UUID — low enumeration risk)
-      allow read: if request.auth != null;
-      // Write: authenticated, max 10MB
-      allow write: if request.auth != null
-                   && request.resource.size < 20 * 1024 * 1024;
-    }
-    // Deny everything else
+    // Current clients upload through the Node API (Azure Blob/local), not Firebase.
+    // Source-only policy: do not provision or deploy Storage to an absent target.
     match /{allPaths=**} {
       allow read, write: if false;
     }

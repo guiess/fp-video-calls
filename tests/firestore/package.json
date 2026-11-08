@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --config ../../firebase.test.json --project demo-location-auth --only firestore \"node --test --test-concurrency=1 location.test.mjs\""
+    "test": "firebase emulators:exec --config ../../firebase.test.json --project demo-location-auth --only firestore \"node --test --test-concurrency=1 location.test.mjs\"",
+    "test:storage": "firebase emulators:exec --config ../../firebase.storage.test.json --project demo-attachment-denial --only storage \"node --test --test-concurrency=1 storage.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",
