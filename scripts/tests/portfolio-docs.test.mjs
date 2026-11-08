@@ -108,35 +108,94 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
     assert.doesNotMatch(text, /token-optional private Socket\.IO identity|unchecked room controls/);
     assert.doesNotMatch(text, /missing access checks for private Socket\.IO identity/);
   }
-  const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
-  assert.match(security, /e74e890d5777db112ea8cedfb4d0d932169b3254/);
-  assert.match(security, /79ae007e22aa1b1f0bbefd29d729f4e1df7a740a/);
+  const security = (await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")).replace(/\s+/g, " ");
   assert.match(security, /Deployed call ownership/);
-  assert.match(security.replace(/\s+/g, " "), /user reported "looks good" on 2026-11-08/);
-  assert.match(security.replace(/\s+/g, " "), /acceptance of checked behavior, not exhaustive device or scenario certification/);
-  assert.match(security.replace(/\s+/g, " "), /updated web client is deployed; APK 201 has been delivered for user testing/);
-  assert.match(security.replace(/\s+/g, " "), /APK 201 is the owner-approved development prerelease/);
+  assert.match(security, /Android 201 or newer/);
+  assert.match(security, /docs\/validation-status\.md#call-ownership-azure-deployment-2026-11-07-est/);
+  assert.match(security, /docs\/releases\/README\.md#android-100201/);
   assert.doesNotMatch(security, /Source-only call ownership|not been deployed or live-user tested/);
   assert.match(security, /1024 invitation records/);
   assert.match(security, /60-second ringing window/);
   assert.match(security, /exactly one recorded call/);
   assert.match(security, /account ownership is not established by guest IDs/);
-  assert.match(security.replace(/\s+/g, " "), /Live user acceptance testing is complete for the features checked/);
-  assert.match(security.replace(/\s+/g, " "), /Self-pin\/primary behavior was not manually checked/);
   const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
   assert.match(readme, /releases\/download\/mobile-v1\.0\.0\.201\/M2Calls-1\.0\.0\.201-debug\.apk/);
   assert.doesNotMatch(readme + security, /updated Android client has not been installed or published|Authenticated call-flow and device lifecycle UAT remain pending/);
   assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });
 
-test("closing risk list retains guest identity without restating resolved call ownership gaps", async () => {
+test("known risk areas are explicit bullets separate from detailed authorization policy", async () => {
   const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
-  const risks = security.slice(security.indexOf("## Known risk areas"));
-  assert.match(risks, /^## Known risk areas/);
-  assert.match(risks, /account-free guest identity limitations/);
-  assert.match(risks, /attachment-sharing policy/);
+  const risks = security.split(/^## /m).find((section) => /^Known risk areas\r?\n/.test(section));
+  assert.ok(risks, "Known risk areas must have its own level-two section");
+  for (const category of [
+    /account-free guest identity limitations/i,
+    /attachment-sharing policy/i,
+    /dependency\/supply-chain/i,
+    /Node 20/i,
+    /configuration drift/i,
+    /guest\/TURN.*abuse/i,
+    /logging.*notification metadata/i,
+  ]) {
+    assert.ok(
+      risks.split(/\r?\n/).some((line) => /^- /.test(line) && category.test(line)),
+      `risk category must be an unordered bullet: ${category}`,
+    );
+  }
   assert.doesNotMatch(risks, /call answer\/cancel ownership checks|missing.*call.*ownership|unchecked.*call/i);
-  assert.match(security.replace(/\s+/g, " "), /These dated transport checks do not establish authenticated user acceptance; the later scoped user acceptance is recorded below/);
+  assert.match(security.replace(/\s+/g, " "), /HTTPS-only[^.]*deployed/);
+});
+
+test("known gaps visibly list current missing protections without reviving deployed fixes", async () => {
+  const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
+  const gaps = security.split(/^## /m).find((section) => /^Known gaps\r?\n/.test(section));
+  assert.ok(gaps, "Known gaps must have its own level-two section");
+  const bullets = gaps.split(/\r?\n/).filter((line) => /^- /.test(line));
+  for (const protection of [
+    /end-to-end encryption/i,
+    /guest.*account ownership/i,
+    /Firebase Storage.*membership/i,
+    /filesystem.*login.*expiry/i,
+    /location.*server-enforced expiry/i,
+    /dependency.*Node 20/i,
+  ]) {
+    assert.ok(bullets.some((line) => protection.test(line)), `gap must be a bullet: ${protection}`);
+  }
+  assert.match(gaps.replace(/\s+/g, " "), /live (?:Storage )?deployment[^.]*not established/i);
+  assert.match(gaps, /if (?:selected|enabled|used)/i);
+  assert.doesNotMatch(
+    gaps,
+    /broad location reads|unauthenticated private sockets|unchecked room controls|missing call ownership|HTTP-only transport/i,
+  );
+});
+
+test("security reference preserves policy limits and separates them from deployment history", async () => {
+  const security = (await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8")).replace(/\s+/g, " ");
+  for (const boundary of [
+    /Firebase (?:ID )?token UID/,
+    /Firebase Auth/,
+    /original invitees/i,
+    /135 seconds/,
+    /restart[^.]*requires redial/i,
+    /cannot be retracted/,
+    /Base64 encoding is not end-to-end encryption/,
+    /DTLS-SRTP/,
+    /HTTPS\/WSS encrypts signaling in transit/,
+    /signaling server still sees SDP, ICE candidates, DTLS fingerprints/,
+    /Node 20/,
+    /dependency\/supply-chain/i,
+    /sensitive (?:diagnostic )?logging/i,
+    /No response[^.]*SLA/,
+    /64 KiB/,
+    /512[^.]*1024[^.]*256/,
+    /2048 UTF-16[^.]*4096 bytes/,
+    /twenty samples per ten seconds/,
+    /no guaranteed server-enforced expiry/i,
+    /public surfaces/,
+  ]) {
+    assert.match(security, boundary);
+  }
+  assert.doesNotMatch(security, /\b[0-9a-f]{40,64}\b/);
 });
 
 test("setup and security guidance retain the corrected implementation boundaries", async () => {
