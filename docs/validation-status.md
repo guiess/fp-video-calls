@@ -53,8 +53,10 @@ objects or notifications were used.
 | TURN and telemetry | `npm run test:turn` and `npm run test:telemetry` equivalent combined Node test invocation | 30 passed |
 | Native production startup/protocol | Actual Express/Socket.IO plus isolated SQLite; source and production-only restores | Passed guest password/namespace/member/stale-socket isolation and synthetic authenticated call ownership/delivery/failure probes |
 
-These are pre-integration results, not vulnerability closure or deployment
-evidence. The old Sharp graph remains vulnerable until the separately owned
+The full suite, 30 contracts and both startup/protocol probes were repeated
+after applying the Node 24 engine metadata, with identical outcomes and no
+native dependency changes. These are pre-integration results, not vulnerability
+closure or deployment evidence. The old Sharp graph remains vulnerable until the separately owned
 0.35.5 change is integrated and qualified. Attachment authorization integration,
 combined gates, Oryx/runtime proof and Azure live UAT remain pending. The
 last verified live server remains Node 20.20.2; its known gap is not removed.
