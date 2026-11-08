@@ -112,8 +112,10 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   assert.match(security, /e74e890d5777db112ea8cedfb4d0d932169b3254/);
   assert.match(security, /79ae007e22aa1b1f0bbefd29d729f4e1df7a740a/);
   assert.match(security, /Deployed call ownership/);
-  assert.match(security.replace(/\s+/g, " "), /Authenticated call-flow and device lifecycle UAT remain pending/);
-  assert.match(security.replace(/\s+/g, " "), /updated web client is deployed; the updated Android client has not been installed or published/);
+  assert.match(security.replace(/\s+/g, " "), /user reported "looks good" on 2026-11-08/);
+  assert.match(security.replace(/\s+/g, " "), /acceptance of checked behavior, not exhaustive device or scenario certification/);
+  assert.match(security.replace(/\s+/g, " "), /updated web client is deployed; APK 201 has been delivered for user testing/);
+  assert.match(security.replace(/\s+/g, " "), /public Android release remains held/);
   assert.doesNotMatch(security, /Source-only call ownership|not been deployed or live-user tested/);
   assert.match(security, /1024 invitation records/);
   assert.match(security, /60-second ringing window/);
@@ -122,6 +124,7 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   assert.match(security.replace(/\s+/g, " "), /Live user acceptance testing is complete for the features checked/);
   assert.match(security.replace(/\s+/g, " "), /Self-pin\/primary behavior was not manually checked/);
   const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
+  assert.doesNotMatch(readme + security, /updated Android client has not been installed or published|Authenticated call-flow and device lifecycle UAT remain pending/);
   assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });
 

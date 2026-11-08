@@ -68,8 +68,8 @@ slow delivery versus the caller's actual ringing timer, reconnect/multidevice,
 profile/socket/token/send races and immutable late-response cleanup.
 Registry restart deliberately requires redial. The early request-order race
 needs the updated web/Android clients; no-response cleanup or zero momentary
-ringing is promised. Android distribution and live-user acceptance remain
-separate pending steps; the subsequent server/web deployment is recorded below.
+ringing is promised. Public Android distribution remains held; subsequent
+server/web deployment, APK delivery and scoped user acceptance are recorded below.
 
 The combined pre-deployment QA/Security/dual-review gate then identified tightly
 coupled queue-error, delivery-resource, navigation-lifetime, early-decline and
@@ -79,7 +79,7 @@ cancel exits, early-event latching, and canonical UUID/room scoping through web
 and Android ringing/overlay/ViewModel/navigation consumers. QA, Security and both
 independent Code Reviews passed final revision
 `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`. APKs 197-200 are superseded by the
-rebuilt and signature-verified APK 201; Android installation/publication remains held.
+rebuilt and signature-verified APK 201, delivered for testing; public publication remains held.
 The subsequent Android compatibility correction validates notification/overlay
 answers against the authenticated server before recovering absent process-local
 state. Conflicting/terminal calls are rejected, background declines update their
@@ -125,9 +125,22 @@ permissions were granted automatically, and no uninstall or data wipe occurred.
 This is limited installation/launch evidence, not authenticated call-flow UAT.
 The APK source remains `79ae007`; the documentation-only revision `4425e4d` was
 not built into it. No public APK release, push, PR or merge occurred.
-Authenticated/manual call flows, real notifications, Android device lifecycle
-and media UAT remain pending; the final post-UAT gate waits for completion or
-an explicit skip.
+Following correction of an accidental earlier acceptance click and delivery of
+the verified APK for physical-device testing, the user reported **"looks good"**
+on 2026-11-08 with no issues reported or pair-fix requested. UAT is complete for
+checked behavior; the device and individual authenticated/media/notification/
+cold-process cases were not specified, so this is not exhaustive certification.
+Final post-UAT review must finish before any separately authorized publication
+or merge. Deployed application and APK source remains `79ae007`; subsequent
+documentation commits are not part of that built artifact.
+
+The Android build derives `versionCode` from `git rev-list --count HEAD`.
+Remote `main` at `fd2817` has 194 reachable commits; squashing this entire branch
+into one commit would produce versionCode **195**, below the delivered **201**
+and therefore unsuitable as an in-place update. Preserving the reviewed history
+with a normal merge keeps the reachable count above 201 without changing app
+source. This is a release-readiness warning, not authorization to merge or
+change the versioning scheme; recheck the count at the chosen future merge tip.
 
 The preceding installed Android source baseline was built and installed on 2026-11-06:
 

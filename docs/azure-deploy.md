@@ -160,8 +160,10 @@ web ZIP with preserved public `config.js`. App Service deployment
 `da83f947-04f4-4a5c-b97e-485ca4a4cf5f` reached `RuntimeSuccessful`; SWA deployment
 `3c2c4e6a-6561-4c6d-a78f-9e83ce6026f3` reached production `Ready`.
 Source/lock/helpers and public assets matched; safe fresh HTTP/WSS checks passed.
-Data/settings/rules were not changed and no rollback was needed. Authenticated
-manual call-flow and Android device UAT remain pending.
+Data/settings/rules were not changed and no rollback was needed. After APK 201
+delivery for testing, the user reported "looks good" on 2026-11-08. This accepts
+checked behavior only, not comprehensive hardware or lifecycle certification.
+Final post-UAT review remains separate from publication/merge authorization.
 See [verification records](validation-status.md#call-ownership-azure-deployment-2026-11-07-est).
 
 1. select a Linux App Service stack supporting Node 22;

@@ -184,8 +184,8 @@ Detailed source/live boundaries and errors are in [SECURITY.md](SECURITY.md).
 The approved web/Android amendment resends cancelled invitations
 with the received UUID and immutable original room/recipients, never a newer
 call's context. Android finishes already-submitted transport despite screen
-coroutine cancellation. The updated web client is deployed; Android installation
-and publication remain pending. The Android update is needed for that early
+coroutine cancellation. The updated web client is deployed; APK 201 was delivered
+for user testing, with public publication still held. The Android update is needed for that early
 request-order race; a response that never arrives cannot trigger resend.
 Normal optional-UUID server compatibility remains. `[CUSTOM]`
 

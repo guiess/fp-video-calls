@@ -168,8 +168,9 @@ Implementation:
 - Source now requires verified private Socket.IO identity, binds room controls
   to the current joined socket, and derives invitation identity from Firebase.
   Bounded call answer/cancel/decline ownership checks and the updated web client
-  are deployed on Azure; authenticated live-user acceptance remains pending.
-  The updated Android client has not been installed or published. Account-free guest
+  are deployed on Azure. APK 201 was delivered for user testing; the user reported
+  "looks good" for checked behavior, not exhaustive device/scenario coverage.
+  A public Android release remains held. Account-free guest
   participant IDs do not establish account ownership.
   Attachment access depends on the storage
   mode. Account-free guest calling, temporary download links, and guest TURN
