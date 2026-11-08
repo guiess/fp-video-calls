@@ -93,8 +93,14 @@ export class AttachmentRegistry {
 
   /** A message may use only its explicitly linked, matching upload receipt. */
   forMessage(message) {
+    const record = this.forMessageAssociation(message);
+    return record?.backend === this.backend ? record : null;
+  }
+
+  /** Receipt association survives adapter switches; it does not authorize reads or I/O. */
+  forMessageAssociation(message) {
     const record = this.get(message.attachment_key);
-    return record && record.backend === this.backend && record.state === "ready" &&
+    return record && record.state === "ready" &&
       record.conversation_id === message.conversation_id && record.uploader_uid === message.sender_uid &&
       record.media_url === message.media_url ? record : null;
   }
@@ -114,9 +120,16 @@ export class AttachmentRegistry {
 
   /** Quarantine before deletion so concurrent sends/signers cannot revive an object. */
   claimDeletion(objectKey) {
+    const record = this.get(objectKey);
+    if (!record || record.backend !== this.backend) return null;
+    return this.revokeUnreferenced(objectKey);
+  }
+
+  /** Revoke last-reference rights even when physical cleanup needs a different adapter. */
+  revokeUnreferenced(objectKey) {
     return this.db.transaction(() => {
       const record = this.get(objectKey);
-      if (!record || record.backend !== this.backend || !["ready", "deleting"].includes(record.state) ||
+      if (!record || !["ready", "deleting"].includes(record.state) ||
           this.hasReferences(objectKey)) return null;
       this.db.prepare("UPDATE attachments SET state = 'deleting' WHERE object_key = ?").run(objectKey);
       return this.get(objectKey);

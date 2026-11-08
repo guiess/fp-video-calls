@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import fs from "node:fs";
 import os from "node:os";
@@ -47,7 +47,7 @@ const encrypted = { type: "file", ciphertext: "synthetic", iv: "iv", encryptedKe
 const UNKNOWN_KEY = "00000000-0000-4000-8000-000000000000.txt";
 
 describe.each(["local", "blob"])("%s authoritative attachment routes", (backend) => {
-  let db, server, origin, directory;
+  let db, server, origin, directory, Registry;
 
   beforeAll(async () => {
     storage.backend = backend;
@@ -56,6 +56,7 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
     vi.stubEnv("CHAT_DB_PATH", ":memory:");
     vi.stubEnv("CHAT_UPLOAD_DIR", directory);
     const routes = await import("../chat-routes.js");
+    Registry = (await import("../attachment-registry.js")).AttachmentRegistry;
     db = (await import("../chat-db.js")).default;
     const app = express();
     app.use(express.json({ limit: "1mb" }));
@@ -67,8 +68,11 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
     origin = `http://127.0.0.1:${server.address().port}`;
   }, 30000);
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const original = await vi.importActual("../blob-storage.js");
+    storage.uploadLocal.mockImplementation(original.uploadLocal);
+    storage.deleteLocal.mockImplementation(original.deleteLocal);
     storage.uploadBlob.mockResolvedValue("https://synthetic.invalid/ignored");
     storage.deleteBlob.mockResolvedValue();
     storage.generateSasUrl.mockImplementation(async key => `https://synthetic.invalid/${key}?sig=test`);
@@ -90,6 +94,8 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
     fs.rmSync(directory, { recursive: true, force: true });
     vi.unstubAllEnvs();
   });
+
+  afterEach(() => { vi.restoreAllMocks(); });
 
   async function request(route, { method = "GET", uid = "alice", body } = {}) {
     const response = await fetch(`${origin}/api/chat${route}`, {
@@ -380,6 +386,60 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
   });
 
   if (backend === "blob") {
+    it("revokes the last authoritative local reference under Blob without using the wrong adapter", async () => {
+      vi.resetModules();
+      vi.doMock("../chat-db.js", () => ({ default: db }));
+      storage.backend = "local";
+      let localServer;
+      try {
+        const localRoutes = await import("../chat-routes.js");
+        const app = express();
+        app.use(express.json());
+        app.get("/api/chat/files/:name", localRoutes.serveLocalAttachment);
+        app.use("/api/chat", localRoutes.default);
+        localServer = await new Promise(resolve => {
+          const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
+        });
+        storage.backend = "blob";
+        const localOrigin = `http://127.0.0.1:${localServer.address().port}`;
+        const localPost = async (route, body) => {
+          const response = await fetch(`${localOrigin}/api/chat${route}`, {
+            method: "POST", headers: { "x-test-uid": "alice", "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          return { status: response.status, body: await response.json() };
+        };
+        const { body: uploaded } = await localPost("/upload", {
+          conversationId: "conversation-a", fileName: "local.txt", data: Buffer.from("safe data").toString("base64"),
+        });
+        const first = await localPost("/conversations/conversation-a/messages", { ...encrypted, mediaUrl: uploaded.downloadUrl });
+        const second = await localPost("/conversations/conversation-a/messages", { ...encrypted, mediaUrl: uploaded.downloadUrl });
+        expect(first.status).toBe(201);
+        vi.clearAllMocks();
+        await request(`/conversations/conversation-a/messages/${first.body.message.id}`, { method: "DELETE" });
+        expect(db.prepare("SELECT state FROM attachments").get().state).toBe("ready");
+        expect((await fetch(localOrigin + uploaded.signedUrl)).status).toBe(200);
+        await request(`/conversations/conversation-a/messages/${second.body.message.id}`, { method: "DELETE" });
+        expect(db.prepare("SELECT state FROM attachments").get().state).toBe("deleting");
+        expect(storage.deleteLocal).not.toHaveBeenCalled();
+        expect(storage.deleteBlob).not.toHaveBeenCalled();
+        expect((await request("/storage-usage")).body.usedBytes).toBe(9);
+        expect((await fetch(localOrigin + uploaded.signedUrl)).status).toBe(403);
+        expect((await localPost("/conversations/conversation-a/messages", { ...encrypted, mediaUrl: uploaded.downloadUrl })).status).toBe(403);
+        expect((await request("/cleanup-orphaned-blobs", { method: "POST" })).body.deleted).toBe(0);
+        expect((await localPost("/cleanup-orphaned-blobs", {})).body.deleted).toBe(1);
+        expect(storage.deleteLocal).toHaveBeenCalledTimes(1);
+        expect(storage.deleteBlob).not.toHaveBeenCalled();
+        expect((await request("/storage-usage")).body.usedBytes).toBe(0);
+      } finally {
+        localServer?.closeAllConnections();
+        if (localServer) await new Promise(resolve => localServer.close(resolve));
+        storage.backend = "blob";
+        vi.doUnmock("../chat-db.js");
+        vi.resetModules();
+      }
+    });
+
     it("bounds conversation cleanup to one storage deletion at a time", async () => {
       await upload();
       await upload();
@@ -437,7 +497,11 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
       db.exec(`CREATE TRIGGER fail_binding BEFORE UPDATE OF state ON attachments
         WHEN NEW.state = 'ready' BEGIN SELECT RAISE(ABORT, 'synthetic binding failure'); END;`);
       storage.deleteBlob.mockRejectedValueOnce(new TypeError("synthetic compensation failure"));
-      try { expect((await upload()).status).toBe(500); }
+      try {
+        const response = await upload();
+        expect(response.status).toBe(503);
+        expect(response.body.error).toBe("ATTACHMENT_DELETE_FAILED");
+      }
       finally { db.exec("DROP TRIGGER fail_binding"); }
       expect(db.prepare("SELECT state FROM attachments").get().state).toBe("deleting");
       expect(storage.generateSasUrl).not.toHaveBeenCalled();
@@ -506,6 +570,43 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
       expect((await pending).status).toBe(200);
     });
   } else {
+    it.each(["EACCES", "EPERM"])("retains ownership/quota when the real local adapter cannot unlink: %s", async code => {
+      const { body: uploaded } = await upload();
+      const sent = await send(uploaded.downloadUrl);
+      const key = db.prepare("SELECT object_key FROM attachments").get().object_key;
+      const target = path.join(directory, key);
+      const exists = fs.existsSync;
+      const unlink = fs.unlinkSync;
+      const inaccessible = vi.spyOn(fs, "existsSync").mockImplementation(file => String(file) === target ? false : exists(file));
+      const fault = vi.spyOn(fs, "unlinkSync").mockImplementation(file => {
+        if (String(file) === target) throw Object.assign(new Error("synthetic access denied"), { code });
+        return unlink(file);
+      });
+      const response = await request(`/conversations/conversation-a/messages/${sent.body.message.id}`, { method: "DELETE" });
+      expect(response.status).toBe(503);
+      expect(response.body.error).toBe("ATTACHMENT_DELETE_FAILED");
+      expect(fault).toHaveBeenCalledWith(target);
+      expect(db.prepare("SELECT state FROM attachments").get().state).toBe("deleting");
+      expect((await request("/storage-usage")).body.usedBytes).toBe(9);
+      expect((await request("/cleanup-orphaned-blobs", { method: "POST", uid: "bob" })).body.deleted).toBe(0);
+      expect(fs.readFileSync(target, "utf8")).toBe("safe data");
+      inaccessible.mockRestore();
+      fault.mockRestore();
+      expect((await request("/cleanup-orphaned-blobs", { method: "POST" })).body.deleted).toBe(1);
+      expect(fs.existsSync(target)).toBe(false);
+      expect((await request("/storage-usage")).body.usedBytes).toBe(0);
+    });
+
+    it("treats only real absence as an idempotent successful local delete", async () => {
+      const { body: uploaded } = await upload();
+      const sent = await send(uploaded.downloadUrl);
+      const key = db.prepare("SELECT object_key FROM attachments").get().object_key;
+      fs.unlinkSync(path.join(directory, key));
+      expect((await request(`/conversations/conversation-a/messages/${sent.body.message.id}`, { method: "DELETE" })).status).toBe(200);
+      expect(db.prepare("SELECT state FROM attachments").get().state).toBe("deleted");
+      expect((await request("/storage-usage")).body.usedBytes).toBe(0);
+    });
+
     it("denies unsigned, tampered, expired, and subsequently deleted local links", async () => {
       const { body: uploaded } = await upload();
       expect((await fetch(origin + uploaded.downloadUrl)).status).toBe(403);
@@ -520,4 +621,38 @@ describe.each(["local", "blob"])("%s authoritative attachment routes", (backend)
       expect((await fetch(origin + uploaded.signedUrl)).status).toBe(403);
     });
   }
+
+  it.each(["completion", "signing"])("surfaces failed confirmed-upload compensation after %s failure", async phase => {
+    if (phase === "completion") {
+      db.exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF state ON attachments
+        WHEN NEW.state = 'ready' BEGIN SELECT RAISE(ABORT, 'synthetic completion failure'); END;`);
+    } else {
+      if (backend === "blob") storage.generateSasUrl.mockRejectedValueOnce(new Error("synthetic signing failure"));
+      else vi.spyOn(Registry.prototype, "localUrl").mockImplementationOnce(() => { throw new Error("synthetic signing failure"); });
+    }
+    if (backend === "blob") storage.deleteBlob.mockRejectedValueOnce(new Error("synthetic delete failure"));
+    else vi.spyOn(fs, "unlinkSync").mockImplementationOnce(() => {
+      throw Object.assign(new Error("synthetic access denied"), { code: "EACCES" });
+    });
+    try {
+      const response = await upload();
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({ ok: false, error: "ATTACHMENT_DELETE_FAILED" });
+      expect(response.body).not.toHaveProperty("signedUrl");
+      expect(db.prepare("SELECT state FROM attachments").get().state).toBe("deleting");
+      expect((await request("/storage-usage")).body.usedBytes).toBe(9);
+    } finally {
+      if (phase === "completion") db.exec("DROP TRIGGER fail_completion");
+      vi.restoreAllMocks();
+      const original = await vi.importActual("../blob-storage.js");
+      storage.deleteLocal.mockImplementation(original.deleteLocal);
+    }
+    expect((await request("/cleanup-orphaned-blobs", { method: "POST", uid: "bob" })).body.deleted).toBe(0);
+    expect((await request("/cleanup-orphaned-blobs", { method: "POST" })).body.deleted).toBe(1);
+    expect((await request("/storage-usage")).body.usedBytes).toBe(0);
+    if (backend === "local") {
+      const key = db.prepare("SELECT object_key FROM attachments").get().object_key;
+      expect(fs.existsSync(path.join(directory, key))).toBe(false);
+    }
+  });
 });

@@ -187,6 +187,14 @@ are scoped accordingly; it never enumerates the storage container. Inactive
 backend bindings are revoked on conversation deletion, but are not deleted
 through the wrong adapter. `[OWASP]` `[CUSTOM]`
 
+Local deletion treats only `ENOENT` as successful absence; access errors must
+retain the quarantined receipt/quota for retry. Last-message revocation checks
+authoritative receipt association independently of the selected storage backend:
+inactive-backend objects are revoked at the last legitimate reference, without
+calling the wrong adapter. Failed physical compensation of a confirmed upload
+also returns `503 ATTACHMENT_DELETE_FAILED`, rather than hiding the retryable
+deletion error behind a generic upload failure.
+
 **Legacy policy (explicitly approved):** no historical ownership backfill is
 performed. Unverified old objects remain untouched; new messages cannot reuse
 them, and the server cannot renew links, read, sign or delete them. History and
@@ -199,6 +207,8 @@ download actions. Android treats explicit JSON null as absence, never the
 literal URL `"null"`, and does not fall back from an explicitly null camelCase
 URL to a stale snake_case value. This presentation requires the updated clients;
 it adds no automatic re-upload flow or ciphertext/type changes.
+The web uses the same decoding path for initial and older pages, preserving
+available encoded attachment captions on pagination.
 Deleting an unverified message removes only the message and reports the same
 attachment error; last-member cleanup reports `unavailableAttachments`. Re-upload
 is required. Old objects are excluded from authoritative quota totals, so those

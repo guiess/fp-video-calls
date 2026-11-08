@@ -224,7 +224,11 @@ export function downloadLocal(fileName, uploadDir) {
  */
 export function deleteLocal(fileName, uploadDir) {
   const filePath = path.join(uploadDir, path.basename(fileName));
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  try {
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
 }
 
 /**

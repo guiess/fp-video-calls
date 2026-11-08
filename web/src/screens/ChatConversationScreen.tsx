@@ -203,7 +203,7 @@ export default function ChatConversationScreen() {
       const res = await apiFetch(`/api/chat/conversations/${id}/messages?limit=50&before=${oldest}`);
       if (res.ok) {
         const data = await res.json();
-        const older = (data.messages || []).reverse();
+        const older = await tryDecryptMessages((data.messages || []).reverse());
         if (older.length > 0) {
           // Preserve scroll position: remember distance from top before prepending
           const el = messagesContainerRef.current;

@@ -527,10 +527,11 @@ router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
   try {
     deletion = db.transaction(() => {
       if (!isParticipant(id, req.uid)) throw new AttachmentError("FORBIDDEN");
-      const record = attachments.forMessage(row);
+      const record = attachments.forMessageAssociation(row);
       unavailable = !!row.media_url && !record;
       db.prepare("DELETE FROM messages WHERE id = ? AND conversation_id = ?").run(msgId, id);
-      return record ? attachments.claimDeletion(record.object_key) : null;
+      const revoked = record ? attachments.revokeUnreferenced(record.object_key) : null;
+      return revoked?.backend === attachments.backend ? revoked : null;
     }).immediate();
   } catch (error) {
     return attachmentFailure(res, error, "MESSAGE_DELETE_FAILED");
@@ -866,8 +867,11 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         if (hasStoredObject) await deleteAttachment(attachments.failUpload(receipt.object_key));
         else if (error.code === "STORAGE_OBJECT_EXISTS") attachments.cancelReservation(receipt.object_key);
         else attachments.markUnverified(receipt.object_key);
-      } catch {
+      } catch (recoveryError) {
         console.error("[chat/upload] Upload recovery failed; receipt remains unavailable");
+        if (recoveryError instanceof AttachmentError && recoveryError.code === "ATTACHMENT_DELETE_FAILED") {
+          return attachmentFailure(res, recoveryError, "UPLOAD_FAILED");
+        }
       }
     }
     // A failed post-storage receipt is never a successful upload, even for access loss.
