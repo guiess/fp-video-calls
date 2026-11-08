@@ -116,13 +116,20 @@ APK `M2Calls-1.0.0.201-debug.apk` was rebuilt from the reviewed revision:
 42,551,614 bytes, SHA-256
 `3c9347eb607084396d99d00ad26d8d42f85aca83afb70fc4711e9f01dca62646`,
 package `com.fpvideocalls`, min SDK 26/target 34, arm64-v8a and armeabi-v7a.
-APK v2 signature verification matched the existing debug signer. It has not
-been installed or published. No push, PR, merge or new GitHub release occurred.
+APK v2 signature verification matched the existing debug signer. The coordinating
+parent reports user-authorized delivery on 2026-11-07: the same hash was verified
+before `adb -s emulator-5580 install -r`, which returned `Success`; installed
+version 201/1.0.0.201 was read back. App process 11782 ran after cold launch, with
+Android's `GrantPermissionsActivity` displayed for the user to handle. No
+permissions were granted automatically, and no uninstall or data wipe occurred.
+This is limited installation/launch evidence, not authenticated call-flow UAT.
+The APK source remains `79ae007`; the documentation-only revision `4425e4d` was
+not built into it. No public APK release, push, PR or merge occurred.
 Authenticated/manual call flows, real notifications, Android device lifecycle
 and media UAT remain pending; the final post-UAT gate waits for completion or
 an explicit skip.
 
-The installed Android source baseline was built and installed on 2026-11-06:
+The preceding installed Android source baseline was built and installed on 2026-11-06:
 
 - source commit: `482a83a83db50d75792610fc009f0fb87d24971d`;
 - build command: `.\gradlew.bat --no-daemon :app:assembleDebug --console=plain`;
