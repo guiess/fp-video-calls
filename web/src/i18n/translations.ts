@@ -97,6 +97,7 @@ export interface Translations {
   refresh: string;
   contactAdded: string;
   deletedChat: string;
+  attachmentUnavailable: string;
   contactAdded: string;
   roomsTab: string;
   optionsTab: string;
@@ -266,6 +267,7 @@ export const translations: Record<Language, Translations> = {
     noLocationData: 'Нет данных о местоположении',
     refresh: 'Обновить',
     deletedChat: '[Удалено]',
+    attachmentUnavailable: 'Вложение недоступно. Загрузите его заново.',
     roomsTab: 'Комнаты',
     optionsTab: 'Настройки',
 
@@ -432,6 +434,7 @@ export const translations: Record<Language, Translations> = {
     noLocationData: 'No location data available',
     refresh: 'Refresh',
     deletedChat: '[Deleted]',
+    attachmentUnavailable: 'Attachment unavailable. Please upload it again.',
     roomsTab: 'Rooms',
     optionsTab: 'Options',
 

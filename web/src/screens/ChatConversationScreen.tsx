@@ -5,6 +5,7 @@ import { useLanguage } from "../i18n/LanguageContext";
 import { apiFetch, getBaseUrl } from "../services/api";
 import { subscribeChatEvents, emitTyping, ChatMessageEvent } from "../services/chatSocket";
 import { fetchContacts, addContact } from "../services/contacts";
+import ChatAttachment from "../components/ChatAttachment";
 
 interface Message {
   id: string;
@@ -14,9 +15,10 @@ interface Message {
   ciphertext: string;
   iv: string;
   encryptedKeys: Record<string, string>;
-  mediaUrl?: string;
-  fileName?: string;
-  fileSize?: number;
+  mediaUrl?: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
+  attachmentError?: string | null;
   replyToId?: string;
   timestamp: number;
   pending?: boolean;
@@ -708,50 +710,9 @@ export default function ChatConversationScreen() {
                     </div>
                   )}
 
-                  {/* Image message */}
-                  {m.type === "image" && m.mediaUrl && !m.uploading && !m.uploadFailed && (
-                    <div style={{ marginBottom: 4 }}>
-                      <img
-                        src={getMediaFullUrl(m.mediaUrl)}
-                        alt="Photo"
-                        style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 6, cursor: "pointer" }}
-                        onClick={() => setPreviewImage(getMediaFullUrl(m.mediaUrl!))}
-                      />
-                    </div>
-                  )}
-
-                  {/* File message */}
-                  {m.type === "file" && m.mediaUrl && !m.uploading && !m.uploadFailed && (
-                    <a
-                      href={getMediaFullUrl(m.mediaUrl)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        padding: "6px 0",
-                        textDecoration: "none",
-                        color: "inherit",
-                        marginBottom: 2,
-                      }}
-                    >
-                      <div style={{
-                        width: 44, height: 44, borderRadius: 8,
-                        background: "#3390ec", color: "#fff",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 500, color: "#3390ec" }}>{m.fileName || "File"}</div>
-                        {m.fileSize && (
-                          <div style={{ fontSize: 12, color: "#707579" }}>
-                            {(m.fileSize / 1024).toFixed(1)} KB
-                          </div>
-                        )}
-                      </div>
-                    </a>
+                  {!m.uploading && !m.uploadFailed && (
+                    <ChatAttachment message={m} unavailableText={t.attachmentUnavailable}
+                      resolveUrl={getMediaFullUrl} onImageClick={setPreviewImage} />
                   )}
 
                   {/* Text content */}

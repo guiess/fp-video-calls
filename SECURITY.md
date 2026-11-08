@@ -193,6 +193,12 @@ them, and the server cannot renew links, read, sign or delete them. History and
 shared-file results return a null URL plus
 `attachmentError: "ATTACHMENT_UNAVAILABLE"` without failing text chat or the
 whole history. Both camelCase and legacy snake_case URL fields are cleared.
+Current web and Android source renders an English/Russian unavailable/re-upload
+label, preserving available filenames/captions without offering preview or
+download actions. Android treats explicit JSON null as absence, never the
+literal URL `"null"`, and does not fall back from an explicitly null camelCase
+URL to a stale snake_case value. This presentation requires the updated clients;
+it adds no automatic re-upload flow or ciphertext/type changes.
 Deleting an unverified message removes only the message and reports the same
 attachment error; last-member cleanup reports `unavailableAttachments`. Re-upload
 is required. Old objects are excluded from authoritative quota totals, so those
