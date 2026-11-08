@@ -21,8 +21,8 @@ a confidential security report are welcome.
 ## Safe use during development
 
 > **M² Calls is under active development and intentionally not production-ready.**
-> Live call ownership and file-access controls
-> still need hardening. Do not use sensitive conversations or confidential files.
+> File-access controls and privacy limitations remain.
+> Do not use sensitive conversations or confidential files.
 > Sensitive diagnostic logging and non-E2E-encrypted text messaging remain limitations.
 
 Use non-sensitive data during development and testing. Do not upload secrets or
@@ -46,7 +46,7 @@ HTTP redirects retain the same host/path/query, and HTTPS health, unauthenticate
 API/CORS and guest WSS protocol checks passed. The Node 20 runtime, startup,
 WebSockets/AlwaysOn and application code/data were unchanged. This is transport
 preflight evidence, not full authenticated or manual-user coverage. The
-source-only call-ownership rollout below remains separately held.
+call-ownership deployment below does not constitute authenticated live-user acceptance.
 
 REST call invitations bind `callerId` to the verified Firebase token UID and
 resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
@@ -55,11 +55,14 @@ name/photo fields use `User`/no photo; lookup failures return HTTP 500
 `CALLER_PROFILE_LOOKUP_FAILED` before any invitation delivery. Socket and Android
 FCM invitations share this canonical identity. `[OWASP]`
 
-### Source-only call ownership
+### Deployed call ownership
 
-The current source adds server-owned invitation authorization; this change has
-not been deployed or live-user tested. At that deployed revision, answer/cancel
-do not verify the requester's relationship to the call.
+The server-owned invitation authorization and updated web client are deployed
+from reviewed revision `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`, verified
+2026-11-07 EST (2026-11-08 00:22 UTC). Tracked App Service startup reached
+`RuntimeSuccessful` on Oryx Node 20.20.2; source/lock/helper hashes, fresh safe
+HTTP/WSS checks and the SWA Ready/public asset hashes matched the approved
+artifacts. Authenticated call-flow and device lifecycle UAT remain pending.
 
 Only original invitees may answer the authenticated inviter. The inviter may
 cancel original recipients still ringing; an invitee may decline only their own
@@ -109,7 +112,8 @@ Android source compatibility amendment retains immutable original context and
 resends cancellation with the exact UUID if the delayed invite response arrives.
 Generation checks prevent old responses from changing a newer call. Android
 finishes submitted invite/cleanup transport after screen-scope cancellation.
-This requires rollout of the changed web and Android clients for the earlier
+The updated web client is deployed; the updated Android client has not been
+installed or published. Android still needs the client update for the earlier
 request-order race; existing clients keep their API contract. It does not
 guarantee no momentary ringing or cleanup when the response never arrives.
 Outgoing clients subscribe before invitation submission and reconcile bounded
@@ -182,8 +186,9 @@ token lifecycle without a new APK release.
   optional room password); account ownership is not established by guest IDs.
   Internal room channels are isolated from private account and socket-ID channels, and the
   REST close bypass returns HTTP 403 `ROOM_SOCKET_REQUIRED`.
-- **Live call ownership:** the deployed gap and source-only authorization
-  policy are distinguished above; live rollout and UAT remain pending.
+- **Live call ownership:** the bounded server policy and updated web client
+  are deployed; authenticated/manual UAT and Android client distribution
+  remain pending. Automated negative probes are not full call-flow assurance.
 
 ### Attachment access by storage mode
 

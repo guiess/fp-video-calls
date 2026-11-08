@@ -2,8 +2,8 @@
 
 - **Status:** only current deployment guide
 - **Owner:** repository owner
-- **Source baseline:** `482a83a83db50d75792610fc009f0fb87d24971d`
-- **Documentation review:** 2026-11-06
+- **Deployed server/web source:** `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`
+- **Deployment verification:** 2026-11-07 EST (2026-11-08 00:22 UTC)
 - **Environment:** personal-use deployment under active development;
   intentionally not production-ready
 
@@ -19,7 +19,7 @@ modify live infrastructure.
 | Live-verified | Observed endpoint or authorized configuration read-back on a recorded date | Web entry point and `/health` responded; deployed Firestore rules were verified on 2026-11-06 |
 | Operator-reported | Requires Azure/Firebase/VM owner confirmation | Resource names, SKUs, deployed source revision, active settings, backups |
 | Proposed | Recommended future hardening, not current fact | IaC, readiness probes, measured recovery objectives, monitoring/alerts |
-| Unknown | Evidence was unavailable | Active Blob mode, TURN listeners/firewalls, retention, cost alerts, live revision |
+| Unknown | Evidence was unavailable | Active Blob mode, TURN listeners/firewalls, retention, cost alerts |
 
 `/health` is liveness only. It does not validate Firebase, SQLite, Blob/local
 storage, Socket.IO upgrade, authentication, TURN allocation, media, or
@@ -29,8 +29,8 @@ authorization.
 
 | Surface | Repository-verified role | Live/configuration status |
 |---|---|---|
-| Azure Static Web Apps | Hosts `web/dist` | Public URL was reachable; deployed revision is unknown |
-| Azure App Service | Runs `node index.js` from `server` | `/health` was reachable; SKU/settings/revision are unknown |
+| Azure Static Web Apps | Hosts `web/dist` | Reviewed prebuilt source above deployed; production Ready and public hashes verified |
+| Azure App Service | Runs `node index.js` from `server` | Reviewed source above deployed; tracked RuntimeSuccessful on Node 20.20.2; source and protocol verified |
 | Firebase Auth | Authenticated application identity | Project `fp-video-calls`; provider settings are not verified |
 | Firestore | Profiles, contacts, histories, location, private device data | Project `fp-video-calls`, database `(default)`, `nam5`; location authorization deployed |
 | FCM | Android call notifications | Delivery health is unknown |
@@ -147,12 +147,22 @@ Preserve that runtime, its startup command, WebSockets/AlwaysOn and settings;
 qualify the actual candidate and current-source rollback on Linux Node 20.
 The Node 22 guidance below is for development or separately approved new
 deployments, not authorization to change this existing target's runtime.
-For the held rollout, require synchronous `--track-status true` startup tracking
+Require synchronous `--track-status true` startup tracking
 with `RuntimeSuccessful`, followed by fresh protocol/native checks. Preserve the
 current fd/e74 source plus lockfile and text-v2 telemetry for source-based Oryx
 rollback; never use a pre-PR20 archive or restore data/uploads/logs/secrets.
-The separate HTTPS owner serializes only `httpsOnly=true`; treat that approved
-flag transition as expected, and roll back only that flag if its own checks fail.
+The independent HTTPS-only change is deployed; `httpsOnly=true` is the authorized
+baseline. Application-code rollback must not revert it. A separate flag rollback
+requires explicit authorization for a flag-attributable compatibility failure.
+
+The 2026-11-07 server/web rollout used the reviewed source ZIP and exact prebuilt
+web ZIP with preserved public `config.js`. App Service deployment
+`da83f947-04f4-4a5c-b97e-485ca4a4cf5f` reached `RuntimeSuccessful`; SWA deployment
+`3c2c4e6a-6561-4c6d-a78f-9e83ce6026f3` reached production `Ready`.
+Source/lock/helpers and public assets matched; safe fresh HTTP/WSS checks passed.
+Data/settings/rules were not changed and no rollback was needed. Authenticated
+manual call-flow and Android device UAT remain pending.
+See [verification records](validation-status.md#call-ownership-azure-deployment-2026-11-07-est).
 
 1. select a Linux App Service stack supporting Node 22;
 2. enable WebSockets;

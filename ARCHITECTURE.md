@@ -160,7 +160,7 @@ fields use `User`/no photo; a failed profile lookup returns HTTP 500
 `call_invite` identity and call UUID reach user Socket.IO rooms and FCM. Android
 can display full-screen ringing and enter the room.
 
-Current source (not yet deployed) records authenticated inviter, original
+The deployed server records authenticated inviter, original
 recipients, room, UUID and per-invitee lifecycle before profile lookup.
 Answer is invitee-to-inviter; cancel is inviter-to-original-ringing-recipients;
 decline remains invitee-to-inviter using the legacy cancel endpoint. Group
@@ -181,11 +181,12 @@ identity, room controls, telemetry, durable call history, or Firebase rules.
 Detailed source/live boundaries and errors are in [SECURITY.md](SECURITY.md).
 `[HEXAGONAL]` `[YAGNI]`
 
-The approved source-only web/Android amendment resends cancelled invitations
+The approved web/Android amendment resends cancelled invitations
 with the received UUID and immutable original room/recipients, never a newer
 call's context. Android finishes already-submitted transport despite screen
-coroutine cancellation. Deployment of the changed clients is needed for that
-early request-order race; a response that never arrives cannot trigger resend.
+coroutine cancellation. The updated web client is deployed; Android installation
+and publication remain pending. The Android update is needed for that early
+request-order race; a response that never arrives cannot trigger resend.
 Normal optional-UUID server compatibility remains. `[CUSTOM]`
 
 ### Persistent and transient chat

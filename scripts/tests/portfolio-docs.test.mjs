@@ -110,8 +110,11 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   }
   const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
   assert.match(security, /e74e890d5777db112ea8cedfb4d0d932169b3254/);
-  assert.match(security.replace(/\s+/g, " "), /At that deployed revision, answer\/cancel do not verify the requester's relationship to the call/);
-  assert.match(security, /Source-only call ownership/);
+  assert.match(security, /79ae007e22aa1b1f0bbefd29d729f4e1df7a740a/);
+  assert.match(security, /Deployed call ownership/);
+  assert.match(security.replace(/\s+/g, " "), /Authenticated call-flow and device lifecycle UAT remain pending/);
+  assert.match(security.replace(/\s+/g, " "), /updated web client is deployed; the updated Android client has not been installed or published/);
+  assert.doesNotMatch(security, /Source-only call ownership|not been deployed or live-user tested/);
   assert.match(security, /1024 invitation records/);
   assert.match(security, /60-second ringing window/);
   assert.match(security, /exactly one recorded call/);
@@ -186,7 +189,12 @@ test("current location guidance describes deployed access without stale warnings
   assert.match(security, /stopping tracking[^.]*retained current location and history/i);
   assert.match(security, /Removing a recipient[^.]*future[^.]*server reads/i);
   assert.match(security, /cached copies/i);
-  assert.doesNotMatch(security, /manual UAT|scoped review gate|byte-for-byte|SHA-256|ruleset identity/i);
+  const location = security.slice(
+    security.indexOf("### Location authorization"),
+    security.indexOf("### Private socket identity"),
+  );
+  assert.match(location, /### Location authorization/);
+  assert.doesNotMatch(location, /manual UAT|scoped review gate|byte-for-byte|SHA-256|ruleset identity/i);
 });
 
 test("both system diagram formats label the location read and write boundary", async () => {

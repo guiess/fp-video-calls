@@ -32,9 +32,9 @@ These package/advisory counts require separate dependency triage.
 ### Local call-ownership integration (2026-11-07)
 
 The approved ownership ticket and web/Android delayed-response cancellation
-amendment were implemented locally against fresh `main`
+amendment were initially implemented locally against fresh `main`
 `fd2817b6e15775971f5d8fb5b6168e6d0bb36474`. No application-code deployment,
-APK installation/publication, push or PR occurred during this implementation.
+APK installation/publication, push or PR occurred during local qualification.
 The separately approved HTTPS-only setting is now deployed; it is the authorized
 baseline and must not be reverted by an application-code rollback.
 These results do not update the live revision or constitute live UAT.
@@ -68,18 +68,18 @@ slow delivery versus the caller's actual ringing timer, reconnect/multidevice,
 profile/socket/token/send races and immutable late-response cleanup.
 Registry restart deliberately requires redial. The early request-order race
 needs the updated web/Android clients; no-response cleanup or zero momentary
-ringing is promised. Coordinated QA/security/review, rollout, Android
-distribution and live-user acceptance remain separate pending steps.
+ringing is promised. Android distribution and live-user acceptance remain
+separate pending steps; the subsequent server/web deployment is recorded below.
 
 The combined pre-deployment QA/Security/dual-review gate then identified tightly
 coupled queue-error, delivery-resource, navigation-lifetime, early-decline and
 receiver-isolation gaps. Follow-up source fixes add per-recipient cached delivery
 outcomes, physical provider/request/queue bounds and deadlines, React Router
 cancel exits, early-event latching, and canonical UUID/room scoping through web
-and Android ringing/overlay/ViewModel/navigation consumers. The 197 APK above
-is baseline evidence only; a new final-SHA APK must be rebuilt and signature
-checked before any distribution. Final review re-verification is required before
-release, with application deployment and Android distribution still held.
+and Android ringing/overlay/ViewModel/navigation consumers. QA, Security and both
+independent Code Reviews passed final revision
+`79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`. APKs 197-200 are superseded by the
+rebuilt and signature-verified APK 201; Android installation/publication remains held.
 The subsequent Android compatibility correction validates notification/overlay
 answers against the authenticated server before recovering absent process-local
 state. Conflicting/terminal calls are rejected, background declines update their
@@ -93,6 +93,34 @@ The separate ANSWER-intent handoff also checks the exact confirmed active UUID
 and room after navigation-graph readiness and after the retry delay. Obsolete
 handoffs cannot navigate or clear a newer call's stack. These are deterministic
 JVM state/effect checks, not Android device lifecycle or live-user acceptance.
+
+### Call-ownership Azure deployment (2026-11-07 EST)
+
+The reviewed server and exact prebuilt web artifacts were deployed and verified
+at **2026-11-08 00:22:07 UTC**, from revision
+`79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`. One server upload used
+`--clean false --async false --track-status true`; one official direct SWA
+production upload used the prebuilt output with no rebuild and a working
+directory outside that output.
+
+| Surface | Live evidence |
+|---|---|
+| App Service | Active deployment `da83f947-04f4-4a5c-b97e-485ca4a4cf5f`; native exit 0; `RuntimeSuccessful`, one successful instance, none failed/in progress |
+| Runtime/source | Oryx Node 20.20.2 and npm restoration observed; all 18 source/package/lock/helper hashes matched the candidate |
+| Protocol | Two fresh trusted guest WSS/Socket.IO connections; 12 safe HTTP/CORS/private-channel/room negative checks passed on each |
+| SWA production | Deployment `3c2c4e6a-6561-4c6d-a78f-9e83ce6026f3`; CLI/native exits 0; environment `Ready`; index, referenced JS/CSS/favicon and `/app/call` fallback verified |
+| Public configuration | `config.js` retained byte-for-byte, SHA-256 `711c539535c6ecfb51888e22a1536f329465344f5dc47260d1283006d2db748b` |
+| Preserved baseline | HTTPS-only=true, `NODE\|20-lts`, startup, WebSockets/AlwaysOn and min TLS 1.2 unchanged; no data/rules/configuration changes or rollback |
+
+APK `M2Calls-1.0.0.201-debug.apk` was rebuilt from the reviewed revision:
+42,551,614 bytes, SHA-256
+`3c9347eb607084396d99d00ad26d8d42f85aca83afb70fc4711e9f01dca62646`,
+package `com.fpvideocalls`, min SDK 26/target 34, arm64-v8a and armeabi-v7a.
+APK v2 signature verification matched the existing debug signer. It has not
+been installed or published. No push, PR, merge or new GitHub release occurred.
+Authenticated/manual call flows, real notifications, Android device lifecycle
+and media UAT remain pending; the final post-UAT gate waits for completion or
+an explicit skip.
 
 The installed Android source baseline was built and installed on 2026-11-06:
 
