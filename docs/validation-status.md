@@ -27,6 +27,40 @@ Locked installs reported existing dependency findings:
 
 These package/advisory counts require separate dependency triage.
 
+## Node 24 qualification (local, 2026-11-08)
+
+The approved runtime work starts from reviewed `main`
+`b8b0c7bc5157f1f6676cc8ce165486d14067102c`. Official
+[Node 24.22.2](https://nodejs.org/dist/v24.22.2/) distributions were checked
+against that release's `SHASUMS256.txt`, without changing the host's global tools.
+Linux x64 archive SHA-256:
+`48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75`.
+Windows x64 ZIP SHA-256:
+`ca1bff5d8ead13c9f2ea404a176db46bd430704d5b5113734049fa365e7799e2`.
+Both actual processes report Node 24.22.2 / ABI 137; bundled npm is 11.19.1.
+
+Isolated Linux development and `npm ci --omit=dev` production restores of the
+existing lock both loaded real SQLite 3.51.2 and Sharp 0.33.5 / libvips 8.15.3.
+In-memory SQLite queries, bcrypt, and synthetic PNG-to-WebP resize passed.
+Production excludes Vitest and socket.io-client; loopback clients are supplied
+from the separate development restore. No real Firebase identities, user data,
+objects or notifications were used.
+
+| Area | Command / scope | Result |
+|---|---|---|
+| Metadata/docs/package regressions | `node --test scripts/tests/*.test.mjs` | 34 passed; the two new toolchain checks first failed against the old metadata/guidance |
+| Full Linux server suite | `CHAT_DB_PATH=:memory: node node_modules/vitest/vitest.mjs run --hookTimeout=60000` | 237 passed, 1 unchanged small-WebP/JPEG expectation failure |
+| TURN and telemetry | `npm run test:turn` and `npm run test:telemetry` equivalent combined Node test invocation | 30 passed |
+| Native production startup/protocol | Actual Express/Socket.IO plus isolated SQLite; source and production-only restores | Passed guest password/namespace/member/stale-socket isolation and synthetic authenticated call ownership/delivery/failure probes |
+
+These are pre-integration results, not vulnerability closure or deployment
+evidence. The old Sharp graph remains vulnerable until the separately owned
+0.35.5 change is integrated and qualified. Attachment authorization integration,
+combined gates, Oryx/runtime proof and Azure live UAT remain pending. The
+last verified live server remains Node 20.20.2; its known gap is not removed.
+The [release guide](azure-deploy.md#server-source-packaging-and-app-service)
+requires a paired app/runtime release and source-based rollback. `[CUSTOM]`
+
 ## Current Android source build
 
 ### Local call-ownership integration (2026-11-07)

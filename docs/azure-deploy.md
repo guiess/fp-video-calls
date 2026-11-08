@@ -103,7 +103,7 @@ Record:
 
 - source commit and clean-tree status;
 - web/server lockfile hashes;
-- Node 22.x and npm versions;
+- actual Node 24.x patch, npm, native ABI, SQLite and `sharp.versions`;
 - exact test/build commands and results;
 - candidate server package entry list and validator result;
 - previous web/server deployment identities;
@@ -142,15 +142,30 @@ and rejects prohibited entries. The package should contain `package.json` and
 
 App Service deployment remains a source/Oryx boundary:
 
-**Existing approved target:** `app-voice-video-server` uses `NODE|20-lts`.
-Preserve that runtime, its startup command, WebSockets/AlwaysOn and settings;
-qualify the actual candidate and current-source rollback on Linux Node 20.
-The Node 22 guidance below is for development or separately approved new
-deployments, not authorization to change this existing target's runtime.
+**Pending approved upgrade, not deployed:** `app-voice-video-server` was last
+verified on `NODE|20-lts` / Node 20.20.2. The approved candidate selects
+`NODE|24-lts`, supported by Azure through 2028-04-30. Local qualification uses
+official Node 24.22.2 (Krypton), npm 11.19.1, ABI 137. Verify official release
+checksums; keep tools/caches isolated. Node alone does not remediate the old
+Sharp decoder: integrate the separately owned Sharp 0.35.5 graph and attachment
+authorization before the one combined rollout. `[CUSTOM]`
+
+Live mutations remain on hold until the combined predeploy gate and explicit
+release authorization. Warn users of call interruption/downtime; no new paid
+resources or slots are approved. Preserve startup
+`mkdir -p /home/data && node index.js`, WebSockets/AlwaysOn, secrets, data,
+selected-location rules and `httpsOnly=true`. Leave SWA and Firebase Storage
+unchanged; no Storage bucket/rules release target was established.
 Require synchronous `--track-status true` startup tracking
-with `RuntimeSuccessful`, followed by fresh protocol/native checks. Preserve the
-current fd/e74 source plus lockfile and text-v2 telemetry for source-based Oryx
-rollback; never use a pre-PR20 archive or restore data/uploads/logs/secrets.
+with `RuntimeSuccessful`, followed by actual process/native version evidence and
+fresh safe HTTP/WSS protocol checks; Kudu hashes plus `/health` alone do not
+qualify the runtime. Preserve the current reviewed source plus lockfile,
+Node 20 configuration and text-v2 telemetry for source-based Oryx rollback.
+Capture only allowlisted JavaScript/package files, never broad `wwwroot`,
+databases, uploads, logs, archives or secrets. Restore runtime and app together,
+preserving additive attachment metadata/schema; explicitly report
+reopened authorization and native-decoder vulnerabilities if rollback is needed.
+This is source-based recovery, not reproduction of an old native container.
 The independent HTTPS-only change is deployed; `httpsOnly=true` is the authorized
 baseline. Application-code rollback must not revert it. A separate flag rollback
 requires explicit authorization for a flag-attributable compatibility failure.
@@ -166,17 +181,23 @@ checked behavior only, not comprehensive hardware or lifecycle certification.
 Final post-UAT review remains separate from publication/merge authorization.
 See [verification records](validation-status.md#call-ownership-azure-deployment-2026-11-07-est).
 
-1. select a Linux App Service stack supporting Node 22;
-2. enable WebSockets;
+1. verify the approved subscription/resource identity and configuration drift;
+2. qualify the combined source on Linux Node 24, including full server tests,
+   SQLite/image operations and safe synthetic protocol checks;
 3. set `SCM_DO_BUILD_DURING_DEPLOYMENT=true` and `ENABLE_ORYX_BUILD=true`
    in the Linux App Service application settings, and verify those values before
    upload; ZIP deployment does not restore dependencies by default;
-4. configure runtime settings without printing secrets;
-5. deploy the validated source ZIP;
-6. confirm in deployment logs that Oryx used Node 22 and restored dependencies;
-7. record the resulting deployment ID and platform logs;
-8. verify process start, liveness, CORS, WebSocket upgrade, authentication, and
-   synthetic API behavior.
+4. after release authorization, select `NODE|24-lts` and deploy the validated
+   source ZIP as one maintenance release; never run old Node 20 native artifacts
+   under Node 24;
+5. confirm in build logs that Oryx selected Node 24 from `engines.node` and
+   restored native dependencies; qualify a separate `npm ci --omit=dev`
+   installation/start without dev test dependencies;
+6. record actual Oryx/runtime patch, ABI and native versions, deployment ID,
+   `RuntimeSuccessful` and bounded redacted native errors if any;
+7. verify process start, liveness, CORS, WebSocket upgrade, authentication,
+   room/call ownership and telemetry contracts using synthetic fixtures only;
+8. conduct approved Azure live UAT, then the final post-UAT review gate.
 
 See [App Service ZIP build automation](https://learn.microsoft.com/azure/app-service/deploy-zip#enable-build-automation-for-zip-deploy)
 for the platform's source-deployment behavior.

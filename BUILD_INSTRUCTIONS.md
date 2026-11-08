@@ -7,14 +7,17 @@ They do not require production credentials.
 ## Supported toolchain
 
 - Git
-- Node.js 22.x and npm with lockfile support
+- Node.js 24.22.2 and its bundled npm 11.19.1 for the server
 - JDK 17 for Android; JDK 21 or newer for the Firestore emulator
 - Android SDK 34 with Android build tools required by AGP 8.2.2
 - Bash or PowerShell
 
-Node 22 is the supported baseline because locked web/server dependencies
-include packages requiring Node 20 or newer. Earlier Node 18 deployment advice
-is superseded.
+The server selects Node 24.x; `server/.nvmrc` pins the qualification patch.
+Use an isolated official Node distribution verified against its release
+`SHASUMS256.txt`, or `nvm use` from `server`. Do not reuse native dependencies
+installed under Node 20, 22, or 26. The Node 24 source change does not establish
+that Azure has been upgraded; see the [deployment guide](docs/azure-deploy.md).
+Existing web/Firestore Node 22 qualification remains historical evidence.
 
 ## Clone
 
@@ -87,16 +90,24 @@ non-secret endpoints/settings.
 
 ```bash
 cd server
+node --version
 npm ci
 node node_modules/vitest/vitest.mjs run
 npm run test:turn
 npm run test:telemetry
 ```
 
-The default server suite currently executes 41 tests with one known mismatch:
+The baseline server suite has one known mismatch:
 the small-WebP test expects JPEG conversion while the current implementation
 preserves the original WebP when no resize is needed. The implementation and
 test expectation should be reconciled separately.
+
+There is no server transpilation step. A production source build is a clean
+Linux Node 24 `npm ci --omit=dev`, including optional native packages and install
+scripts, followed by `npm start`. Run tests in a separate development restore;
+do not copy Windows `node_modules` or rely on Vitest/socket.io-client being
+installed in production. Record actual Node/ABI, SQLite and `sharp.versions`
+along with synthetic image and HTTP/Socket.IO readiness results.
 
 Start without production integrations:
 
