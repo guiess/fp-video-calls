@@ -250,22 +250,30 @@ Use `--only firestore:rules` for a rules-only change and verify the active sourc
 after deployment. Do not infer the target from a personal default or deploy
 Storage, indexes, functions, or hosting as part of this command.
 
-Firebase Storage rules still allow broad authenticated reads and writes to chat objects.
-The location policy does not change those Storage permissions or the
-Blob/local attachment access described below.
+Firebase Storage has a source-only deny-all rule for direct client access.
+No bucket/rules release target was established; no provisioning or Storage rules
+deployment is authorized. This is separate from the deployed location policy
+and does not claim a live Firebase remediation.
 
 ## Blob and local attachment storage
 
 At server startup, a non-empty `AZURE_STORAGE_CONNECTION_STRING` selects Blob
-mode; otherwise the local filesystem is used. Blob message references are
-resolved to time-limited SAS URLs. Local mode serves
-`/api/chat/files/:name` without authentication.
+mode; otherwise the local filesystem is used. The integrated source authorizes
+attachment references against its authoritative SQLite registry and current
+conversation membership before issuing read links, accepting messages or
+performing deletion/cleanup. Blob uses time-limited SAS URLs; filesystem reads
+require an expiring per-object signed capability and a ready binding. Old
+unbound objects fail closed and remain untouched; affected clients must re-upload.
+These controls are pending the coordinated release, not established live facts.
+Retain additive attachment metadata/schema on rollback and explicitly report
+the reopened authorization vulnerability. See [attachment policy](../SECURITY.md#attachment-access-by-storage-mode).
 
 Verify:
 
 1. active mode from bounded startup evidence without secret values;
 2. container/directory existence and write permissions;
-3. synthetic upload, download, delete, and quota behavior;
+3. synthetic authorized upload/download/delete/quota behavior and forged,
+   cross-conversation, missing/unbound object denials;
 4. object deletion separately from message/reference deletion;
 5. backup/restore ownership and retention;
 6. restart behavior and URL compatibility when mode changes.

@@ -63,6 +63,39 @@ last verified live server remains Node 20.20.2; its known gap is not removed.
 The [release guide](azure-deploy.md#server-source-packaging-and-app-service)
 requires a paired app/runtime release and source-based rollback. `[CUSTOM]`
 
+### Combined server qualification (local, 2026-11-08)
+
+The Node 24 integration branch imports Sharp source `232c44f` and attachment
+source `9dfe3b8` sequentially as `65594df` and `4b224a9`. The engine remains
+`24.x`, the development pin `24.22.2`, and Sharp's package-manager-generated
+`^0.35.5` graph is retained. No runtime/protocol changes were added to integrate.
+
+Fresh Linux x64 restores used an empty environment, isolated home/cache, and
+distinct empty npm user/global configuration files. No author credentials,
+private registry settings or TLS exceptions were copied. Locked downloads
+succeeded anonymously, including the public mirror URLs in the Sharp graph;
+this is not independent npm attestation or proof of public npm endpoint
+availability. The Sharp owner separately verified every packed source/generated
+file and actual native payloads against official maintainer release workspaces.
+
+| Area | Result |
+|---|---|
+| Actual runtime/native graph | Node 24.22.2, npm 11.19.1, ABI 137, SQLite 3.51.2, Sharp 0.35.5, libvips 8.18.7, TIFF 4.7.2 |
+| Fresh restores | Development: 392 packages; production-only: 332 packages, without Vitest/socket.io-client |
+| Full server suite | `CHAT_DB_PATH=:memory: npm test -- --hookTimeout=60000`: 346/346 passed, including registry/routes and image regressions; old WebP expectation corrected without changing image production behavior |
+| Native contract tests | `npm run test:turn`: 9 passed; `npm run test:telemetry`: 21 passed |
+| Real native operations | In-memory SQLite/bcrypt and safe generated JPEG/PNG/WebP/TIFF/GIF decode/resize passed in both restores |
+| Safe production readiness | Actual source and production-only HTTP/Socket.IO startup, guest/member/namespace isolation, plus synthetic authenticated call ownership/delivery/failure probes passed |
+| Documentation/package contracts | 34 passed after reconciling obsolete attachment-policy expectations; source package requires `attachment-registry.js` |
+
+This qualifies combined **server source locally**, not Azure or client UAT.
+Minimum web/Android unavailable/re-upload labels remain a separate pending
+integration; no final integrated APK is claimed. Combined predeploy review,
+explicit release approval, Oryx/runtime native readback, live UAT and final
+post-UAT review remain required. Live Node 20 and older attachment behavior are
+not claimed remediated. Firebase Storage deny-all remains source-only; no bucket
+is provisioned and no rules are deployed. `[CUSTOM]`
+
 ## Current Android source build
 
 ### Local call-ownership integration (2026-11-07)

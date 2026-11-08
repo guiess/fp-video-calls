@@ -97,10 +97,10 @@ npm run test:turn
 npm run test:telemetry
 ```
 
-The baseline server suite has one known mismatch:
+Before the Sharp upgrade, the baseline server suite had one known mismatch:
 the small-WebP test expects JPEG conversion while the current implementation
-preserves the original WebP when no resize is needed. The implementation and
-test expectation should be reconciled separately.
+preserves the original WebP when no resize is needed. The integrated Sharp
+tests now assert this preserved behavior correctly.
 
 There is no server transpilation step. A production source build is a clean
 Linux Node 24 `npm ci --omit=dev`, including optional native packages and install

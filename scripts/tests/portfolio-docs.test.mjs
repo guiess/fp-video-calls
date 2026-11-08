@@ -154,15 +154,16 @@ test("known gaps visibly list current missing protections without reviving deplo
   for (const protection of [
     /end-to-end encryption/i,
     /guest.*account ownership/i,
-    /Firebase Storage.*membership/i,
-    /filesystem.*login.*expiry/i,
+    /Attachment rollout.*coordinated server rollout/i,
+    /possession of an issued read link.*expiry/i,
     /location.*server-enforced expiry/i,
     /dependency.*Node 20/i,
   ]) {
     assert.ok(bullets.some((line) => protection.test(line)), `gap must be a bullet: ${protection}`);
   }
-  assert.match(gaps.replace(/\s+/g, " "), /live (?:Storage )?deployment[^.]*not established/i);
-  assert.match(gaps, /if (?:selected|enabled|used)/i);
+  assert.match(security, /Firebase Storage rules \| Deny all direct client/);
+  assert.match(security, /hardened \*\*source\*\*, not a claim of deployment/);
+  assert.match(security, /unsigned\/unbound UUID paths are denied/);
   assert.doesNotMatch(
     gaps,
     /broad location reads|unauthenticated private sockets|unchecked room controls|missing call ownership|HTTP-only transport/i,
@@ -215,12 +216,14 @@ test("setup and security guidance retain the corrected implementation boundaries
   assert.doesNotMatch(build + android, /Use simulated coordinates only|only with synthetic data/i);
   assert.match(security, /private vulnerability reporting is not enabled/i);
   assert.doesNotMatch(security, /security\/advisories\/new/);
-  assert.match(security, /bearer-link design/);
+  assert.match(security, /possession remains an intentional bearer capability/);
   assert.match(security, /supporting guest calling/);
   assert.doesNotMatch(deployment, /historical deployment automation/i);
   assert.match(deployment, /SCM_DO_BUILD_DURING_DEPLOYMENT=true/);
   assert.match(deployment, /ENABLE_ORYX_BUILD=true/);
   assert.match(deployment, /Base64-encoded service-account JSON, not raw JSON/);
+  assert.match(deployment, /source-only deny-all/);
+  assert.doesNotMatch(deployment, /Local mode serves[\s\S]{0,80}without authentication/);
   assert.match(releases, /original build-source commit and build process remain unknown/i);
   assert.doesNotMatch(releases, /signer, installed package metadata, and\s+device validation remain unknown/i);
 });
