@@ -4,6 +4,8 @@ import android.content.Intent
 import android.util.Log
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.model.CallIdentity
+import com.fpvideocalls.model.CallRecord
 import com.fpvideocalls.util.AppLifecycle
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
@@ -16,6 +18,22 @@ class FcmService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "FcmService"
+    }
+
+    private val cancellationHandler by lazy {
+        IncomingCancellationHandler(object : IncomingCancellationEffects {
+            override fun markCancelled(uuid: String) = IncomingCallState.markCancelled(uuid)
+            override fun findRecord(uuid: String) = CallStateManager.getRecord(uuid)
+            override fun cancelRecord(uuid: String) = CallStateManager.cancelCall(uuid)
+            override fun publish(event: CallEvent.Cancel) = CallEventBus.post(event)
+            override fun cancelNotification(uuid: String) = NotificationHelper.cancelNotification(applicationContext, uuid)
+            override fun stopRinging(expected: CallIdentity) = CallRingingService.stopIfActive(expected)
+            override fun finishActivity(expected: CallIdentity) = IncomingCallActivity.finishIfActive(expected)
+            override fun showMissed(record: CallRecord) {
+                NotificationHelper.showMissedCallNotification(applicationContext, record.callerName, record.callType)
+            }
+            override fun reportInvalid() { Log.w(TAG, "Ignoring invalid call cancellation") }
+        })
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -82,27 +100,7 @@ class FcmService : FirebaseMessagingService() {
     }
 
     private fun handleCallCancel(data: Map<String, String>) {
-        var callUUID = data["callUUID"] ?: ""
-        val roomId = data["roomId"] ?: ""
-        if (callUUID.isEmpty() && roomId.isNotEmpty()) {
-            callUUID = CallStateManager.findCallUUIDByRoomId(roomId) ?: ""
-        }
-        Log.d(TAG, "Call cancelled: uuid=$callUUID, roomId=$roomId")
-        IncomingCallState.markCancelled(callUUID)
-
-        val record = CallStateManager.cancelCall(callUUID)
-        CallEventBus.post(CallEvent.Cancel(callUUID, roomId))
-        if (callUUID.isNotEmpty()) {
-            NotificationHelper.cancelNotification(applicationContext, callUUID)
-        }
-        stopService(Intent(applicationContext, CallRingingService::class.java))
-        IncomingCallActivity.finishIfActive()
-
-        if (record != null && record.status == com.fpvideocalls.model.CallRecordStatus.MISSED) {
-            NotificationHelper.showMissedCallNotification(
-                applicationContext, record.callerName, record.callType
-            )
-        }
+        cancellationHandler.handle(data)
     }
 
     private fun handleChatMessage(data: Map<String, String>) {

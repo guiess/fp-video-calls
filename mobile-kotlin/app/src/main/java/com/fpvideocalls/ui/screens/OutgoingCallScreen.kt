@@ -91,7 +91,7 @@ fun OutgoingCallScreen(
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = {
-                    outgoingCallViewModel.cancel(contacts)
+                    outgoingCallViewModel.cancel()
                     onBack()
                 },
                 shape = RoundedCornerShape(12.dp)

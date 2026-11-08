@@ -5,8 +5,14 @@ import { useLanguage } from "../i18n/LanguageContext";
 import { createRoom, sendCallInvite, cancelCall } from "../services/callService";
 import { saveCallRecord } from "../services/callHistoryService";
 import { subscribeChatEvents } from "../services/chatSocket";
+import { OutgoingInvitation } from "../services/outgoingInvitation";
 
 type CallState = "setting_up" | "ringing" | "answered" | "declined" | "timeout" | "error";
+type CallGeneration = { isCancelled: boolean; invitation?: OutgoingInvitation };
+
+function reportCancellationFailure() {
+  console.warn("[call/cancel] Cancellation request failed");
+}
 
 export default function OutgoingCallScreen() {
   const [params] = useSearchParams();
@@ -22,20 +28,25 @@ export default function OutgoingCallScreen() {
   const passwordRef = useRef<string>("");
   const callUUIDRef = useRef<string>("");
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const generationRef = useRef<CallGeneration>();
 
   useEffect(() => {
     if (!user || calleeUids.length === 0) return;
-    let cancelled = false;
+    const generation: CallGeneration = { isCancelled: false };
+    generationRef.current = generation;
 
     async function startCall() {
       // 1. Create room
       const room = await createRoom(quality);
-      if (!room || cancelled) {
-        if (!cancelled) setState("error");
+      if (!room || generation.isCancelled || generationRef.current !== generation) {
+        if (!generation.isCancelled) setState("error");
         return;
       }
       roomIdRef.current = room.roomId;
       passwordRef.current = room.password;
+      const attempt = new OutgoingInvitation({ roomId: room.roomId, calleeUids },
+        (context, uuid) => cancelCall([...context.calleeUids], context.roomId, uuid));
+      generation.invitation = attempt;
 
       // 2. Send invite
       const result = await sendCallInvite({
@@ -47,11 +58,28 @@ export default function OutgoingCallScreen() {
         callType,
         roomPassword: room.password,
       });
-      if (!result || cancelled) {
-        if (!cancelled) setState("error");
+      if (result) {
+        try { await attempt.receiveUUID(result.callUUID); } catch {
+          reportCancellationFailure();
+          if (!generation.isCancelled && generationRef.current === generation) {
+            setState("error");
+            return;
+          }
+        }
+      }
+      if (!result || generation.isCancelled || generationRef.current !== generation) {
+        if (!generation.isCancelled && generationRef.current === generation) setState("error");
         return;
       }
       callUUIDRef.current = result.callUUID;
+      if (attempt.terminalEvent === "declined") {
+        finishDeclinedAttempt();
+        return;
+      }
+      if (attempt.terminalEvent === "answered") {
+        finishAnsweredAttempt();
+        return;
+      }
       setState("ringing");
 
       // Save call record to Firestore
@@ -71,22 +99,28 @@ export default function OutgoingCallScreen() {
 
       // 3. Timeout after 45s
       timerRef.current = setTimeout(() => {
+        if (generation.isCancelled || generationRef.current !== generation) return;
         setState("timeout");
-        cancelCall(calleeUids, roomIdRef.current, callUUIDRef.current);
+        void attempt.cancel().catch(reportCancellationFailure);
         saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "MISSED", direction: "outgoing", createdAt: Date.now(), endedAt: Date.now() });
       }, 45000);
     }
 
     startCall();
     return () => {
-      cancelled = true;
+      generation.isCancelled = true;
+      void generation.invitation?.cancel().catch(reportCancellationFailure);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
   function handleCancel() {
     if (timerRef.current) clearTimeout(timerRef.current);
-    cancelCall(calleeUids, roomIdRef.current, callUUIDRef.current);
+    const generation = generationRef.current;
+    if (generation) {
+      generation.isCancelled = true;
+      void generation.invitation?.cancel().catch(reportCancellationFailure);
+    }
     if (callUUIDRef.current) {
       saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "DECLINED", direction: "outgoing", createdAt: Date.now(), endedAt: Date.now() });
     }
@@ -103,30 +137,34 @@ export default function OutgoingCallScreen() {
     window.location.reload();
   }
 
+  function finishDeclinedAttempt() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    generationRef.current?.invitation?.finish();
+    setState("declined");
+    saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "DECLINED", direction: "outgoing", createdAt: Date.now(), endedAt: Date.now() });
+  }
+
+  function finishAnsweredAttempt() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    generationRef.current?.invitation?.finish();
+    setState("answered");
+    saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "ACTIVE", direction: "outgoing", createdAt: Date.now(), answeredAt: Date.now() });
+    setTimeout(() => handleJoinRoom(), 500);
+  }
+
   // Listen for call_cancel (callee declined) and call_answered via socket
   useEffect(() => {
-    if (state !== "ringing") return;
-
     const unsub = subscribeChatEvents({
       onCallCancel: (data) => {
-        if (data.roomId === roomIdRef.current || data.callUUID === callUUIDRef.current) {
-          if (timerRef.current) clearTimeout(timerRef.current);
-          setState("declined");
-          saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "DECLINED", direction: "outgoing", createdAt: Date.now(), endedAt: Date.now() });
-        }
+        if (generationRef.current?.invitation?.observeCancellation(data)) finishDeclinedAttempt();
       },
       onCallAnswered: (data) => {
-        if (data.roomId === roomIdRef.current || data.callUUID === callUUIDRef.current) {
-          if (timerRef.current) clearTimeout(timerRef.current);
-          setState("answered");
-          saveCallRecord({ callId: callUUIDRef.current, callUUID: callUUIDRef.current, callerUid: user!.uid, callerName: user!.displayName || "User", calleeUids, callType, roomId: roomIdRef.current, status: "ACTIVE", direction: "outgoing", createdAt: Date.now(), answeredAt: Date.now() });
-          setTimeout(() => handleJoinRoom(), 500);
-        }
+        if (generationRef.current?.invitation?.observeAnswer(data)) finishAnsweredAttempt();
       },
     });
 
     return unsub;
-  }, [state]);
+  }, []);
 
   const stateText: Record<CallState, string> = {
     setting_up: t.settingUpCall,

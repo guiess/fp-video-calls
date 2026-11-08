@@ -7,20 +7,20 @@ import android.util.Log
 import com.fpvideocalls.MainActivity
 import com.fpvideocalls.model.CallType
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.model.CallIdentityPolicy
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
-import com.fpvideocalls.util.Constants
+import com.fpvideocalls.data.CallApiService
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
+import java.io.IOException
 
+@AndroidEntryPoint
 class CallActionReceiver : BroadcastReceiver() {
+    @Inject lateinit var callApiService: CallApiService
 
     companion object {
         const val ACTION_ANSWER = "com.fpvideocalls.ACTION_ANSWER"
@@ -34,10 +34,19 @@ class CallActionReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_ANSWER -> {
                 val callData = extractCallData(intent)
-                CallEventBus.post(CallEvent.Answer(callData))
+                val identity = CallIdentityPolicy.parse(callData.callUUID, callData.roomId)
+                if (identity == null) {
+                    Log.w("CallActionReceiver", "Ignoring obsolete notification answer")
+                    return
+                }
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                  try {
+                    if (!IncomingCallActions.answer(callData, callApiService)) return@launch
+                    CallEventBus.post(CallEvent.Answer(callData))
 
                 // Stop ringing service and cancel ringing notification
-                context.stopService(Intent(context, CallRingingService::class.java))
+                CallRingingService.stopIfActive(identity)
                 NotificationHelper.cancelNotification(context, callData.callUUID)
 
                 // Launch MainActivity with answer action
@@ -55,16 +64,26 @@ class CallActionReceiver : BroadcastReceiver() {
                     putExtra("roomPassword", callData.roomPassword ?: "")
                 }
                 context.startActivity(launchIntent)
+                  } catch (_: IOException) {
+                    Log.w("CallActionReceiver", "Notification answer was not confirmed")
+                  } finally { pending.finish() }
+                }
             }
 
             ACTION_DECLINE -> {
                 val callUUID = intent.getStringExtra("callUUID") ?: ""
                 val roomId = intent.getStringExtra("roomId") ?: ""
                 val callerId = intent.getStringExtra("callerId") ?: ""
+                val identity = CallIdentityPolicy.parse(callUUID, roomId)
+                if (identity == null) {
+                    Log.w("CallActionReceiver", "Ignoring notification decline without canonical identity")
+                    return
+                }
+                IncomingCallActions.decline(extractCallData(intent))
                 CallEventBus.post(CallEvent.Decline(callUUID))
 
                 // Stop ringing service
-                context.stopService(Intent(context, CallRingingService::class.java))
+                CallRingingService.stopIfActive(identity)
 
                 // Cancel notification
                 NotificationHelper.cancelNotification(context, callUUID)
@@ -74,17 +93,8 @@ class CallActionReceiver : BroadcastReceiver() {
                     val pending = goAsync()
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
-                            val body = JSONObject().apply {
-                                put("calleeUids", JSONArray().put(callerId))
-                                put("roomId", roomId)
-                                put("callUUID", callUUID)
-                            }
-                            val req = Request.Builder()
-                                .url("${Constants.SIGNALING_URL}/api/call/cancel")
-                                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                                .build()
-                            OkHttpClient().newCall(req).execute().close()
-                            Log.d("CallActionReceiver", "Decline cancel sent to $callerId")
+                            callApiService.cancelCall(listOf(callerId), roomId, callUUID)
+                            Log.d("CallActionReceiver", "Authenticated decline sent")
                         } catch (e: Exception) {
                             Log.w("CallActionReceiver", "Failed to send decline cancel", e)
                         } finally {

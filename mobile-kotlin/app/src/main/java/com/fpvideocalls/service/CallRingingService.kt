@@ -14,6 +14,8 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.model.CallIdentity
+import com.fpvideocalls.model.CallIdentityPolicy
 import com.fpvideocalls.util.CallEvent
 import com.fpvideocalls.util.CallEventBus
 import com.fpvideocalls.util.Constants
@@ -23,11 +25,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
 
 class CallRingingService : Service() {
 
     companion object {
         private const val TAG = "CallRingingService"
+        @Volatile private var activeInstance: CallRingingService? = null
+
+        fun stopIfActive(expected: CallIdentity) {
+            val instance = activeInstance ?: return
+            instance.handler.post {
+                val current = CallIdentityPolicy.parse(instance.currentCallUUID, instance.currentRoomId)
+                if (activeInstance === instance && CallIdentityPolicy.matches(current, expected)) {
+                    instance.stopRinging()
+                    instance.stopSelf(instance.latestStartId)
+                }
+            }
+        }
 
         fun start(context: Context, callData: IncomingCallData) {
             val intent = Intent(context, CallRingingService::class.java).apply {
@@ -48,6 +63,8 @@ class CallRingingService : Service() {
     private var vibrator: Vibrator? = null
     private val handler = Handler(Looper.getMainLooper())
     private var currentCallUUID: String? = null
+    private var currentRoomId: String? = null
+    private var latestStartId = 0
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val timeoutRunnable = Runnable {
@@ -56,7 +73,7 @@ class CallRingingService : Service() {
             CallEventBus.post(CallEvent.Timeout(uuid))
             NotificationHelper.cancelNotification(this, uuid)
         }
-        stopSelf()
+        stopSelf(latestStartId)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -64,10 +81,11 @@ class CallRingingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
+        activeInstance = this
         audioHelper = AudioManagerHelper(this)
 
         // Listen for answer/decline/cancel events — only stop if UUID matches current call
-        serviceScope.launch {
+        serviceScope.launch(start = CoroutineStart.UNDISPATCHED) {
             CallEventBus.events.collect { event ->
                 val eventUUID = when (event) {
                     is CallEvent.Answer -> event.data.callUUID
@@ -77,10 +95,14 @@ class CallRingingService : Service() {
                     else -> null
                 }
 
-                if (eventUUID != null && (eventUUID == currentCallUUID || eventUUID.isEmpty())) {
+                val isCurrent = if (event is CallEvent.Cancel) {
+                    CallIdentityPolicy.matches(CallIdentityPolicy.parse(currentCallUUID, currentRoomId),
+                        CallIdentity(event.callUUID, event.roomId))
+                } else CallIdentityPolicy.matchesUUID(currentCallUUID, eventUUID)
+                if (isCurrent) {
                     Log.d(TAG, "Event matched current call ($eventUUID), stopping")
                     stopRinging()
-                    stopSelf()
+                    stopSelf(latestStartId)
                 } else if (eventUUID != null) {
                     Log.d(TAG, "Ignoring event for different call: $eventUUID (current: $currentCallUUID)")
                 }
@@ -89,6 +111,7 @@ class CallRingingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         try {
             Log.d(TAG, "onStartCommand called")
             if (intent == null) {
@@ -98,12 +121,20 @@ class CallRingingService : Service() {
             }
 
             val callUUID = intent.getStringExtra("callUUID") ?: ""
-            if (IncomingCallState.isCancelledRecently(callUUID)) {
-                Log.d(TAG, "Ignoring ringing start for cancelled call $callUUID")
-                stopSelf()
+            val roomId = intent.getStringExtra("roomId") ?: ""
+            if (CallIdentityPolicy.parse(callUUID, roomId) == null) {
+                Log.w(TAG, "Ignoring ringing start without canonical identity")
+                if (currentCallUUID == null) stopSelf(startId)
                 return START_NOT_STICKY
             }
-            val roomId = intent.getStringExtra("roomId") ?: ""
+            if (IncomingCallState.isCancelledRecently(callUUID)) {
+                Log.d(TAG, "Ignoring ringing start for cancelled call $callUUID")
+                if (currentCallUUID == null || CallIdentityPolicy.matchesUUID(currentCallUUID, callUUID)) {
+                    stopRinging()
+                    stopSelf(startId)
+                }
+                return START_NOT_STICKY
+            }
             val callerId = intent.getStringExtra("callerId") ?: ""
             val callerName = intent.getStringExtra("callerName") ?: "Unknown"
             val callerPhoto = intent.getStringExtra("callerPhoto")?.takeIf { it.isNotEmpty() }
@@ -117,6 +148,7 @@ class CallRingingService : Service() {
             }
 
             currentCallUUID = callUUID
+            currentRoomId = roomId
             Log.d(TAG, "Processing call: uuid=$callUUID, caller=$callerName, type=$callType")
 
             // Build and show foreground notification
@@ -214,6 +246,8 @@ class CallRingingService : Service() {
         wakeLock = null
         // Cancel the per-UUID ringing notification
         currentCallUUID?.let { NotificationHelper.cancelNotification(this, it) }
+        currentCallUUID = null
+        currentRoomId = null
         Log.d(TAG, "Ringing stopped")
     }
 
@@ -222,6 +256,7 @@ class CallRingingService : Service() {
         stopRinging()
         audioHelper = null
         serviceScope.cancel()
+        if (activeInstance === this) activeInstance = null
         Log.d(TAG, "Service destroyed")
     }
 }

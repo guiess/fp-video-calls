@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.fpvideocalls.data.CallApiService
 import com.fpvideocalls.model.Contact
 import com.fpvideocalls.model.User
+import com.fpvideocalls.model.OutgoingInvitationAttempt
+import com.fpvideocalls.model.InvitationCancellation
 import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.service.CallStateManager
 import com.fpvideocalls.webrtc.AudioManagerHelper
@@ -24,6 +26,14 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.flow
+import java.io.IOException
 import java.util.UUID
 import javax.inject.Inject
 
@@ -54,14 +64,16 @@ class OutgoingCallViewModel @Inject constructor(
 
     val audioHelper = AudioManagerHelper(application)
     private var cancelled = false
-    private var roomId: String? = null
-    private var password: String? = null
     private var lastUser: User? = null
     private var lastContacts: List<Contact>? = null
     private var lastCallType: String? = null
-    private var currentCallId: String? = null
+    private var currentAttempt: OutgoingInvitationAttempt? = null
+    private var generation = 0
 
     fun initCall(user: User, contacts: List<Contact>, callType: String) {
+        currentAttempt?.markCancelled()?.let(::dispatchCancellation)
+        val callGeneration = ++generation
+        val originalRecipients = contacts.map { it.uid }
         cancelled = false
         lastUser = user
         lastContacts = contacts
@@ -69,28 +81,44 @@ class OutgoingCallViewModel @Inject constructor(
         audioHelper.startRingback()
 
         viewModelScope.launch {
+            var cancellationCollector: Job? = null
             try {
                 val pw = UUID.randomUUID().toString()
-                password = pw
 
                 // Create room
                 val room = callApiService.createRoom(pw)
-                if (cancelled) return@launch
-                roomId = room.roomId
+                if (cancelled || callGeneration != generation) return@launch
+                val attempt = OutgoingInvitationAttempt(room.roomId, originalRecipients)
+                currentAttempt = attempt
+                val declined = CompletableDeferred<Unit>()
+                cancellationCollector = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    CallEventBus.events.filterIsInstance<CallEvent.Cancel>().collect { event ->
+                        if (currentAttempt === attempt && callGeneration == generation &&
+                            attempt.observeCancellation(event.callUUID, event.roomId)) declined.complete(Unit)
+                    }
+                }
                 _status.value = OutgoingCallStatus.CALLING
 
                 // Send invite — server generates the callUUID seen by callee
-                val callId = callApiService.sendCallInvite(
-                    callerId = user.uid,
-                    callerName = user.displayName,
-                    callerPhoto = user.photoURL,
-                    calleeUids = contacts.map { it.uid },
-                    roomId = room.roomId,
-                    callType = callType,
-                    roomPassword = pw
+                val callId = attempt.awaitInvitation(
+                    send = { callApiService.sendCallInvite(
+                        callerId = user.uid,
+                        callerName = user.displayName,
+                        callerPhoto = user.photoURL,
+                        calleeUids = attempt.calleeUids,
+                        roomId = room.roomId,
+                        callType = callType,
+                        roomPassword = pw
+                    ) },
+                    cancel = { sendCancellation(it) },
+                    isCurrent = { currentAttempt === attempt && callGeneration == generation }
                 )
-                currentCallId = callId
-                if (cancelled) return@launch
+                if (cancelled || currentAttempt !== attempt || callGeneration != generation) return@launch
+                if (attempt.hasDeclined) {
+                    audioHelper.stopRingback()
+                    _status.value = OutgoingCallStatus.DECLINED
+                    return@launch
+                }
 
                 // Register outgoing call in state manager using the server's callUUID
                 CallStateManager.startOutgoing(
@@ -98,12 +126,12 @@ class OutgoingCallViewModel @Inject constructor(
                     callerUid = user.uid,
                     callerName = user.displayName,
                     callerPhoto = user.photoURL,
-                    calleeUids = contacts.map { it.uid },
+                    calleeUids = attempt.calleeUids,
                     callType = callType,
                     roomId = room.roomId
                 )
 
-                if (cancelled) return@launch
+                if (cancelled || callGeneration != generation) return@launch
 
                 // Start the real call (ActiveCallService + WebRTCManager)
                 // immediately so there is only ONE signaling socket per user.
@@ -125,7 +153,7 @@ class OutgoingCallViewModel @Inject constructor(
                 ActiveCallService.isCallActive.first { it }
                 Log.d(TAG, "isCallActive=true, webRTCManager=${ActiveCallService.webRTCManager != null}")
                 val manager = ActiveCallService.webRTCManager
-                if (manager == null || cancelled) {
+                if (manager == null || cancelled || callGeneration != generation) {
                     Log.w(TAG, "Aborting: manager=$manager cancelled=$cancelled")
                     return@launch
                 }
@@ -138,17 +166,18 @@ class OutgoingCallViewModel @Inject constructor(
                     .filter { it.isNotEmpty() }
                     .map { true }
 
-                val cancelSignal = CallEventBus.events
-                    .filterIsInstance<CallEvent.Cancel>()
-                    .filter { it.roomId == room.roomId || it.callUUID == callId }
-                    .map { false }
+                val cancelSignal = flow {
+                    declined.await()
+                    emit(false)
+                }
 
                 val answered: Boolean? = withTimeoutOrNull(Constants.OUTGOING_CALL_TIMEOUT_MS) {
                     merge(joinSignal, cancelSignal).first()
                 }
-                if (cancelled) return@launch
+                if (cancelled || callGeneration != generation) return@launch
 
                 if (answered == false) {
+                    attempt.finish()
                     // Callee declined — they already sent cancel, don't re-cancel
                     Log.d(TAG, "Callee declined the call")
                     audioHelper.stopRingback()
@@ -164,25 +193,23 @@ class OutgoingCallViewModel @Inject constructor(
                     CallStateManager.endCall()
                     ActiveCallService.endCall(getApplication())
                     // Notify callee(s) so they stop ringing and see a missed call
-                    val rid = roomId
-                    if (rid != null) {
-                        callApiService.cancelCall(
-                            contacts.map { it.uid },
-                            rid,
-                            callUUID = callId
-                        )
-                    }
+                    attempt.markCancelled()?.let { sendCancellation(it) }
                     _status.value = OutgoingCallStatus.TIMED_OUT
                     return@launch
                 }
 
                 Log.d(TAG, "Recipient joined, navigating to InCall")
+                attempt.finish()
                 audioHelper.stopRingback()
                 CallStateManager.answerCall(callId)
                 _result.value = OutgoingCallResult(room.roomId, pw)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "initCall failed", e)
-                if (!cancelled) _status.value = OutgoingCallStatus.ERROR
+                if (!cancelled && callGeneration == generation) _status.value = OutgoingCallStatus.ERROR
+            } finally {
+                cancellationCollector?.cancel()
             }
         }
     }
@@ -196,19 +223,30 @@ class OutgoingCallViewModel @Inject constructor(
         initCall(user, contacts, callType)
     }
 
-    fun cancel(contacts: List<Contact>) {
+    fun cancel() {
         cancelled = true
         audioHelper.stopRingback()
         CallStateManager.endCall()
         ActiveCallService.endCall(getApplication())
-        val rid = roomId ?: return
-        val cid = currentCallId
-        viewModelScope.launch {
-            callApiService.cancelCall(contacts.map { it.uid }, rid, callUUID = cid)
+        currentAttempt?.markCancelled()?.let(::dispatchCancellation)
+    }
+
+    private fun dispatchCancellation(request: InvitationCancellation) {
+        viewModelScope.launch(NonCancellable) { sendCancellation(request) }
+    }
+
+    private suspend fun sendCancellation(request: InvitationCancellation) {
+        try {
+            withContext(NonCancellable) {
+                callApiService.cancelCall(request.calleeUids, request.roomId, request.callUUID)
+            }
+        } catch (_: IOException) {
+            Log.w(TAG, "Call cancellation request failed")
         }
     }
 
     override fun onCleared() {
+        currentAttempt?.markCancelled()?.let(::dispatchCancellation)
         super.onCleared()
         audioHelper.release()
         // Don't end the active call — InCallScreen takes over

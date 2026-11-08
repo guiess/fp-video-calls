@@ -1,6 +1,6 @@
 # M² Calls security and privacy
 
-**Updated:** 2026-11-06.
+**Updated:** 2026-11-07.
 
 M² Calls is a personal-use application under active development and is
 intentionally not production-ready. This document describes its current
@@ -21,8 +21,8 @@ a confidential security report are welcome.
 ## Safe use during development
 
 > **M² Calls is under active development and intentionally not production-ready.**
-> Call ownership and file-access controls
-> still need hardening. Do not use sensitive conversations or confidential files.
+> File-access controls and privacy limitations remain.
+> Do not use sensitive conversations or confidential files.
 > Sensitive diagnostic logging and non-E2E-encrypted text messaging remain limitations.
 
 Use non-sensitive data during development and testing. Do not upload secrets or
@@ -41,12 +41,94 @@ for the features checked. Self-pin/primary behavior was not manually checked;
 this is not comprehensive security or production-readiness assurance.
 The deployed location policy below is separate and unchanged.
 
+The independent HTTPS-only setting change is deployed, verified 2026-11-07:
+HTTP redirects retain the same host/path/query, and HTTPS health, unauthenticated
+API/CORS and guest WSS protocol checks passed. The Node 20 runtime, startup,
+WebSockets/AlwaysOn and application code/data were unchanged. This is transport
+preflight evidence, not full authenticated or manual-user coverage. The
+call-ownership deployment below does not constitute authenticated live-user acceptance.
+
 REST call invitations bind `callerId` to the verified Firebase token UID and
 resolve `callerName`/`callerPhoto` from Firebase Auth, not the request body or
 Firestore contacts. Legacy body identity fields are ignored. Missing trusted
 name/photo fields use `User`/no photo; lookup failures return HTTP 500
 `CALLER_PROFILE_LOOKUP_FAILED` before any invitation delivery. Socket and Android
 FCM invitations share this canonical identity. `[OWASP]`
+
+### Deployed call ownership
+
+The server-owned invitation authorization and updated web client are deployed
+from reviewed revision `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`, verified
+2026-11-07 EST (2026-11-08 00:22 UTC). Tracked App Service startup reached
+`RuntimeSuccessful` on Oryx Node 20.20.2; source/lock/helper hashes, fresh safe
+HTTP/WSS checks and the SWA Ready/public asset hashes matched the approved
+artifacts. Following APK 201 delivery for testing, the user reported "looks good"
+on 2026-11-08 with no issues reported. This is acceptance of checked behavior,
+not exhaustive device or scenario certification; the specific physical device
+and all cold-process/notification lifecycle cases were not established.
+
+Only original invitees may answer the authenticated inviter. The inviter may
+cancel original recipients still ringing; an invitee may decline only their own
+invitation to the original caller through the existing `/api/call/cancel` route.
+Explicitly invited same-account devices remain eligible; inviter status alone
+never grants answer authority.
+One group invitee declining still ends the caller's ringing wait; this does not
+redesign group UX or confer room/host privileges. Destination/room/UUID mismatches
+fail before socket or FCM lookup/delivery. Repeated valid actions are idempotent
+without repeated notifications. `[OWASP]` `[CUSTOM]`
+
+The process retains at most 1024 invitation records, with 1-32 distinct
+recipients each. UID/room/UUID strings are bounded to 128 characters, passwords
+to 1024; control characters, invalid destination types, duplicate recipients,
+Firestore path separators in UIDs, and reserved room-channel prefixes are
+rejected. Profile preparation has a 15-second deadline and initial delivery is
+authorized for at most 60 seconds. Delivery completion grants one fixed
+60-second ringing window covering current web (45 seconds) and Android
+(30 seconds) timers, which start after the invite response. This is at most
+135 seconds of authority from reservation; terminal actions never extend it.
+A 1-second sweep removes expired records and
+retry timers; terminal records remain until the original deadline to deduplicate
+repeats and prevent ambiguous UUID-less requests from selecting another call.
+Capacity exhaustion returns HTTP 503 `CALL_CAPACITY`, without evicting live calls.
+These bounds are intentionally process-local, not a scalability promise. `[OWASP]` `[YAGNI]`
+
+Call JSON is limited to 64 KiB independently of attachment routes. Call-only
+authentication has a 15-second deadline; initial delivery/actions have absolute
+deadlines, with at most 512 retained HTTP call requests, 1024 queued operations
+and 256 physical provider operations. Timed-out provider work retains its slot
+until actual settlement, so expiry cannot silently free unlimited pending work.
+Already-submitted FCM operations cannot be retracted. Notification outcomes are
+cached per original recipient: a failure does not invalidate unrelated group
+actions, and repeats return the original outcome rather than false success.
+
+Missing/empty UUIDs are accepted only when signed-in role, room and destinations
+identify exactly one recorded call; unknown/stale calls return HTTP 403
+`CALL_FORBIDDEN`, ambiguous calls HTTP 409 `CALL_AMBIGUOUS`, conflicting lifecycle
+actions HTTP 409 `CALL_NOT_RINGING`. All delivered events use the recorded UUID.
+Ownership is reserved after authentication and before profile lookup.
+Cancellation at that point blocks late profile/socket/token-lookup invitations
+and reconnect retries. Cancellation delivery is ordered after already-started
+invitation sends; provider operations already submitted cannot be retracted.
+An unknown cancellation arriving before invitation authentication/reservation
+is rejected, not retained as a speculative cancellation. The approved web/
+Android source compatibility amendment retains immutable original context and
+resends cancellation with the exact UUID if the delayed invite response arrives.
+Generation checks prevent old responses from changing a newer call. Android
+finishes submitted invite/cleanup transport after screen-scope cancellation.
+The updated web client is deployed; APK 201 has been delivered for user testing.
+APK 201 is the owner-approved development prerelease. Older Android clients still need the update for the earlier
+request-order race; existing clients keep their API contract. It does not
+guarantee no momentary ringing or cleanup when the response never arrives.
+Outgoing clients subscribe before invitation submission and reconcile bounded
+early-event candidates only after receiving the canonical UUID. Internal web
+cancel navigation stays within React Router so it does not destroy a pending
+cleanup continuation. Incoming and outgoing web consumers require UUID **and**
+room matches; Android ringing, overlay, notification actions and navigation
+dismissals are likewise UUID-scoped, without empty-UUID wildcards. Old A's
+legitimate cancellation cannot dismiss B merely because the rooms coincide.
+Restart/deploy loses
+pending authority and requires redial, as explicitly accepted. No client API
+version change or Firebase rules change is introduced. `[OWASP]` `[CUSTOM]`
 
 ### Location authorization
 
@@ -107,9 +189,10 @@ token lifecycle without a new APK release.
   optional room password); account ownership is not established by guest IDs.
   Internal room channels are isolated from private account and socket-ID channels, and the
   REST close bypass returns HTTP 403 `ROOM_SOCKET_REQUIRED`.
-- **Call ownership:** invite/answer/cancel routes require login and invitation
-  identity is bound to the verified UID. Answer/cancel do not verify the
-  requester's relationship to the call.
+- **Live call ownership:** the bounded server policy and updated web client
+  are deployed. User acceptance covers checked behavior; automated negative
+  probes and that acceptance are not comprehensive call-flow/device assurance.
+  APK 201 was delivered for testing and approved as a debug-signed development prerelease.
 
 ### Attachment access by storage mode
 
@@ -137,6 +220,8 @@ are not established here.
 
 Source:
 [server/index.js](server/index.js),
+[server/call-authorization.js](server/call-authorization.js),
+[server/call-routes.js](server/call-routes.js),
 [server/auth-middleware.js](server/auth-middleware.js),
 [firestore.rules](firestore.rules),
 [storage.rules](storage.rules), and

@@ -5,6 +5,8 @@ import android.util.Log
 import com.fpvideocalls.model.CallRecord
 import com.fpvideocalls.model.CallRecordStatus
 import com.fpvideocalls.model.IncomingCallData
+import com.fpvideocalls.model.CallIdentity
+import com.fpvideocalls.model.CallIdentityPolicy
 
 /**
  * Central call state tracker. Manages local call records with 10h TTL,
@@ -17,6 +19,62 @@ object CallStateManager {
 
     private val records = mutableMapOf<String, CallRecord>()
     private val processedEvents = mutableSetOf<String>()
+    private const val MAX_PENDING_ANSWERS = 32
+    private val pendingAnswers = mutableSetOf<IncomingAnswerAttempt>()
+
+    private fun invalidateAnswers(uuid: String) {
+        pendingAnswers.filter { it.identity.callUUID == uuid }.forEach { it.invalidated = true }
+    }
+
+    private fun canCommitIncoming(data: IncomingCallData): Boolean {
+        val identity = CallIdentityPolicy.parse(data.callUUID, data.roomId) ?: return false
+        if (activeCallUUID != null && activeCallUUID != identity.callUUID) return false
+        if (IncomingCallState.isCancelledRecently(identity.callUUID)) return false
+        val record = records[identity.callUUID]
+        return record == null || (record.roomId == identity.roomId && record.status == CallRecordStatus.RINGING)
+    }
+
+    @Synchronized
+    fun beginIncomingAnswer(data: IncomingCallData): IncomingAnswerAttempt? {
+        if (pendingAnswers.size >= MAX_PENDING_ANSWERS || !canCommitIncoming(data)) return null
+        return IncomingAnswerAttempt(CallIdentity(data.callUUID, data.roomId)).also { pendingAnswers.add(it) }
+    }
+
+    @Synchronized
+    fun finishIncomingAnswer(attempt: IncomingAnswerAttempt) { pendingAnswers.remove(attempt) }
+
+    /** Eligibility, restoration and the answer state write share the same lock as terminal decisions. */
+    @Synchronized
+    fun commitIncomingAnswer(data: IncomingCallData, attempt: IncomingAnswerAttempt): Boolean {
+        if (attempt !in pendingAnswers || attempt.invalidated ||
+            !CallIdentityPolicy.matches(attempt.identity, CallIdentity(data.callUUID, data.roomId)) ||
+            !canCommitIncoming(data)) return false
+        if (records[data.callUUID] == null && !startIncoming(data)) return false
+        answerCall(data.callUUID)
+        return true
+    }
+
+    @Synchronized
+    fun isCurrentActiveIncoming(identity: CallIdentity): Boolean {
+        val record = records[identity.callUUID] ?: return false
+        return activeCallUUID == identity.callUUID && record.status == CallRecordStatus.ACTIVE &&
+            record.roomId == identity.roomId
+    }
+
+    /** A cold-process decline still records a terminal decision and invalidates all pending confirmations. */
+    @Synchronized
+    fun recordIncomingDecline(data: IncomingCallData): CallRecord? {
+        if (CallIdentityPolicy.parse(data.callUUID, data.roomId) == null) return null
+        val known = records[data.callUUID]
+        if (known != null && known.roomId != data.roomId) return null
+        if (known == null) {
+            records[data.callUUID] = CallRecord(callId = data.callUUID, callUUID = data.callUUID,
+                callerUid = data.callerId, callerName = data.callerName, callerPhoto = data.callerPhoto,
+                callType = data.callType.value, roomId = data.roomId, status = CallRecordStatus.DECLINED,
+                direction = "incoming", createdAt = System.currentTimeMillis(), endedAt = System.currentTimeMillis())
+        }
+        return declineCall(data.callUUID)
+    }
 
     /** Currently ringing or active call UUID, if any. */
     var activeCallUUID: String? = null
@@ -129,6 +187,7 @@ object CallStateManager {
 
     @Synchronized
     fun declineCall(callUUID: String): CallRecord? {
+        invalidateAnswers(callUUID)
         val record = records[callUUID] ?: return null
         val updated = record.copy(status = CallRecordStatus.DECLINED, endedAt = System.currentTimeMillis())
         records[callUUID] = updated
@@ -142,6 +201,7 @@ object CallStateManager {
      */
     @Synchronized
     fun cancelCall(callUUID: String): CallRecord? {
+        invalidateAnswers(callUUID)
         if (isEventDuplicate("cancel", callUUID)) return null
         val record = records[callUUID] ?: return null
         val wasMissed = record.status == CallRecordStatus.RINGING && record.direction == "incoming"
@@ -157,6 +217,7 @@ object CallStateManager {
     @Synchronized
     fun endCall(callUUID: String? = null): CallRecord? {
         val uuid = callUUID ?: activeCallUUID ?: return null
+        invalidateAnswers(uuid)
         val record = records[uuid] ?: return null
         if (record.status == CallRecordStatus.ENDED || record.status == CallRecordStatus.MISSED) return record
         val updated = record.copy(status = CallRecordStatus.ENDED, endedAt = System.currentTimeMillis())
@@ -168,6 +229,7 @@ object CallStateManager {
 
     @Synchronized
     fun timeoutCall(callUUID: String): CallRecord? {
+        invalidateAnswers(callUUID)
         val record = records[callUUID] ?: return null
         val wasMissed = record.status == CallRecordStatus.RINGING && record.direction == "incoming"
         val newStatus = if (wasMissed) CallRecordStatus.MISSED else CallRecordStatus.ENDED
@@ -207,6 +269,7 @@ object CallStateManager {
     /** Reset all state. Only for testing. */
     @Synchronized
     fun resetForTest() {
+        pendingAnswers.clear()
         records.clear()
         processedEvents.clear()
         activeCallUUID = null
