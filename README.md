@@ -17,8 +17,8 @@ compatibility are preserved; remaining limitations are described below.
 ## Availability
 
 - **Web app:** [Open M² Calls](https://thankful-moss-0611ddf0f.3.azurestaticapps.net)
-- **Android:** [Download version 1.0.0.191](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.191/M2Calls-1.0.0.191-debug.apk)
-  for Android 8.0 or later. See the [release notes](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0.0.191)
+- **Android:** [Download version 1.0.0.201](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.201/M2Calls-1.0.0.201-debug.apk)
+  for Android 8.0 or later. See the [release notes](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0.0.201)
   or [build from source](BUILD_INSTRUCTIONS.md).
 - **Server status:** [`/health`](https://app-voice-video-server.azurewebsites.net/health)
   reports process liveness only.
@@ -170,7 +170,7 @@ Implementation:
   Bounded call answer/cancel/decline ownership checks and the updated web client
   are deployed on Azure. APK 201 was delivered for user testing; the user reported
   "looks good" for checked behavior, not exhaustive device/scenario coverage.
-  A public Android release remains held. Account-free guest
+  APK 201 is the owner-approved debug-signed development prerelease. Account-free guest
   participant IDs do not establish account ownership.
   Attachment access depends on the storage
   mode. Account-free guest calling, temporary download links, and guest TURN

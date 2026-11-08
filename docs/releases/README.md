@@ -3,7 +3,34 @@
 This runbook records Android releases and their build metadata, verification,
 and withdrawal procedures.
 
-## Android 1.0.0.191
+## Android 1.0.0.201
+
+[Download the APK](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.201/M2Calls-1.0.0.201-debug.apk)
+or read the [release notes](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0.0.201).
+
+- Owner-approved development prerelease; tag `mobile-v1.0.0.201` targets the actual
+  APK build commit `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`, not later documentation
+  or merge commits.
+- APK: `M2Calls-1.0.0.201-debug.apk`, 42,551,614 bytes.
+- SHA-256: `3c9347eb607084396d99d00ad26d8d42f85aca83afb70fc4711e9f01dca62646`.
+- Package/version: `com.fpvideocalls`, versionCode 201 / versionName 1.0.0.201.
+- Requirements: Android 8.0 or later; ARM64 or ARMv7.
+- Debug signing certificate SHA-256:
+  `68f4e7af7bc06efa5669ec26886237f15d607ef205f49554777c3a12b6775b63`.
+
+This release adds original-invitation ownership and race-safe answer/cancel/decline
+handling, including delayed cancellation cleanup and incoming Android lifecycle
+guards. The matching server/web changes and HTTPS-only transport are deployed.
+The user accepted checked behavior; this is not exhaustive device/scenario
+certification or a production-readiness claim. The APK and SHA-256 sidecar are
+published without rebuilding; older tags and assets remain unchanged.
+
+Because Android versionCode uses reachable Git commit count, preserve this
+release's reviewed history when merging. A single squash onto the current
+194-commit main would produce 195, below delivered APK 201.
+See [verification records](../validation-status.md#current-android-source-build).
+
+## Previous Android 1.0.0.191
 
 [Download the APK](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.191/M2Calls-1.0.0.191-debug.apk)
 or read the [release notes](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0.0.191).

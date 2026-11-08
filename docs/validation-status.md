@@ -68,7 +68,7 @@ slow delivery versus the caller's actual ringing timer, reconnect/multidevice,
 profile/socket/token/send races and immutable late-response cleanup.
 Registry restart deliberately requires redial. The early request-order race
 needs the updated web/Android clients; no-response cleanup or zero momentary
-ringing is promised. Public Android distribution remains held; subsequent
+ringing is promised. APK 201 publication is owner-approved; subsequent
 server/web deployment, APK delivery and scoped user acceptance are recorded below.
 
 The combined pre-deployment QA/Security/dual-review gate then identified tightly
@@ -79,7 +79,7 @@ cancel exits, early-event latching, and canonical UUID/room scoping through web
 and Android ringing/overlay/ViewModel/navigation consumers. QA, Security and both
 independent Code Reviews passed final revision
 `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`. APKs 197-200 are superseded by the
-rebuilt and signature-verified APK 201, delivered for testing; public publication remains held.
+rebuilt and signature-verified APK 201, delivered for testing and approved for development prerelease publication.
 The subsequent Android compatibility correction validates notification/overlay
 answers against the authenticated server before recovering absent process-local
 state. Conflicting/terminal calls are rejected, background declines update their
@@ -130,8 +130,9 @@ the verified APK for physical-device testing, the user reported **"looks good"**
 on 2026-11-08 with no issues reported or pair-fix requested. UAT is complete for
 checked behavior; the device and individual authenticated/media/notification/
 cold-process cases were not specified, so this is not exhaustive certification.
-Final post-UAT review must finish before any separately authorized publication
-or merge. Deployed application and APK source remains `79ae007`; subsequent
+Final post-UAT QA, Security and both independent Code Reviews passed documentation
+revision `2dea864`. The owner subsequently authorized a history-preserving merge
+and publication of the exact APK 201 as a development prerelease. Deployed application and APK source remains `79ae007`; subsequent
 documentation commits are not part of that built artifact.
 
 The Android build derives `versionCode` from `git rev-list --count HEAD`.

@@ -116,7 +116,7 @@ resends cancellation with the exact UUID if the delayed invite response arrives.
 Generation checks prevent old responses from changing a newer call. Android
 finishes submitted invite/cleanup transport after screen-scope cancellation.
 The updated web client is deployed; APK 201 has been delivered for user testing.
-A public Android release remains held. Older Android clients still need the update for the earlier
+APK 201 is the owner-approved development prerelease. Older Android clients still need the update for the earlier
 request-order race; existing clients keep their API contract. It does not
 guarantee no momentary ringing or cleanup when the response never arrives.
 Outgoing clients subscribe before invitation submission and reconcile bounded
@@ -192,7 +192,7 @@ token lifecycle without a new APK release.
 - **Live call ownership:** the bounded server policy and updated web client
   are deployed. User acceptance covers checked behavior; automated negative
   probes and that acceptance are not comprehensive call-flow/device assurance.
-  APK 201 was delivered for testing; public distribution remains held.
+  APK 201 was delivered for testing and approved as a debug-signed development prerelease.
 
 ### Attachment access by storage mode
 
