@@ -129,6 +129,16 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });
 
+test("closing risk list retains guest identity without restating resolved call ownership gaps", async () => {
+  const security = await readFile(path.join(REPOSITORY_ROOT, "SECURITY.md"), "utf8");
+  const risks = security.slice(security.indexOf("## Known risk areas"));
+  assert.match(risks, /^## Known risk areas/);
+  assert.match(risks, /account-free guest identity limitations/);
+  assert.match(risks, /attachment-sharing policy/);
+  assert.doesNotMatch(risks, /call answer\/cancel ownership checks|missing.*call.*ownership|unchecked.*call/i);
+  assert.match(security.replace(/\s+/g, " "), /These dated transport checks do not establish authenticated user acceptance; the later scoped user acceptance is recorded below/);
+});
+
 test("setup and security guidance retain the corrected implementation boundaries", async () => {
   const load = (filename) => readFile(path.join(REPOSITORY_ROOT, filename), "utf8");
   const [build, security, android, deployment, releases] = await Promise.all([
