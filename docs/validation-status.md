@@ -33,8 +33,10 @@ These package/advisory counts require separate dependency triage.
 
 The approved ownership ticket and web/Android delayed-response cancellation
 amendment were implemented locally against fresh `main`
-`fd2817b6e15775971f5d8fb5b6168e6d0bb36474`. No code/settings deployment,
+`fd2817b6e15775971f5d8fb5b6168e6d0bb36474`. No application-code deployment,
 APK installation/publication, push or PR occurred during this implementation.
+The separately approved HTTPS-only setting is now deployed; it is the authorized
+baseline and must not be reverted by an application-code rollback.
 These results do not update the live revision or constitute live UAT.
 
 | Area | Local command | Result |
@@ -44,11 +46,14 @@ These results do not update the live revision or constitute live UAT.
 | TURN and telemetry | `node --test server/turn-config.test.js server/turn-config.qa.test.js server/turn-credentials.test.js server/telemetry-validation.test.js server/telemetry-relay.test.js` | 30 tests passed |
 | Web unit tests | From `web`: `node node_modules/vitest/vitest.mjs run` | 175 tests passed, including canonical incoming events, early declines and `/app/call` SPA exit/unmount cleanup |
 | Web production build | From `web`: `node node_modules/vite/bin/vite.js build` | Passed; existing translation-key and bundle warnings remain |
-| Android full unit suites/debug build | From `mobile-kotlin`: `.\gradlew.bat --no-daemon test :app:assembleDebug --console=plain` | 369 debug + 369 release tests passed; debug APK built locally |
+| Android full unit suites/debug build | From `mobile-kotlin`: `.\gradlew.bat --no-daemon test :app:assembleDebug --console=plain` | 375 debug + 375 release tests passed; debug APK built locally |
 | Docs/package tests | `node --test scripts/tests/portfolio-docs.test.mjs scripts/tests/server-package.test.mjs scripts/tests/release-manifest.test.mjs` | 29 tests passed |
 | Source-package contract | `node scripts/validate-server-package.mjs server` | Passed, including all new runtime helpers; pre-existing checked-in ZIP is not the new deployment artifact |
 
 Server/web tests used Node 22.23.4; in-memory native SQLite qualification passed.
+The unchanged server tree and its actual production-only source/lock ZIP also
+passed Linux Node 20.20.2 SQLite, bcrypt, Express/Socket.IO and synthetic ownership
+API probes. The Linux full suite retains the same single WebP expectation failure.
 The unchanged Windows npm-test shim was bypassed with the direct Vitest entry.
 An explicit application TypeScript check still reports 11 pre-existing errors
 in translations, AppShell, ChatConversationScreen and LocationPanel; no changed
@@ -73,8 +78,8 @@ outcomes, physical provider/request/queue bounds and deadlines, React Router
 cancel exits, early-event latching, and canonical UUID/room scoping through web
 and Android ringing/overlay/ViewModel/navigation consumers. The 197 APK above
 is baseline evidence only; a new final-SHA APK must be rebuilt and signature
-checked before any distribution. Review re-verification and Linux Node 20
-qualification are required before release, with all live changes still held.
+checked before any distribution. Final review re-verification is required before
+release, with application deployment and Android distribution still held.
 The subsequent Android compatibility correction validates notification/overlay
 answers against the authenticated server before recovering absent process-local
 state. Conflicting/terminal calls are rejected, background declines update their
@@ -84,6 +89,10 @@ Final incoming-answer restoration and activation are one conditional state-lock
 transaction. Bounded in-flight attempt tokens are invalidated by matching local
 decline/cancel/timeout and cannot be revived by a late confirmation, even if
 history/tombstone retention changes while that confirmation is pending.
+The separate ANSWER-intent handoff also checks the exact confirmed active UUID
+and room after navigation-graph readiness and after the retry delay. Obsolete
+handoffs cannot navigate or clear a newer call's stack. These are deterministic
+JVM state/effect checks, not Android device lifecycle or live-user acceptance.
 
 The installed Android source baseline was built and installed on 2026-11-06:
 

@@ -31,6 +31,7 @@ import com.fpvideocalls.model.IncomingCallData
 import com.fpvideocalls.service.ActiveCallService
 import com.fpvideocalls.service.CallRingingService
 import com.fpvideocalls.service.CallStateManager
+import com.fpvideocalls.service.IncomingAnswerHandoff
 import com.fpvideocalls.ui.screens.*
 import com.fpvideocalls.ui.theme.*
 import com.fpvideocalls.viewmodel.AuthViewModel
@@ -106,12 +107,13 @@ fun AppNavigation(
             val action = intent.getStringExtra("action")
 
             if (type == "call_invite") {
-                // Wait for nav graph to be ready (Activity may have just restarted)
-                var retries = 0
-                while (retries < 20) {
-                    try { navController.graph; break } catch (_: Exception) { }
-                    kotlinx.coroutines.delay(50)
-                    retries++
+                val waitReady: suspend () -> Unit = {
+                    var retries = 0
+                    while (retries < 20) {
+                        try { navController.graph; break } catch (_: IllegalStateException) { }
+                        kotlinx.coroutines.delay(50)
+                        retries++
+                    }
                 }
 
                 val callData = IncomingCallData(
@@ -125,31 +127,20 @@ fun AppNavigation(
                 )
 
                 if (action == "ANSWER") {
-                    // Answered from notification — go directly to InCall, skip IncomingCallScreen
                     val displayName = user?.displayName ?: callData.callerName
                     val userId = user?.uid ?: callData.callerId
-                    try {
+                    IncomingAnswerHandoff.navigate(
+                        com.fpvideocalls.model.CallIdentity(callData.callUUID, callData.roomId), waitReady
+                    ) {
                         navController.navigate(
                             Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
                         ) {
                             popUpTo(0) { inclusive = true }
                             launchSingleTop = true
                         }
-                    } catch (e: Exception) {
-                        android.util.Log.w("AppNavigation", "Nav failed for ANSWER intent, retrying", e)
-                        kotlinx.coroutines.delay(200)
-                        try {
-                            navController.navigate(
-                                Routes.inCall(callData.roomId, displayName, userId, callData.callType.value, callData.roomPassword)
-                            ) {
-                                popUpTo(0) { inclusive = true }
-                                launchSingleTop = true
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("AppNavigation", "Nav retry failed", e)
-                        }
                     }
                 } else {
+                    waitReady()
                     // Tapped notification (not a specific action) — show IncomingCallScreen
                     pendingCallData.value = callData
                     try {
