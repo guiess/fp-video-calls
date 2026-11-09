@@ -145,6 +145,18 @@ was restored; this amendment bypasses, not repairs, that SDK path. The live
 Node20 EOL, old attachment authorization and Sharp decoder gaps remain. No ready
 deployment, SWA change, APK installation/publication or new resource is claimed.
 
+Scoped packaging QA subsequently exposed validator-only fail-closed gaps, not
+defective artifact bytes: actual-versus-declared ZIP expansion, incomplete ELF
+structure, optional platform classification, contradictory/malformed final native
+evidence, executed tool fingerprints and enumeration/diagnostic failures.
+The tightly coupled follow-up uses coherent resealed negative archives, public
+CLI controls on real qualified artifacts and hermetic filesystem/command faults.
+Full stream EOS/CRC/local-header consistency, complete structural ELF checks and
+typed provenance/native/platform checks are required before extraction/acceptance.
+All application/package/lock/pin bytes and the source-only validator remain
+unchanged. Operational destination permissions, data/mount boundaries, bootstrap/
+replacement and rollback flag/startup behavior remain separate release blockers.
+
 ## Current Android source build
 
 ### Local call-ownership integration (2026-11-07)

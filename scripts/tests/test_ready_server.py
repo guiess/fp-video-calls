@@ -6,12 +6,15 @@ import io
 import json
 from pathlib import Path
 import stat
+import struct
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
+import zlib
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
@@ -48,7 +51,9 @@ def fixture(profile="forward"):
     entries["node_modules/fixture/package.json"] = (
         b'{"name":"fixture","version":"1.0.0"}', stat.S_IFREG | 0o644)
     graph = {"node_modules/fixture": {"version": "1.0.0", "integrity": "sha512-test",
-                                    "resolved": "https://example.invalid/fixture"}}
+                                    "resolved": "https://example.invalid/fixture",
+                                    "declaredPlatform": {},
+                                    "selection": "active-or-platform-neutral"}}
     for name, value in {
         "package.json": {"dependencies": {"fixture": "1.0.0"}},
         "package-lock.json": {"packages": {"": {"dependencies": {"fixture": "1.0.0"}},
@@ -75,6 +80,92 @@ def fixture(profile="forward"):
 
 
 class ReadyValidationTests(unittest.TestCase):
+    def test_actual_deflate_expansion_cannot_hide_behind_declared_size(self):
+        _, receipt, expected, entries = fixture()
+        name = "node_modules/fixture/expanded.txt"
+        entries[name] = (b"A" * 65536, stat.S_IFREG | 0o644)
+        raw = bytearray(archive(entries))
+        with zipfile.ZipFile(io.BytesIO(raw)) as package:
+            info = package.getinfo(name)
+            struct.pack_into("<II", raw, info.header_offset + 14, zlib.crc32(b"A"), info.compress_size)
+            struct.pack_into("<I", raw, info.header_offset + 22, 1)
+            offset = package.start_dir
+            while raw[offset:offset + 4] == b"PK\x01\x02":
+                length, extra, comment = struct.unpack_from("<HHH", raw, offset + 28)
+                candidate = raw[offset + 46:offset + 46 + length].decode()
+                if candidate == name:
+                    struct.pack_into("<I", raw, offset + 16, zlib.crc32(b"A"))
+                    struct.pack_into("<I", raw, offset + 24, 1)
+                    break
+                offset += 46 + length + extra + comment
+        receipt["entries"].append({"path": name, "size": 1,
+                                  "mode": stat.S_IFREG | 0o644,
+                                  "sha256": hashlib.sha256(b"A").hexdigest()})
+        receipt["zipSha256"] = hashlib.sha256(raw).hexdigest()
+        caps = {"expanded": sum(item["size"] for item in receipt["entries"])}
+        with self.assertRaisesRegex(ready.ReadyValidationError, "expanded|actual|stream"):
+            ready.validate_zip(bytes(raw), receipt, expected, caps)
+
+    def test_local_central_metadata_mismatch_and_deflate_tail_rejected(self):
+        raw, receipt, expected, _ = fixture()
+        with zipfile.ZipFile(io.BytesIO(raw)) as package:
+            info = package.getinfo("index.js")
+        for field, value in ((6, 8), (8, 0), (14, info.CRC ^ 1),
+                             (18, info.compress_size + 1), (22, info.file_size + 1)):
+            changed = bytearray(raw)
+            struct.pack_into("<H" if field in (6, 8) else "<I",
+                             changed, info.header_offset + field, value)
+            receipt["zipSha256"] = hashlib.sha256(changed).hexdigest()
+            with self.subTest(field=field), self.assertRaises(ready.ReadyValidationError):
+                ready.validate_zip(bytes(changed), receipt, expected)
+
+    def test_coherent_hidden_bytes_after_deflate_eos_are_rejected(self):
+        raw, receipt, expected, _ = fixture()
+        with zipfile.ZipFile(io.BytesIO(raw)) as package:
+            last = package.infolist()[-1]
+            directory = package.start_dir
+        tail = b"hidden"
+        changed = bytearray(raw[:directory] + tail + raw[directory:])
+        struct.pack_into("<I", changed, last.header_offset + 18, last.compress_size + len(tail))
+        offset = directory + len(tail)
+        while changed[offset:offset + 4] == b"PK\x01\x02":
+            length, extra, comment = struct.unpack_from("<HHH", changed, offset + 28)
+            name = changed[offset + 46:offset + 46 + length].decode()
+            if name == last.filename:
+                struct.pack_into("<I", changed, offset + 20, last.compress_size + len(tail))
+                break
+            offset += 46 + length + extra + comment
+        struct.pack_into("<I", changed, len(changed) - 22 + 16, directory + len(tail))
+        receipt["zipSha256"] = hashlib.sha256(changed).hexdigest()
+        with self.assertRaisesRegex(ready.ReadyValidationError, "DEFLATE|stream|EOS"):
+            ready.validate_zip(bytes(changed), receipt, expected)
+
+    def test_complete_native_elf_structure_required(self):
+        prefix = b"\x7fELF\x02\x01" + bytes(12) + b"\x3e\0"
+        with self.assertRaises(ready.ReadyValidationError):
+            ready.validate_elf("node_modules/fixture/addon.node", prefix)
+        # Structurally valid synthetic ET_DYN with PT_LOAD, PT_DYNAMIC/DT_NULL;
+        # this is not machine code and cannot substitute for execution proof.
+        ident = b"\x7fELF\x02\x01\x01" + bytes(9)
+        header = struct.pack("<16sHHIQQQIHHHHHH", ident, 3, 62, 1, 0, 64, 0, 0,
+                             64, 56, 2, 64, 0, 0)
+        load_segment = struct.pack("<II6Q", 1, 4, 0, 0, 0, 192, 192, 1)
+        dynamic_segment = struct.pack("<II6Q", 2, 4, 176, 176, 0, 16, 16, 8)
+        content = header + load_segment + dynamic_segment + bytes(16)
+        ready.validate_elf("node_modules/fixture/addon.node", content)
+        for offset, value in ((16, 2), (18, 183), (20, 0), (52, 20), (54, 20)):
+            changed = bytearray(content)
+            struct.pack_into("<H" if offset != 20 else "<I", changed, offset, value)
+            with self.subTest(offset=offset), self.assertRaises(ready.ReadyValidationError):
+                ready.validate_elf("node_modules/fixture/addon.node", bytes(changed))
+
+    def test_platform_classification_is_mandatory_even_for_neutral_package(self):
+        raw, receipt, expected, _ = fixture()
+        del receipt["productionGraph"]["node_modules/fixture"]["declaredPlatform"]
+        del receipt["productionGraph"]["node_modules/fixture"]["selection"]
+        with self.assertRaises(ready.ReadyValidationError):
+            ready.validate_zip(raw, receipt, expected)
+
     def test_exact_forward_and_original_profiles(self):
         for profile in ("forward", "rollback"):
             raw, receipt, expected, _ = fixture(profile)
@@ -286,6 +377,56 @@ class ReleaseContractTests(unittest.TestCase):
 
 
 class ProducerTests(unittest.TestCase):
+    def test_spawn_and_timeout_failures_have_bounded_evidence(self):
+        for error in (FileNotFoundError(2, "missing executable"),
+                      subprocess.TimeoutExpired(["node"], 1, output=b"bounded timeout")):
+            with tempfile.TemporaryDirectory() as evidence:
+                with patch.object(producer.subprocess, "run", side_effect=error):
+                    with self.assertRaises(ready.ReadyValidationError):
+                        producer.command(["node"], evidence=Path(evidence), stage="native")
+                record = json.loads((Path(evidence) / "native-command-error.json").read_text())
+                self.assertIsNone(record["exitCode"])
+
+    def test_enumeration_permission_failure_is_not_silent_partial_success(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            (root / "node_modules").mkdir()
+            error = PermissionError(13, "synthetic unreadable package subtree")
+            def inaccessible(*args, **kwargs):
+                handler = kwargs.get("onerror")
+                if handler:
+                    handler(error)
+                return iter(())
+            with patch.object(producer.os, "walk", inaccessible), self.assertRaises(
+                    ready.ReadyValidationError):
+                producer.write_zip(root, root.parent / (root.name + ".zip"))
+
+    def test_command_failures_preserve_typed_redacted_diagnostics(self):
+        with tempfile.TemporaryDirectory() as evidence:
+            result = SimpleNamespace(returncode=37, stdout=b"native probe stage\n",
+                stderr=b"ERR_DLOPEN_FAILED: native load failed\nAuthorization: Bearer synthetic-secret\n"
+                       b"password=synthetic-password\n")
+            with patch.object(producer.subprocess, "run", return_value=result):
+                with self.assertRaises(ready.ReadyValidationError) as error:
+                    producer.command(["node", "probe"], evidence=Path(evidence), stage="native")
+            path = Path(evidence) / "native-command-error.json"
+            record = json.loads(path.read_text())
+            self.assertEqual(record["exitCode"], 37)
+            self.assertIn("ERR_DLOPEN_FAILED", record["stderr"])
+            self.assertIn(str(path), str(error.exception))
+            self.assertNotIn("synthetic-secret", path.read_text())
+            self.assertNotIn("synthetic-password", path.read_text())
+
+    def test_all_command_failure_stages_have_real_bounded_evidence(self):
+        for stage in ("git", "npm-ls", "native"):
+            with tempfile.TemporaryDirectory() as evidence:
+                result = SimpleNamespace(returncode=5, stdout=b"x" * 20000,
+                                         stderr=b"operation failed\n")
+                with patch.object(producer.subprocess, "run", return_value=result):
+                    with self.assertRaises(ready.ReadyValidationError):
+                        producer.command(["test"], evidence=Path(evidence), stage=stage)
+                record = json.loads((Path(evidence) / (stage + "-command-error.json")).read_text())
+                self.assertLessEqual(len(record["stdout"]), 4096)
     def test_graph_rejects_dev_integrity_drift_and_missing_packages(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)

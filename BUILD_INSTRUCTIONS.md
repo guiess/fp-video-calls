@@ -118,7 +118,7 @@ standard-library tooling, Git and the checksum-verified Node/npm distributions
 are required; no new dependency or tool installation is performed.
 
 ```bash
-python3 -m unittest discover -s scripts/tests -p test_ready_server.py
+python3 -m unittest discover -s scripts/tests -p 'test_ready*.py'
 python3 scripts/produce-ready-server.py --repo <checkout> --commit <full-commit> --profile forward --node <qualified-node24-bin> --output <owned-artifacts>/forward.zip
 python3 scripts/validate-ready-server.py --repo <checkout> --commit <full-commit> --profile forward --zip <owned-artifacts>/forward.zip --receipt <owned-artifacts>/forward.zip.receipt.json
 ```
@@ -141,6 +141,19 @@ closed rather than relying on unproven Azure ZIP link behavior. `[CUSTOM]`
 
 The separate validator accepts only explicit forward/original-rollback profiles.
 The existing JavaScript source-only validator still rejects `node_modules`.
+Validation measures the full actual ZIP stream through DEFLATE EOS and CRC,
+not declared sizes alone; local/central header contradictions are rejected before
+extraction. ELF structural checks are separate from required real native execution.
+Every package's platform classification and every final native-report field must
+agree with the qualified profile. Executed tool digests must match committed bytes
+or the explicitly derived CRLF variant, not an arbitrary normalized fingerprint.
+
+For read-only CLI regressions against an existing qualified artifact, set
+`M2_READY_TEST_ZIP` and `M2_READY_TEST_RECEIPT`; optionally set
+`M2_READY_TEST_REPO`/`M2_READY_TEST_GIT` for a Windows worktree bridge. These tests
+mutate only temporary receipts and never restore dependencies or deploy.
+Command failures retain bounded redacted stage/exit/code/stdout/stderr JSON at
+the actual owned evidence path, including Git, npm-ls and native load failures.
 Ready processing caps are 500 MiB compressed, 1 GiB expanded, 20,000 entries and
 depth 20; original source-mode limits are unchanged. Producer/validator usage
 errors return 2 (argparse); validation/restore failures return 2 with stderr

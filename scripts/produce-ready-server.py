@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import platform
-import shutil
+import re
 import stat
 import subprocess
 import sys
@@ -51,20 +51,57 @@ console.log(JSON.stringify({node:process.version.slice(1),abi:process.versions.m
 """
 
 
-def command(arguments, cwd=None, env=None, timeout=600):
-    result = subprocess.run(arguments, cwd=cwd, env=env, timeout=timeout,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+def redacted_output(value):
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value or "")
+    text = re.sub(r"(?im)authorization\s*:\s*[^\r\n]*", "Authorization: <redacted>", text)
+    text = re.sub(r"https?://[^\s\"'<>]+", "<url-redacted>", text)
+    text = re.sub(r"(?i)([\"']?[\w-]*(?:password|secret|token|cookie|connection[_-]?string|api[_-]?key)"
+                  r"[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)", r"\1<redacted>", text)
+    text = re.sub(r"(?im)^(\s*(?:export\s+)?[A-Z][A-Z0-9_]*\s*=)[^\r\n]*",
+                  r"\1<environment-redacted>", text)
+    text = re.sub(r"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
+                  "<private-key-redacted>", text)
+    text = re.sub(r"\b[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}\b", "<jwt-redacted>", text)
+    return text[:4096]
+
+
+def command_error(evidence, stage, exit_code, stdout, stderr, cause):
+    require(re.fullmatch("[a-z0-9-]{1,32}", stage), "Invalid diagnostic stage")
+    directory = evidence or Path(tempfile.mkdtemp(prefix="m2-ready-command-"))
+    path = directory / (stage + "-command-error.json")
+    record = {"stage": stage, "exitCode": exit_code, "cause": cause,
+              "stdout": redacted_output(stdout), "stderr": redacted_output(stderr)}
+    code = re.search(r"\bERR_[A-Z0-9_]+\b", record["stderr"])
+    record["errorCode"] = code.group(0) if code else None
+    path.write_text(json.dumps(record, indent=2) + "\n")
+    return path
+
+
+def command(arguments, cwd=None, env=None, timeout=600, evidence=None, stage="command"):
+    try:
+        result = subprocess.run(arguments, cwd=cwd, env=env, timeout=timeout,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except subprocess.TimeoutExpired as error:
+        path = command_error(evidence, stage, None, error.stdout, error.stderr, "timeout")
+        raise ReadyValidationError(f"{stage} timed out; bounded diagnostics: {path}") from error
+    except OSError as error:
+        path = command_error(evidence, stage, None, b"", error.strerror, type(error).__name__)
+        raise ReadyValidationError(f"{stage} could not start; bounded diagnostics: {path}") from error
     if result.returncode:
-        # npm/Git may include URLs or config in errors; preserve bounded diagnostics
-        # in the owned local evidence directory, never echo credential-bearing output.
+        path = command_error(evidence, stage, result.returncode, result.stdout,
+                             result.stderr, "native command failure")
         raise ReadyValidationError(
-            f"{Path(arguments[0]).name} failed (exit {result.returncode}); "
-            "inspect isolated restore diagnostics")
+            f"{stage} failed (exit {result.returncode}); bounded diagnostics: {path}")
+    if evidence is not None and stage == "npm-ci":
+        (evidence / "npm-ci-command-result.json").write_text(json.dumps({
+            "stage": stage, "exitCode": 0, "stdout": redacted_output(result.stdout),
+            "stderr": redacted_output(result.stderr)}, indent=2) + "\n")
     return result.stdout
 
 
 def git(arguments, options):
-    return command([options.git, "-C", options.repo, *arguments])
+    return command([options.git, "-C", options.repo, *arguments],
+                   evidence=getattr(options, "evidence", None), stage="git")
 
 
 def source_payload(options):
@@ -90,7 +127,8 @@ def producer_identity(options):
     for name in ("ready_server.py", "produce-ready-server.py", "validate-ready-server.py"):
         expected = git(["show", f"{commit}:scripts/{name}"], options)
         actual = Path(__file__).with_name(name).read_bytes()
-        require(actual.replace(b"\r\n", b"\n") == expected.replace(b"\r\n", b"\n"),
+        allowed = (expected, expected.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        require(actual in allowed,
                 f"Producer tooling differs from committed code: {name}")
         files[name] = {"committedSha256": sha256(expected), "executedSha256": sha256(actual)}
     return {"commit": commit, "files": files}
@@ -102,7 +140,8 @@ def verify_toolchain(options):
             "Producer requires existing Linux x64")
     expected = PROFILES[options.profile]
     value = json.loads(command([str(node), "-p",
-        "JSON.stringify({node:process.version.slice(1),abi:process.versions.modules,platform:process.platform,arch:process.arch})"]))
+        "JSON.stringify({node:process.version.slice(1),abi:process.versions.modules,platform:process.platform,arch:process.arch})"],
+        evidence=getattr(options, "evidence", None), stage="toolchain"))
     require(value == {"node": expected["node"], "abi": expected["abi"],
                       "platform": "linux", "arch": "x64"}, "Unqualified producer Node/ABI")
     npm = node.parent.parent / "lib/node_modules/npm/bin/npm-cli.js"
@@ -121,16 +160,12 @@ def restore(root, node, npm, evidence):
            "npm_config_userconfig": str(user), "npm_config_globalconfig": str(global_config),
            "npm_config_registry": "https://registry.npmjs.org"}
     require(not (root / "node_modules").exists(), "Inherited dependencies prohibited")
-    result = subprocess.run([str(node), str(npm), "ci", "--omit=dev",
-                             "--no-audit", "--no-fund", "--loglevel=error"],
-                            cwd=root, env=env, timeout=600, capture_output=True)
-    (evidence / "restore.stdout").write_bytes(result.stdout[:128 * 1024])
-    (evidence / "restore.stderr").write_bytes(result.stderr[:128 * 1024])
-    require(result.returncode == 0, f"Fresh production restore failed ({result.returncode})")
+    command([str(node), str(npm), "ci", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"],
+            cwd=root, env=env, evidence=evidence, stage="npm-ci")
     native = json.loads(command([str(node), "--input-type=module", "-e", NATIVE_PROBE],
-                                cwd=root, env=env, timeout=60))
+                                cwd=root, env=env, timeout=60, evidence=evidence, stage="native"))
     command([str(node), str(npm), "ls", "--omit=dev", "--all", "--json"],
-            cwd=root, env=env, timeout=60)
+            cwd=root, env=env, timeout=60, evidence=evidence, stage="npm-ls")
     require(not (root / "node_modules/vitest").exists() and
             not (root / "node_modules/socket.io-client").exists(), "Dev dependencies retained")
     return native
@@ -162,8 +197,13 @@ def production_graph(root):
 
 
 def collect_payload(root):
+    require(root.is_dir() and not root.is_symlink(), "Unqualified payload-root link/type")
     payload, excluded = [], []
-    for directory, directories, filenames in os.walk(root, followlinks=False):
+    def enumeration_error(error):
+        raise ReadyValidationError(
+            f"Approved package tree enumeration failed ({type(error).__name__})") from error
+    for directory, directories, filenames in os.walk(
+            root, followlinks=False, onerror=enumeration_error):
         for name in list(directories):
             require(not (Path(directory) / name).is_symlink(), "Dependency directory link prohibited")
         for name in filenames:
@@ -220,19 +260,21 @@ def qualify_extracted(archive, node, evidence, receipt=None, expected_source=Non
         for entry in package.infolist():
             (extracted / entry.filename).chmod((entry.external_attr >> 16) & 0o777)
     return json.loads(command([str(node), "--input-type=module", "-e", NATIVE_PROBE],
-                             cwd=extracted, env={}, timeout=60))
+                             cwd=extracted, env={}, timeout=60,
+                             evidence=evidence, stage="final-native"))
 
 
 def produce(options):
-    files = source_payload(options)
-    identity = producer_identity(options)
-    node, npm = verify_toolchain(options)
     destination = Path(options.output).resolve()
     require(destination.parent.is_dir() and not destination.exists(),
             "Output must be a new artifact in an existing owned directory")
     receipt_path = Path(str(destination) + ".receipt.json")
     require(not receipt_path.exists(), "Receipt already exists")
     evidence = Path(tempfile.mkdtemp(prefix="m2-ready-producer-", dir=destination.parent))
+    options.evidence = evidence
+    files = source_payload(options)
+    identity = producer_identity(options)
+    node, npm = verify_toolchain(options)
     root = evidence / "payload"
     root.mkdir()
     for name, content in files.items():
@@ -251,7 +293,8 @@ def produce(options):
                "productionGraph": graph, "generatedLinksExcluded": excluded,
                "producerNodeSha256": sha256(node.read_bytes()),
                "producer": identity,
-               "npm": command([str(node), str(npm), "--version"]).decode().strip(),
+               "npm": command([str(node), str(npm), "--version"],
+                              evidence=evidence, stage="npm-version").decode().strip(),
                "evidenceDirectory": str(evidence),
                "nativeHashes": {entry["path"]: entry["sha256"] for entry in entries
                                 if entry["path"].endswith(".node") or ".so" in Path(entry["path"]).name},

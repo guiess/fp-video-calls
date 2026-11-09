@@ -10,6 +10,7 @@ import stat
 import struct
 import unicodedata
 import zipfile
+import zlib
 from pathlib import Path
 
 LIMITS = {"compressed": 500 * 1024**2, "expanded": 1024**3,
@@ -74,9 +75,10 @@ def validate_path(name, depth):
 
 
 def validate_receipt(receipt):
-    require(isinstance(receipt, dict) and receipt.get("schema") == 1, "Invalid receipt schema")
+    require(isinstance(receipt, dict) and type(receipt.get("schema")) is int and
+            receipt["schema"] == 1, "Invalid receipt schema")
     profile = receipt.get("profile")
-    require(profile in PROFILES, "Invalid receipt profile")
+    require(isinstance(profile, str) and profile in PROFILES, "Invalid receipt profile")
     for field in ("sourceCommit", "sourceTree", "zipSha256"):
         size = 64 if field == "zipSha256" else 40
         require(isinstance(receipt.get(field), str) and
@@ -152,11 +154,14 @@ def validate_zip(raw, receipt, expected_source, limits=None):
     actual_native = {name: entry["sha256"] for name, entry in inventory.items()
                      if name.endswith(".node") or ".so" in Path(name).name}
     require(receipt.get("nativeHashes", {}) == actual_native, "Receipt native hash mismatch")
-    for name, digest in receipt.get("loadedNativeHashes", {}).items():
+    loaded = receipt.get("loadedNativeHashes", {})
+    require(isinstance(loaded, dict), "Malformed loaded native hash inventory")
+    for name, digest in loaded.items():
         require(actual_native.get(name) == digest, "Loaded native hash outside final payload")
     try:
         return validate_archive(raw, inventory, expected_source, caps, receipt)
-    except (zipfile.BadZipFile, RuntimeError, EOFError, struct.error, OSError) as error:
+    except (zipfile.BadZipFile, RuntimeError, EOFError, struct.error, OSError,
+            zlib.error, UnicodeDecodeError) as error:
         raise ReadyValidationError("Malformed or corrupt ZIP content") from error
 
 
@@ -177,9 +182,11 @@ def validate_archive(raw, inventory, expected_source, caps, receipt):
         require(set(names) == set(inventory), "Incomplete ZIP inventory")
         roots = {name for name in names if "/" not in name}
         require(roots == set(expected_source), "Unexpected/missing source payload")
+        expanded = 0
         for info in infos:
             validate_entry(info, inventory, caps)
-            content = archive.read(info)
+            content = actual_zip_content(raw, info, caps["expanded"] - expanded)
+            expanded += len(content)
             digest = sha256(content)
             require(digest == inventory[info.filename]["sha256"], "ZIP content hash mismatch")
             if info.filename in expected_source:
@@ -188,7 +195,34 @@ def validate_archive(raw, inventory, expected_source, caps, receipt):
                 require(info.filename.startswith("node_modules/"), "Unexpected root tree")
                 validate_elf(info.filename, content)
         validate_production_graph(archive, receipt, names)
-        return {"entries": len(infos), "expandedBytes": sum(info.file_size for info in infos)}
+        return {"entries": len(infos), "expandedBytes": expanded}
+
+
+def actual_zip_content(raw, info, remaining):
+    """Count actual DEFLATE output through full EOS, not ZipFile's declared-size slice."""
+    header = struct.unpack_from("<4s5H3I2H", raw, info.header_offset)
+    start = info.header_offset + 30 + header[9] + header[10]
+    packed = memoryview(raw)[start:start + info.compress_size]
+    decoder = zlib.decompressobj(-15) if info.compress_type == zipfile.ZIP_DEFLATED else None
+    output = bytearray()
+    crc = 0
+    for offset in range(0, len(packed), 65536):
+        pending = bytes(packed[offset:offset + 65536])
+        while pending:
+            chunk = (decoder.decompress(pending, 65536) if decoder else pending)
+            output.extend(chunk)
+            require(len(output) <= info.file_size and len(output) <= remaining,
+                    "Actual expanded ZIP stream exceeds declared/processing limits")
+            crc = zlib.crc32(chunk, crc)
+            if decoder:
+                require(not decoder.unused_data, "Hidden bytes after DEFLATE stream EOS")
+                pending = decoder.unconsumed_tail
+            else:
+                pending = b""
+    require(decoder is None or decoder.eof, "Incomplete actual DEFLATE stream")
+    require(len(output) == info.file_size and crc == info.CRC,
+            "Actual ZIP stream size/CRC mismatch")
+    return bytes(output)
 
 
 def validate_zip_layout(raw, archive, infos):
@@ -204,8 +238,16 @@ def validate_zip_layout(raw, archive, infos):
         require(info.header_offset == offset and not info.flag_bits & 8,
                 "Uninventoried ZIP local content or data descriptor")
         require(raw[offset:offset + 4] == b"PK\x03\x04", "Malformed ZIP local header")
+        header = struct.unpack_from("<4s5H3I2H", raw, offset)
+        require(header[2] == info.flag_bits and header[3] == info.compress_type and
+                header[6] == info.CRC and header[7] == info.compress_size and
+                header[8] == info.file_size,
+                "Incoherent local/central ZIP flags/method/CRC/sizes")
         name_length, extra_length = struct.unpack_from("<HH", raw, offset + 26)
         require(extra_length == 0, "Uninventoried local ZIP metadata")
+        encoding = "utf-8" if info.flag_bits & 0x800 else "cp437"
+        local_name = raw[offset + 30:offset + 30 + name_length].decode(encoding)
+        require(local_name == info.orig_filename, "Incoherent local/central ZIP filename")
         offset += 30 + name_length + extra_length + info.compress_size
     require(offset == archive.start_dir, "Uninventoried ZIP local payload")
 
@@ -216,6 +258,8 @@ def validate_production_graph(archive, receipt, names):
         manifest = json.loads(archive.read("package.json"))
         locked = json.loads(archive.read("package-lock.json"))["packages"]
         installed = json.loads(archive.read("node_modules/.package-lock.json"))["packages"]
+        require(isinstance(manifest, dict) and isinstance(locked, dict) and
+                isinstance(locked.get(""), dict), "Malformed manifest/lock objects")
         require(manifest.get("dependencies") == locked[""].get("dependencies"),
                 "Manifest/lock production dependency mismatch")
         require(isinstance(installed, dict) and installed, "Missing installed production graph")
@@ -223,13 +267,19 @@ def validate_production_graph(archive, receipt, names):
         require(isinstance(graph, dict) and set(graph) == set(installed),
                 "Receipt installed production graph mismatch")
         for location, package in installed.items():
+            require(isinstance(package, dict) and isinstance(graph[location], dict),
+                    "Malformed installed package evidence")
+            require(isinstance(locked.get(location), dict), "Unmatched installed lock entry")
             require(location.startswith("node_modules/") and location in locked and
                     not locked[location].get("dev"), "Package outside locked production graph")
             for field in ("version", "resolved", "integrity"):
                 require(package.get(field) == locked[location].get(field) ==
                         graph[location].get(field), "Locked production version/integrity mismatch")
             actual = json.loads(archive.read(location + "/package.json"))
+            require(isinstance(actual, dict), "Malformed installed package JSON")
             require(actual["version"] == package["version"], "Installed package version mismatch")
+            require("declaredPlatform" in graph[location] and "selection" in graph[location],
+                    "Missing required installed package platform classification")
             if "declaredPlatform" in graph[location]:
                 declared = {key: actual[key] for key in ("os", "cpu", "libc") if key in actual}
                 require(graph[location]["declaredPlatform"] == declared,
@@ -277,9 +327,45 @@ def resolve_dependency(location, dependency, installed):
 
 def validate_elf(name, content):
     if name.endswith(".node") or ".so" in Path(name).name:
-        require(len(content) >= 20 and content[:4] == b"\x7fELF" and
-                content[4:6] == b"\x02\x01" and struct.unpack("<H", content[18:20])[0] == 62,
-                "Incompatible native ELF architecture")
+        require(len(content) >= 64, "Incomplete native ELF64 header")
+        header = struct.unpack_from("<16sHHIQQQIHHHHHH", content)
+        ident, elf_type, machine, version = header[:4]
+        require(ident[:7] == b"\x7fELF\x02\x01\x01" and ident[7] in (0, 3) and
+                elf_type == 3 and machine == 62 and version == 1 and header[8] == 64,
+                "Incompatible native ELF64 type/architecture/version/header")
+        validate_elf_tables(content, header)
+
+
+def validate_elf_tables(content, header):
+    program_offset, section_offset = header[5:7]
+    program_size, program_count, section_size, section_count, strings = header[9:14]
+    require(program_size == 56 and 0 < program_count < 65535 and program_offset >= 64 and
+            program_offset + program_size * program_count <= len(content),
+            "Invalid bounded ELF program table")
+    require((section_count == 0 and section_offset == 0 and strings == 0) or
+            (0 < section_count < 65535 and section_size == 64 and section_offset >= 64 and
+             section_offset + section_count * section_size <= len(content) and
+             strings < section_count), "Invalid bounded ELF section table")
+    types = set()
+    for index in range(program_count):
+        entry = struct.unpack_from("<II6Q", content, program_offset + index * program_size)
+        kind, _, offset, address, _, file_size, memory_size, alignment = entry
+        require(offset + file_size <= len(content) and
+                (kind != 1 or memory_size >= file_size) and
+                (alignment in (0, 1) or (alignment & (alignment - 1) == 0 and
+                                        address % alignment == offset % alignment)),
+                "Invalid ELF segment bounds/alignment")
+        types.add(kind)
+        if kind == 2:
+            require(file_size >= 16 and file_size % 16 == 0 and
+                    any(struct.unpack_from("<qQ", content, position)[0] == 0
+                        for position in range(offset, offset + file_size, 16)),
+                    "Invalid ELF dynamic segment")
+    require({1, 2} <= types, "ELF must contain load and dynamic segments")
+    for index in range(section_count):
+        entry = struct.unpack_from("<II4Q2I2Q", content, section_offset + index * section_size)
+        require(entry[1] == 8 or entry[4] + entry[5] <= len(content),
+                "Invalid ELF section bounds")
 
 
 def azure_command(python, arguments):
