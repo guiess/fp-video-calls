@@ -118,7 +118,7 @@ delivered notifications.
 
 ## Server source packaging and App Service
 
-The supported package boundary is the contents of `server/`, excluding
+The **source-only** package boundary is the contents of `server/`, excluding
 dependencies, databases/WAL files, uploads, credentials, local certificates,
 logs, and nested archives. `server-deploy.zip` is not accepted as current
 deployable evidence.
@@ -205,6 +205,78 @@ for the platform's source-deployment behavior.
 The repository start contract is `npm start` → `node index.js`. A successful
 source ZIP upload is not a build-once attestation because platform restore/build
 occurs after packaging.
+
+### Explicit ready-artifact mode
+
+**Approved preparation, not deployment:** the ready contract packages the
+reviewed application plus freshly locked Linux production dependencies. It
+bypasses the failed Oryx SDK acquisition; it does not repair it or claim a cloud
+Oryx build. The last verified live service remains the original Node 20 source.
+All application/package/lock/pin bytes must equal reviewed `aa201067` (original
+rollback profile equals `b8b0c7b`). Packaging/documentation commits change Git
+count, so final Android provenance must be rebuilt from the exact clean SHA.
+
+The producer and separate ready validator are documented in
+[build instructions](../BUILD_INSTRUCTIONS.md#explicit-ready-artifact-preparation).
+The forward root is the exact 20 reviewed runtime/package/pin files, including
+`attachment-registry.js`, plus the locked production `node_modules` tree. The
+original rollback profile is its reviewed 18-file root plus independently
+restored Node20 production dependencies. Neither contains a Node executable,
+custom serving runtime, evidence manifest, app tests, dev dependencies, private
+configuration, data or caches. Preserve published dependency licenses/payloads;
+do not blindly delete vendor fixtures or archives. `[CUSTOM]`
+
+**Preparation must establish, not assume:**
+
+- Both final ZIPs pass complete content/inventory/graph/path/mode/resource checks
+  and real native execution on the actual App Service OS, not just another Linux.
+- One temporary native probe at a time: maximum 60 seconds; numeric CPU, memory,
+  scratch and disk reserves enforced before and during execution. Approved Node24
+  probe executable/license may exist only in the uniquely owned temporary
+  qualification directory and must be removed, never in the deployment artifact,
+  system SDK cache, app root or serving runtime.
+- Inventory only exact deployment-managed Oryx manifest/archive/bootstrap names
+  and actual startup resolution. Unknown ownership is blocking. Quarantine only
+  proven managed paths under the stopped boundary; no broad `wwwroot` cleanup.
+- Replace the complete owned dependency tree, not a timestamp-based merge;
+  otherwise equal timestamps or stale native files can silently retain Node20
+  artifacts. Verify all extracted file hashes/modes before start.
+- Prove old bootstrap artifacts cannot unpack over ready dependencies and prove
+  rollback build-flag restoration does not rebuild or re-extract stale content.
+  Stopped staging and the exact deployment's runtime tracking remain conditional
+  platform prerequisites, not capabilities inferred from documentation.
+
+Only a **separate maintenance decision** authorizes writes. The proposed forward
+transition keeps the app stopped, selects `NODE|24-lts`, and sets only
+`SCM_DO_BUILD_DURING_DEPLOYMENT=false` / `ENABLE_ORYX_BUILD=false`. Capture old
+presence and values first; unexpected drift stops execution. Those false flags
+are the intentional successful ready-mode baseline. Do not change
+`FRAMEWORK_VERSION`, `NODE_VERSION`, providers, registries, credentials or other
+settings. Preserve HTTPS/startup/data and every unrelated reviewed flag.
+
+After one qualified stopped ready stage, verify exact payload/native hashes,
+then start the matched Azure-managed runtime. Require the **same deployment's**
+ARM `RuntimeSuccessful`, success ≥1, failed/in-progress 0 within 15 minutes,
+actual fresh application PID/executable/ABI/native mappings and isolated memory
+SQLite/generated-image operations, followed by safe HTTP/WSS readiness. Do not
+accept Kudu 4, missing fields, SCM Node metadata, old `/health` or CLI fallback
+build polling. Only then may the preserved compatible web artifact proceed;
+overlay the exact captured public config without rebuilding afterward.
+
+Rollback keeps both build flags false through the prequalified ready Node20
+stage, preserves data/additive attachment metadata, and restores original flags
+while stopped before the matched start **only after that ordering is proven
+not to rebuild or unpack stale content**. Otherwise maintenance is blocked.
+Use presence-aware restoration; do not silently retain changed flags. Recovery
+explicitly restores Node20 EOL/attachment authorization/old decoder risks.
+The retained five public web files are not a complete site backup; actual live
+routing and the full runtime asset graph remain unverified. `[CUSTOM]`
+
+Azure commands must use literal argument arrays (on Windows, the existing
+Python `-m azure.cli`, not `cmd.exe` interpretation of `NODE|24-lts`). Capture
+bounded native exit/error details separately from structured success output.
+Distinguish inactive failed deployment IDs from the active serving deployment;
+no repeated deploys or build-only green status are allowed as a recovery shortcut.
 
 ## Web validation and SWA deployment
 

@@ -96,6 +96,55 @@ post-UAT review remain required. Live Node 20 and older attachment behavior are
 not claimed remediated. Firebase Storage deny-all remains source-only; no bucket
 is provisioned and no rules are deployed. `[CUSTOM]`
 
+## Ready-artifact preparation (local and isolated worker, 2026-11-08)
+
+The approved packaging amendment preserves every application/package/lock/pin
+byte from `aa201067` and the original rollback's 18-file `b8b0c7b` source.
+New Python-standard-library producer/validation tools have separate explicit
+forward and original-rollback profiles; the source-only JavaScript validator
+still rejects dependencies. Packaging tests were written red first, including
+inventory tampering, private paths, links/modes, resource limits, locked-graph
+ownership, CLI argument preservation and stopped/rollback/runtime-status guards.
+
+Fresh independent credential-free Linux production restores yielded a forward
+ZIP with 11,442 entries / 114,483,032 expanded bytes and an original rollback
+with 11,443 / 128,167,798. Both retained published dependency content/licenses
+and inventoried exclusion of npm-generated contained bin symlinks. No vendor
+files were blindly pruned. These figures are preparation evidence, not Azure
+deployment evidence.
+
+Both ZIPs were extracted and every hash/mode checked in uniquely owned temporary
+paths on the **actual** existing App Service worker (glibc 2.36). Forward:
+verified temporary official Node 24.22.2 / ABI 137, SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7. Original rollback: existing worker Node 20.20.2 /
+ABI 115, SQLite 3.51.2, Sharp 0.33.5 / libvips 8.15.3. Memory-only SQLite and
+tiny generated JPEG/PNG/WebP/TIFF/GIF operations passed; no app/Firebase/data
+module was imported and no real objects or notifications were accessed.
+
+One probe ran at a time: 60-second wall/20-second CPU bounds, 1 GiB address
+space, 192 MiB monitored RSS ceiling, 64 MiB V8 heap, 512 MiB aggregate scratch
+and 2 GiB free-disk reserve. Observed peak RSS was approximately 66/58 MB and
+scratch 333,570,242 bytes. Initial available memory was 524 MB and free disk
+14.66 GB. All owned temporary files and tunnels were removed; a prior interrupted
+transfer's partial owned file was also explicitly removed. Node24 was never
+copied into the app root, system SDK cache or production ZIP. `[CUSTOM]`
+
+Bounded bootstrap inventory found only the known `node_modules.tar.zst`
+(29,556,533 bytes) among the approved root archive/manifest names. The current
+289-byte generated startup script uses the exact custom startup/cwd and contains
+no archive extraction or Oryx-manifest references. This is **current Node20**
+evidence; it does not establish future Node24 bootstrap ownership/disposition, complete
+deployment replacement or safe flag-restoration ordering. These technical
+release prerequisites, stopped staging and same-deployment RuntimeSuccessful
+remain blocked pending a reviewed qualified procedure; no preparation result
+authorizes maintenance.
+
+The prior source/Oryx attempt failed deployment `57a35227-3edc-4c12-8045-93b348269b3d`
+at its Node24.22.1 SDK cache/installer handoff. Original runtime/source availability
+was restored; this amendment bypasses, not repairs, that SDK path. The live
+Node20 EOL, old attachment authorization and Sharp decoder gaps remain. No ready
+deployment, SWA change, APK installation/publication or new resource is claimed.
+
 ## Current Android source build
 
 ### Local call-ownership integration (2026-11-07)
