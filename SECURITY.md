@@ -17,17 +17,17 @@ Current missing protections and limits:
 
 - **Text/files:** active text and attachment paths lack end-to-end encryption.
 - **Guest identity:** guest IDs do not establish account ownership; room passwords and socket-bound controls do not change that.
-- **Attachment rollout:** the source controls below require the coordinated server rollout; do not assume they protect an older deployed revision.
+- **Legacy attachments:** pre-update objects without trusted upload receipts remain unavailable and require re-upload; historical ownership is not backfilled.
 - **Bearer downloads:** possession of an issued read link grants access until expiry; these are not per-request membership checks or E2E encryption.
 - **Location retention:** no guaranteed server-enforced expiry; history cleanup is client-triggered without an established physical deletion deadline.
-- **Dependencies/runtime:** recorded dependency findings need triage; [Node 20 is end-of-life](https://nodejs.org/en/about/previous-releases).
+- **Dependencies/runtime:** remaining dependency and supply-chain findings require triage; the supported runtime and native packages still need maintenance.
 
 ## Known risk areas
 
 - Account-free guest identity limitations.
 - Attachment-sharing policy and storage-mode-specific access.
 - Dependency/supply-chain findings requiring triage.
-- Node 20 runtime maintenance.
+- Supported-runtime maintenance.
 - Configuration drift across Azure, Firebase, storage and coturn.
 - Guest/TURN resource abuse and bandwidth costs.
 - Sensitive logging and notification metadata.
@@ -40,7 +40,23 @@ and [existing dependency and verification records](docs/validation-status.md#tes
 
 Private-socket authentication, socket-bound room controls, trusted invitation
 identity and call ownership are deployed on Azure. HTTPS-only transport is
-deployed; Node 20 remains unchanged. See [verification records](docs/validation-status.md#call-ownership-azure-deployment-2026-11-07-est).
+deployed. See the [call-ownership verification records](docs/validation-status.md#call-ownership-azure-deployment-2026-11-07-est)
+and [accepted runtime/client rollout](docs/validation-status.md#accepted-node-24-and-compatible-web-rollout-2026-11-13).
+
+The accepted serving runtime is Node 24.22.3 / ABI 137, with SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7. The scoped attachment-authorization and Sharp
+remediations are deployed; actual native operations, complete mounted inventory,
+safe protocol checks and same-ID `RuntimeSuccessful` were verified.
+The accepted mounted-content/runtime contract does not prove physical compressed-ZIP backing.
+These results do not close unrelated dependency advisories or establish a
+whole-project security certification. Previous Node 20 and old-decoder recovery
+artifacts are historical, not the current serving baseline; reverting to those
+versions would reopen their documented risks.
+
+The compatible web client and user-tested APK 219 explain unavailable legacy
+attachments. User UAT included new image/file uploads. New attachments require
+trusted server upload receipts; old message URLs never establish object
+ownership. Firebase Storage deny-all rules remain hardened **source**, not a claim of deployment.
 
 REST chat routes verify Firebase ID tokens and conversation membership. Guest
 calling remains account-free, with optional room passwords.

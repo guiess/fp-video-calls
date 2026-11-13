@@ -1,7 +1,40 @@
 # M² Calls build and verification records
 
-- **Source baseline:** `482a83a83db50d75792610fc009f0fb87d24971d`
-- **Recorded:** 2026-11-06
+- **Latest accepted server source:** `a9e7d466605b154745dc0e08c9e1965d52cac043`
+- **Latest rollout recorded:** 2026-11-13; older sections retain their original validation context
+
+## Accepted Node 24 and compatible web rollout (2026-11-13)
+
+Server deployment `a5441274-2e4b-443b-9830-89ff441ebaf3` passed same-ID
+`RuntimeSuccessful` and fresh startup/application proof within 542 seconds of
+one tracked publication. Actual Node 24.22.3 / ABI 137, SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7, all 11,442 managed files/types/hashes, native
+operations and safe HTTP/WSS protocol checks passed. The approved read-only
+mounted-content/runtime contract does not claim physical compressed-ZIP backing.
+No restore/deletion was needed; old deadlines/history and data were preserved.
+
+Server user UAT passed with the explicit limitation that pre-update attachments
+without trusted upload receipts require re-upload. Four bounded final
+post-UAT reviews passed with no actionable findings; they were not a new
+whole-project audit. Missing optional linters and unchanged style warnings
+remain limitations, not new code defects.
+
+Compatible web deployment `5408096a-b278-4fa1-8cbb-abe3b584e93a` used the
+previously reviewed, unchanged prebuilt artifact. Official CLI/native exits
+were zero; production was `Ready`; all five public file hashes, preserved
+`config.js`, `/app` and missing-asset routing matched. The web now includes
+localized unavailable/re-upload guidance. Nineteen focused attachment/display
+tests passed before rollout; existing duplicate translation-key warnings remain.
+The accepted backend still reported same-ID `RuntimeSuccessful` and health 200
+after this web-only deployment. The user subsequently reported physical-device
+APK 219 and updated-web calls/chat, reconnects and new image/file attachment UAT
+passed; individual device models and exhaustive case results
+were not reported. Final client review and public APK/Git release approval remain
+separate. See the
+[current release record](azure-deploy.md#accepted-server-and-compatible-web-rollout-2026-11-13).
+
+The following sections are historical results, not current Node 20 or
+not-yet-deployed status claims.
 
 ## Test and documentation checks
 

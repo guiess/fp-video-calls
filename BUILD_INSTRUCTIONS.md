@@ -15,8 +15,9 @@ They do not require production credentials.
 The server selects Node 24.x; `server/.nvmrc` pins the qualification patch.
 Use an isolated official Node distribution verified against its release
 `SHASUMS256.txt`, or `nvm use` from `server`. Do not reuse native dependencies
-installed under Node 20, 22, or 26. The Node 24 source change does not establish
-that Azure has been upgraded; see the [deployment guide](docs/azure-deploy.md).
+installed under Node 20, 22, or 26. The producer pin is distinct from the
+accepted Azure serving patch, Node 24.22.3 / ABI 137; source metadata alone is
+not deployment proof. See the [deployment guide](docs/azure-deploy.md).
 Existing web/Firestore Node 22 qualification remains historical evidence.
 
 ## Clone

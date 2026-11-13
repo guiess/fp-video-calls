@@ -102,7 +102,7 @@ capacity guarantees.
 | Guest rooms/signaling | Optional room password; controls and sender identity bound to the current roster socket | Roster, SDP, ICE, transient room chat |
 | TURN issuance | Bounded caller-supplied `userId`/`roomId`; no application token | Time-limited TURN username/credential/URLs |
 | Firestore | Collection-specific rules | Profiles, contacts, histories, location, private subcollections |
-| Attachment route | Source: server-owned upload binding and current membership before capability issuance; signed local reads deny raw/unbound paths | Files and 60-minute read bearer/SAS URLs; coordinated rollout pending |
+| Attachment route | Deployed server-owned upload binding and current membership before capability issuance; signed local reads deny raw/unbound paths | Files and 60-minute read bearer/SAS URLs; unverified legacy objects require re-upload |
 
 Data inventory and retention evidence are maintained in
 [SECURITY.md](SECURITY.md). Deployed Firestore rules restrict current location
@@ -110,7 +110,7 @@ and history reads to the signed-in owner or selected recipients, with owner-only
 writes and deletes. The private recipient settings and tracking lifecycle are
 described below. Checked-in Storage rules now deny all direct clients; this is
 source-only hardening, not a Firebase deployment. The server upload adapter uses
-Blob or filesystem storage. Current source uses authoritative SQLite upload
+Blob or filesystem storage. The accepted server uses authoritative SQLite upload
 bindings for acceptance, quota, link issuance and cleanup, with expiring bearer
 links for both modes. Legacy unverified objects are not backfilled, signed, read
 or deleted; re-upload is required. See the [attachment contract](SECURITY.md#attachment-access-by-storage-mode)

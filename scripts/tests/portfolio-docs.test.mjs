@@ -119,7 +119,7 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   assert.match(security, /exactly one recorded call/);
   assert.match(security, /account ownership is not established by guest IDs/);
   const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
-  assert.match(readme, /releases\/download\/mobile-v1\.0\.0\.201\/M2Calls-1\.0\.0\.201-debug\.apk/);
+  assert.match(readme, /Download an Android prerelease.*github\.com\/guiess\/fp-video-calls\/releases/);
   assert.doesNotMatch(readme + security, /updated Android client has not been installed or published|Authenticated call-flow and device lifecycle UAT remain pending/);
   assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });
@@ -132,7 +132,7 @@ test("known risk areas are explicit bullets separate from detailed authorization
     /account-free guest identity limitations/i,
     /attachment-sharing policy/i,
     /dependency\/supply-chain/i,
-    /Node 20/i,
+    /supported-runtime maintenance/i,
     /configuration drift/i,
     /guest\/TURN.*abuse/i,
     /logging.*notification metadata/i,
@@ -154,10 +154,10 @@ test("known gaps visibly list current missing protections without reviving deplo
   for (const protection of [
     /end-to-end encryption/i,
     /guest.*account ownership/i,
-    /Attachment rollout.*coordinated server rollout/i,
+    /Legacy attachments.*re-upload/i,
     /possession of an issued read link.*expiry/i,
     /location.*server-enforced expiry/i,
-    /dependency.*Node 20/i,
+    /dependencies\/runtime.*remaining.*triage/i,
   ]) {
     assert.ok(bullets.some((line) => protection.test(line)), `gap must be a bullet: ${protection}`);
   }
@@ -168,6 +168,11 @@ test("known gaps visibly list current missing protections without reviving deplo
     gaps,
     /broad location reads|unauthenticated private sockets|unchecked room controls|missing call ownership|HTTP-only transport/i,
   );
+  assert.doesNotMatch(gaps, /Node 20|Attachment rollout.*coordinated server rollout/i);
+  assert.match(security, /Node 24\.22\.3.*ABI 137/);
+  assert.match(security, /Sharp 0\.35\.5.*libvips 8\.18\.7/);
+  assert.match(security, /same-ID.*RuntimeSuccessful/);
+  assert.match(security, /physical compressed-ZIP backing/i);
 });
 
 test("security reference preserves policy limits and separates them from deployment history", async () => {

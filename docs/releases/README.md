@@ -3,6 +3,31 @@
 This runbook records Android releases and their build metadata, verification,
 and withdrawal procedures.
 
+## Manual development prereleases from merged main
+
+New manually published APKs must be built from an exact merged `main` commit
+in a clean, isolated checkout with complete Git history. The unchanged Android
+build derives `versionCode` and `1.0.0.<count>` from reachable Git commit count;
+the next version must exceed previously delivered APK 219. Preserve merge
+history instead of squashing away its count.
+
+Use the existing debug signer, run unit tests and `assembleDebug`, then verify
+package/version, Android requirements, signer, size and SHA-256. Publish
+`mobile-v1.0.0.<count>` as a development prerelease targeting that exact build
+commit, with the APK and matching checksum sidecar. Record the full build SHA
+and actual test scope in the GitHub release notes; independently download and
+verify the published bytes. Do not move existing tags or replace older assets.
+Manual builds are not `ci-built` attestations.
+
+APK 219 and the compatible web client passed user UAT, including new image/file
+attachments. This is retained application evidence, not physical-device testing
+of a newly built APK. Legacy attachments without trusted upload receipts still
+require re-upload. Public release does not change the accepted Azure deployment.
+
+An existing automatic Azure workflow must not redeploy live configuration as a
+side effect of publication: establish its approved pause before triggering PR or
+`main` events, and restore its prior state after the publication steps finish.
+
 ## Android 1.0.0.201
 
 [Download the APK](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.201/M2Calls-1.0.0.201-debug.apk)
@@ -26,8 +51,8 @@ certification or a production-readiness claim. The APK and SHA-256 sidecar are
 published without rebuilding; older tags and assets remain unchanged.
 
 Because Android versionCode uses reachable Git commit count, preserve this
-release's reviewed history when merging. A single squash onto the current
-194-commit main would produce 195, below delivered APK 201.
+release's reviewed history when merging. At that publication, a single squash
+onto the then 194-commit main would have produced 195, below delivered APK 201.
 See [verification records](../validation-status.md#current-android-source-build).
 
 ## Previous Android 1.0.0.191

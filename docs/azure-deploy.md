@@ -2,8 +2,9 @@
 
 - **Status:** only current deployment guide
 - **Owner:** repository owner
-- **Deployed server/web source:** `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`
-- **Deployment verification:** 2026-11-07 EST (2026-11-08 00:22 UTC)
+- **Deployed server source:** `a9e7d466605b154745dc0e08c9e1965d52cac043`
+- **Deployed web application baseline:** `aa201067df114b2f84d5b99aeee9d02fce4f06ff`; web source unchanged at the server commit above
+- **Deployment verification:** 2026-11-13 UTC; server UAT passed with the documented legacy-attachment limitation; client UAT passed including new attachments
 - **Environment:** personal-use deployment under active development;
   intentionally not production-ready
 
@@ -30,13 +31,56 @@ authorization.
 | Surface | Repository-verified role | Live/configuration status |
 |---|---|---|
 | Azure Static Web Apps | Hosts `web/dist` | Reviewed prebuilt source above deployed; production Ready and public hashes verified |
-| Azure App Service | Runs `node index.js` from `server` | Reviewed source above deployed; tracked RuntimeSuccessful on Node 20.20.2; source and protocol verified |
+| Azure App Service | Runs `node index.js` from `server` | Node 24.22.3 / ABI 137; same-ID RuntimeSuccessful and fresh native/inventory/protocol proof accepted |
 | Firebase Auth | Authenticated application identity | Project `fp-video-calls`; provider settings are not verified |
 | Firestore | Profiles, contacts, histories, location, private device data | Project `fp-video-calls`, database `(default)`, `nam5`; location authorization deployed |
 | FCM | Android call notifications | Delivery health is unknown |
 | Azure Blob Storage | Preferred server attachment store when configured | Active mode is unknown |
 | Local filesystem | Attachment fallback and SQLite | Persistence/backup behavior is operator-dependent |
 | coturn VM | STUN/TURN/TURNS and media relay | Listener, DNS, TLS, NSG, host firewall, relay range, and revision are unknown |
+
+## Accepted server and compatible web rollout (2026-11-13)
+
+App Service deployment `a5441274-2e4b-443b-9830-89ff441ebaf3` reached
+`RuntimeSuccessful` with one successful instance, zero failed/in-progress, and
+fresh same-ID startup proof. Final acceptance completed within 542 seconds of
+the one tracked publication. The new actual application process qualified all
+11,442 managed files, safe types/content hashes, native mappings and operations,
+and safe HTTP/WSS protocol checks: Node 24.22.3 / ABI 137, SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7.
+
+The accepted mode is `WEBSITE_RUN_FROM_PACKAGE=1` with build automation disabled.
+The explicitly approved `mounted-content-runtime-v1` contract verifies actual
+read-only mounted content and runtime, independently owned ZIP/file versions and
+request-bound provider association. It **does not prove physical compressed-ZIP
+backing**: `exactBackingObjectVerified=false`. The old exact-backing profile and
+failed attempt history were not rewritten. The qualifier adds
+`MALLOC_ARENA_MAX=2` only to its native child, retaining the 1 GiB address-space,
+64 MiB heap, CPU/file/time/output limits; it changes neither the application
+environment nor recovery authority. An arena limit is not a RAM hard cap.
+
+One publication was used, with no restore PUT, file deletion, directory
+creation/removal or manual restart. HTTPS, startup, data and additive attachment
+metadata remain preserved. Server UAT and four bounded post-UAT reviews passed;
+this is not whole-project security or production-readiness certification.
+
+The compatible prebuilt web ZIP
+`4c737b4fad0bb36680d2e89d565d6f194d3b9a9a3043539bb9334a6734efeff5`
+was published once to existing `swa-voice-video` production as deployment
+`5408096a-b278-4fa1-8cbb-abe3b584e93a`. Official CLI/native exits were zero,
+production was `Ready`, and all five public file hashes matched. Public
+`config.js` remained
+`711c539535c6ecfb51888e22a1536f329465344f5dc47260d1283006d2db748b`;
+no rebuild followed the preserved-config overlay. `/app` and missing-asset
+routing were checked. The accepted backend remained unchanged and healthy.
+
+Old attachments without trusted upload receipts remain unavailable and require
+re-upload; no ownership backfill or legacy-object deletion was performed. The
+deployed web now explains this limitation. The user reported physical-device
+APK 219 and updated-web calls/chat, reconnects and new image/file attachment UAT
+passed. This is user-reported acceptance, not
+comprehensive device certification; no agent installation or public APK release
+occurred. Git publication and final client-release approval remain separate.
 
 ## Safe targeting prerequisites
 
@@ -140,9 +184,10 @@ The validator opens the ZIP central directory, requires local runtime modules,
 and rejects prohibited entries. The package should contain `package.json` and
 `package-lock.json`; it should not contain `node_modules`.
 
-App Service deployment remains a source/Oryx boundary:
+The following source/Oryx guidance describes the earlier preparation boundary;
+the current accepted mounted ready-mode deployment is recorded above:
 
-**Pending approved upgrade, not deployed:** `app-voice-video-server` was last
+**Historical pre-upgrade snapshot:** `app-voice-video-server` was then
 verified on `NODE|20-lts` / Node 20.20.2. The approved candidate selects
 `NODE|24-lts`, supported by Azure through 2028-04-30. Local qualification uses
 official Node 24.22.2 (Krypton), npm 11.19.1, ABI 137. Verify official release
@@ -150,12 +195,13 @@ checksums; keep tools/caches isolated. Node alone does not remediate the old
 Sharp decoder: integrate the separately owned Sharp 0.35.5 graph and attachment
 authorization before the one combined rollout. `[CUSTOM]`
 
-Live mutations remain on hold until the combined predeploy gate and explicit
+Any new live mutation requires the applicable gate and explicit
 release authorization. Warn users of call interruption/downtime; no new paid
 resources or slots are approved. Preserve startup
 `mkdir -p /home/data && node index.js`, WebSockets/AlwaysOn, secrets, data,
-selected-location rules and `httpsOnly=true`. Leave SWA and Firebase Storage
-unchanged; no Storage bucket/rules release target was established.
+selected-location rules and `httpsOnly=true`. SWA has only the separately
+approved compatible rollout above; Firebase Storage remains unchanged because
+no bucket/rules release target was established.
 Require synchronous `--track-status true` startup tracking
 with `RuntimeSuccessful`, followed by actual process/native version evidence and
 fresh safe HTTP/WSS protocol checks; Kudu hashes plus `/health` alone do not
