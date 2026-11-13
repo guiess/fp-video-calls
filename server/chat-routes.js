@@ -11,13 +11,14 @@ import {
   uploadBlob,
   deleteBlob,
   generateSasUrl,
-  listBlobs,
   uploadLocal,
   deleteLocal,
+  getContentDisposition,
 } from "./blob-storage.js";
 import { isResizableImage, processImage } from "./image-processor.js";
 import { getAppSettings, getEffectiveStorageLimit } from "./app-config.js";
 import { getLinkPreview } from "./link-preview.js";
+import { AttachmentError, AttachmentRegistry } from "./attachment-registry.js";
 
 const __filename2 = fileURLToPath(import.meta.url);
 const __dirname2 = path.dirname(__filename2);
@@ -25,6 +26,7 @@ const UPLOAD_DIR = process.env.CHAT_UPLOAD_DIR || path.join(process.env.CHAT_DB_
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const useBlob = isBlobStorageConfigured();
+const attachments = new AttachmentRegistry(db, { backend: useBlob ? "blob" : "local" });
 if (useBlob) {
   console.log("[chat-routes] Azure Blob Storage configured — using cloud storage");
 } else {
@@ -34,42 +36,41 @@ if (useBlob) {
 const router = Router();
 router.use(requireAuth);
 
-/**
- * Resolve a stored media_url to a client-accessible URL.
- * - Blob files (blob:filename): generate a 60-min SAS URL
- * - Legacy /api/chat/files/filename: generate SAS URL from filename
- * - Already full URLs: return as-is
- */
-async function resolveMediaUrl(mediaUrl) {
-  if (!mediaUrl) return null;
-  if (!useBlob) return mediaUrl; // local storage — paths work as-is
+/** Issue only from a ready receipt and recheck after asynchronous Blob signing. */
+async function resolveMediaUrl(record, context) {
+  if (!attachments.canAccess(record, context)) throw new AttachmentError();
+  const url = useBlob ? await generateSasUrl(record.object_key, 60) : attachments.localUrl(record);
+  if (!attachments.canAccess(record, context)) throw new AttachmentError();
+  return url;
+}
 
-  // Extract blob name from stored URL patterns
-  let blobName = null;
-  if (mediaUrl.startsWith("blob:")) {
-    blobName = mediaUrl.slice(5);
-  } else if (mediaUrl.includes("/api/chat/files/")) {
-    blobName = mediaUrl.split("/api/chat/files/").pop();
-  } else if (mediaUrl.startsWith("http")) {
-    return mediaUrl; // already a full URL
-  } else {
-    blobName = mediaUrl;
+async function messageMedia(message, context) {
+  const empty = { mediaUrl: null, fileName: null, fileSize: null, contentType: null };
+  if (!message.media_url) return empty;
+  const record = attachments.forMessage(message);
+  if (record) {
+    try {
+      const mediaUrl = await resolveMediaUrl(record, context);
+      return { mediaUrl, fileName: record.file_name, fileSize: record.file_size, contentType: record.content_type };
+    } catch {
+      console.warn("[chat/media] Attachment capability unavailable");
+    }
   }
+  return { ...empty, attachmentError: "ATTACHMENT_UNAVAILABLE" };
+}
 
-  try {
-    return await generateSasUrl(blobName, 60);
-  } catch {
-    return mediaUrl; // fallback if blob not found
+function attachmentFailure(res, error, fallback) {
+  if (error instanceof AttachmentError) {
+    return res.status(error.status).json({ ok: false, error: error.code, ...error.details });
   }
+  console.error(`[chat/${fallback}] operation failed`);
+  return res.status(500).json({ ok: false, error: fallback });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function isParticipant(conversationId, uid) {
-  const row = db.prepare(
-    "SELECT 1 FROM conversation_participants WHERE conversation_id = ? AND user_uid = ?"
-  ).get(conversationId, uid);
-  return !!row;
+  return attachments.isParticipant(conversationId, uid);
 }
 
 async function getFcmToken(uid) {
@@ -139,15 +140,12 @@ const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"];
 const MEDIA_EXTS = [".mp4", ".mp3", ".wav", ".ogg", ".webm", ".mov"];
 
 /**
- * Queries total storage used by a user (sum of file_size for messages with media).
+ * Queries server-recorded uploaded/reserved bytes, counting each object once.
  * @param {string} uid - User UID.
  * @returns {number} Total bytes used.
  */
 function getUserStorageUsed(uid) {
-  const row = db.prepare(
-    "SELECT COALESCE(SUM(file_size), 0) as total FROM messages WHERE sender_uid = ? AND media_url IS NOT NULL"
-  ).get(uid);
-  return row.total;
+  return attachments.storageUsed(uid);
 }
 
 /**
@@ -186,36 +184,35 @@ function classifyFileType(fileName) {
   return "other";
 }
 
-/**
- * Deletes a file from storage (blob or local), best-effort.
- * @param {string} mediaUrl - The media_url from the message.
- */
-async function deleteFile(mediaUrl) {
-  if (!mediaUrl) return;
+/** The key must have been claimed synchronously, before any storage operation. */
+async function deleteAttachment(record) {
+  if (!record) return;
   try {
-    let fileName;
-    if (mediaUrl.startsWith("blob:")) {
-      fileName = mediaUrl.slice(5);
-    } else if (mediaUrl.includes("/api/chat/files/")) {
-      fileName = mediaUrl.split("/api/chat/files/").pop();
-    } else if (mediaUrl.startsWith("http")) {
-      // SAS URL or full blob URL — extract blob name from path
-      try {
-        const url = new URL(mediaUrl);
-        fileName = url.pathname.split("/").pop();
-      } catch { return; }
-    } else {
-      fileName = mediaUrl;
-    }
-    if (!fileName) return;
-    console.log(`[deleteFile] Deleting: ${fileName} (from mediaUrl=${mediaUrl.slice(0, 60)})`);
-    if (useBlob) {
-      await deleteBlob(fileName);
-    } else {
-      deleteLocal(fileName, UPLOAD_DIR);
-    }
-  } catch (e) {
-    console.warn(`[deleteFile] Failed to delete: ${e.message}`);
+    if (useBlob) await deleteBlob(record.object_key);
+    else deleteLocal(record.object_key, UPLOAD_DIR);
+    attachments.finishDeletion(record.object_key);
+  } catch {
+    console.error("[chat/attachment-delete] Storage deletion failed; receipt quarantined");
+    throw new AttachmentError("ATTACHMENT_DELETE_FAILED", 503);
+  }
+}
+
+/** Local bearer downloads mirror expiring Blob capabilities, never raw UUID access. */
+export function serveLocalAttachment(req, res) {
+  try {
+    const record = attachments.localRead(req.params.name, req.query);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Content-Disposition", getContentDisposition(record.file_name));
+    res.type(record.content_type);
+    return res.sendFile(path.join(UPLOAD_DIR, record.object_key), error => {
+      if (!error) return;
+      if (res.headersSent) return res.destroy();
+      res.status(error.code === "ENOENT" ? 404 : 500).json({ ok: false, error: "ATTACHMENT_UNAVAILABLE" });
+    });
+  } catch (error) {
+    return attachmentFailure(res, error, "ATTACHMENT_UNAVAILABLE");
   }
 }
 
@@ -389,7 +386,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, fileName, fileSize, replyToId } = req.body || {};
+  const { type, ciphertext, iv, encryptedKeys, senderName, mediaUrl, replyToId } = req.body || {};
 
   if (!type || !["text", "image", "file"].includes(type)) {
     return res.status(400).json({ ok: false, error: "BAD_TYPE" });
@@ -397,16 +394,33 @@ router.post("/conversations/:id/messages", async (req, res) => {
   if (!ciphertext || !iv || !encryptedKeys) {
     return res.status(400).json({ ok: false, error: "MISSING_ENCRYPTED_DATA" });
   }
+  if (type !== "text" && mediaUrl == null) {
+    return res.status(400).json({ ok: false, error: "ATTACHMENT_REQUIRED" });
+  }
 
   const msgId = crypto.randomUUID();
   const now = Date.now();
+  let record, clientUrl;
 
-  db.prepare(`
-    INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys, media_url, file_name, file_size, plaintext, reply_to_id, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys), mediaUrl || null, fileName || null, fileSize || null, null, replyToId || null, now);
-
-  db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(now, id);
+  try {
+    const context = { conversationId: id, uid };
+    record = mediaUrl == null ? null : attachments.forUploadReference(mediaUrl, context);
+    clientUrl = record ? await resolveMediaUrl(record, context) : null;
+    db.transaction(() => {
+      if (!isParticipant(id, uid)) throw new AttachmentError("FORBIDDEN");
+      if (record) attachments.forUploadReference(mediaUrl, context);
+      db.prepare(`
+        INSERT INTO messages (id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys,
+          media_url, file_name, file_size, plaintext, reply_to_id, timestamp, attachment_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(msgId, id, uid, senderName || null, type, ciphertext, iv, JSON.stringify(encryptedKeys),
+        record?.media_url || null, record?.file_name || null, record?.file_size ?? null,
+        null, replyToId || null, now, record?.object_key || null);
+      db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(now, id);
+    }).immediate();
+  } catch (error) {
+    return attachmentFailure(res, error, "MESSAGE_SEND_FAILED");
+  }
 
   const message = {
     id: msgId,
@@ -417,9 +431,9 @@ router.post("/conversations/:id/messages", async (req, res) => {
     ciphertext,
     iv,
     encryptedKeys,
-    mediaUrl: await resolveMediaUrl(mediaUrl || null),
-    fileName: fileName || null,
-    fileSize: fileSize || null,
+    mediaUrl: clientUrl,
+    fileName: record?.file_name || null,
+    fileSize: record?.file_size ?? null,
     replyToId: replyToId || null,
     timestamp: now,
   };
@@ -458,25 +472,27 @@ router.get("/conversations/:id/messages", async (req, res) => {
   const before = parseInt(req.query.before) || Date.now() + 1;
 
   const rows = db.prepare(`
-    SELECT id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys,
-           media_url, file_name, file_size, plaintext, reply_to_id, timestamp
+    SELECT id, conversation_id, sender_uid, sender_name, type, ciphertext, iv, encrypted_keys,
+           media_url, file_name, file_size, plaintext, reply_to_id, timestamp, attachment_key
     FROM messages
     WHERE conversation_id = ? AND timestamp < ?
     ORDER BY timestamp DESC
     LIMIT ?
   `).all(id, before, limit);
 
-  const messages = await Promise.all(rows.map(async r => ({
-    ...r,
-    conversationId: id,
-    senderUid: r.sender_uid,
-    senderName: r.sender_name,
-    encryptedKeys: JSON.parse(r.encrypted_keys),
-    mediaUrl: await resolveMediaUrl(r.media_url),
-    fileName: r.file_name,
-    fileSize: r.file_size,
-    replyToId: r.reply_to_id,
-  })));
+  let messages;
+  try {
+    messages = await Promise.all(rows.map(async r => {
+      const media = await messageMedia(r, { conversationId: id, uid: req.uid });
+      return {
+        ...r, ...media, media_url: media.mediaUrl, file_name: media.fileName, file_size: media.fileSize,
+        conversationId: id, senderUid: r.sender_uid, senderName: r.sender_name,
+        encryptedKeys: JSON.parse(r.encrypted_keys), replyToId: r.reply_to_id,
+      };
+    }));
+  } catch (error) {
+    return attachmentFailure(res, error, "MESSAGES_FAILED");
+  }
 
   // Get read receipts for other participants (to show double-check marks)
   const receipts = db.prepare(
@@ -498,7 +514,7 @@ router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  const row = db.prepare("SELECT sender_uid, media_url FROM messages WHERE id = ? AND conversation_id = ?").get(msgId, id);
+  const row = db.prepare("SELECT * FROM messages WHERE id = ? AND conversation_id = ?").get(msgId, id);
   if (!row) {
     return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   }
@@ -507,12 +523,21 @@ router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
     return res.status(403).json({ ok: false, error: "NOT_SENDER" });
   }
 
-  // Delete file from storage (blob or local)
-  if (row.media_url) {
-    await deleteFile(row.media_url);
+  let deletion, unavailable = false, deletionError;
+  try {
+    deletion = db.transaction(() => {
+      if (!isParticipant(id, req.uid)) throw new AttachmentError("FORBIDDEN");
+      const record = attachments.forMessageAssociation(row);
+      unavailable = !!row.media_url && !record;
+      db.prepare("DELETE FROM messages WHERE id = ? AND conversation_id = ?").run(msgId, id);
+      const revoked = record ? attachments.revokeUnreferenced(record.object_key) : null;
+      return revoked?.backend === attachments.backend ? revoked : null;
+    }).immediate();
+  } catch (error) {
+    return attachmentFailure(res, error, "MESSAGE_DELETE_FAILED");
   }
-
-  db.prepare("DELETE FROM messages WHERE id = ? AND conversation_id = ?").run(msgId, id);
+  try { await deleteAttachment(deletion); }
+  catch (error) { deletionError = error; }
 
   // Notify all participants via Socket.IO
   const participants = db.prepare("SELECT user_uid FROM conversation_participants WHERE conversation_id = ?").all(id);
@@ -531,7 +556,11 @@ router.delete("/conversations/:id/messages/:msgId", async (req, res) => {
     console.warn("[chat/delete] FCM failed:", e.message);
   }
 
-  return res.json({ ok: true });
+  if (deletionError) {
+    deletionError.details = { messageDeleted: true };
+    return attachmentFailure(res, deletionError, "MESSAGE_DELETE_FAILED");
+  }
+  return res.json({ ok: true, ...(unavailable ? { attachmentError: "ATTACHMENT_UNAVAILABLE" } : {}) });
 });
 
 // ── PUT /api/chat/conversations/:id/read — Mark messages as read ────────────
@@ -683,68 +712,91 @@ router.delete("/conversations/:id", async (req, res) => {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
 
-  db.prepare(
-    "DELETE FROM conversation_participants WHERE conversation_id = ? AND user_uid = ?"
-  ).run(id, uid);
-
-  // If no participants left, delete the conversation entirely
-  const remaining = db.prepare(
-    "SELECT COUNT(*) as cnt FROM conversation_participants WHERE conversation_id = ?"
-  ).get(id);
-
-  if (remaining.cnt === 0) {
-    // Clean up uploaded files before deleting messages
-    const filesRows = db.prepare(
-      "SELECT media_url FROM messages WHERE conversation_id = ? AND media_url IS NOT NULL"
-    ).all(id);
-    for (const f of filesRows) {
-      await deleteFile(f.media_url);
+  try {
+    const cleanup = db.transaction(() => {
+      if (!isParticipant(id, uid)) throw new AttachmentError("FORBIDDEN");
+      db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ? AND user_uid = ?").run(id, uid);
+      const remaining = db.prepare("SELECT COUNT(*) AS cnt FROM conversation_participants WHERE conversation_id = ?").get(id);
+      if (remaining.cnt !== 0) return { records: [], unavailableAttachments: 0 };
+      const messages = db.prepare("SELECT * FROM messages WHERE conversation_id = ? AND media_url IS NOT NULL").all(id);
+      const unavailableAttachments = messages.filter(message => !attachments.forMessage(message)).length;
+      db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+      attachments.revokeConversation(id);
+      const records = attachments.conversationAttachments(id)
+        .map(row => attachments.claimDeletion(row.object_key)).filter(Boolean);
+      return { records, unavailableAttachments };
+    }).immediate();
+    let hasDeletionFailure = false;
+    for (const record of cleanup.records) {
+      try { await deleteAttachment(record); }
+      catch { hasDeletionFailure = true; }
     }
-    db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(id);
-    db.prepare("DELETE FROM read_receipts WHERE conversation_id = ?").run(id);
-    db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+    if (hasDeletionFailure) {
+      return res.status(503).json({ ok: false, error: "ATTACHMENT_DELETE_FAILED", conversationLeft: true });
+    }
+    return res.json({ ok: true, ...(cleanup.unavailableAttachments ? { unavailableAttachments: cleanup.unavailableAttachments } : {}) });
+  } catch (error) {
+    return attachmentFailure(res, error, "CONVERSATION_DELETE_FAILED");
   }
-
-  return res.json({ ok: true });
 });
 
 // ── POST /api/chat/upload — Upload a file (multipart or base64 JSON) ─────────
 
 import multer from "multer";
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4;
+const MAX_FILE_NAME_LENGTH = 255;
+const MAX_CONVERSATION_ID_LENGTH = 128;
+const STORAGE_EXTENSION_PATTERN = /^(?:\.[a-z0-9]{1,16})?$/;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES } });
+
+function readUpload(req) {
+  const { conversationId, data } = req.body || {};
+  const name = req.body?.fileName ?? req.file?.originalname;
+  const resizeFlag = req.body?.skipResize;
+  if (typeof conversationId !== "string" || !conversationId.length ||
+      conversationId.length > MAX_CONVERSATION_ID_LENGTH || /[\u0000-\u001f\u007f]/.test(conversationId) ||
+      typeof name !== "string" || !name.length || name.length > MAX_FILE_NAME_LENGTH ||
+      /[\\/\u0000-\u001f\u007f]/.test(name) ||
+      (resizeFlag !== undefined && ![true, false, "true", "false"].includes(resizeFlag))) {
+    throw new AttachmentError("INVALID_UPLOAD_FIELDS", 400);
+  }
+  const fileName = name.normalize("NFC");
+  if (!fileName.isWellFormed() || fileName.length > MAX_FILE_NAME_LENGTH) {
+    throw new AttachmentError("INVALID_UPLOAD_FIELDS", 400);
+  }
+  const buffer = req.file ? req.file.buffer : decodeUpload(data);
+  return { buffer, fileName, conversationId, skipResize: resizeFlag === true || resizeFlag === "true" };
+}
+
+function decodeUpload(data) {
+  if (typeof data !== "string" || !data.length || data.length > MAX_BASE64_LENGTH) {
+    throw new AttachmentError("INVALID_UPLOAD_FIELDS", 400);
+  }
+  const encoded = data.replace(/[ \t\r\n]/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 === 1) {
+    throw new AttachmentError("INVALID_UPLOAD_FIELDS", 400);
+  }
+  const buffer = Buffer.from(encoded, "base64");
+  if (buffer.toString("base64").replace(/=+$/, "") !== encoded.replace(/=+$/, "")) {
+    throw new AttachmentError("INVALID_UPLOAD_FIELDS", 400);
+  }
+  return buffer;
+}
 
 router.post("/upload", upload.single("file"), async (req, res) => {
   const uid = req.uid;
-
-  // Support both multipart form-data and legacy base64 JSON
-  let buffer, fileName, conversationId, skipResize;
-
-  if (req.file) {
-    // Multipart upload
-    buffer = req.file.buffer;
-    fileName = req.body.fileName || req.file.originalname;
-    conversationId = req.body.conversationId;
-    skipResize = req.body.skipResize === "true" || req.body.skipResize === true;
-  } else {
-    // Legacy base64 JSON
-    const { conversationId: cid, fileName: fn, data, skipResize: sr } = req.body || {};
-    if (!cid || !fn || !data) {
-      return res.status(400).json({ ok: false, error: "MISSING_FIELDS" });
-    }
-    buffer = Buffer.from(data, "base64");
-    fileName = fn;
-    conversationId = cid;
-    skipResize = !!sr;
-  }
-
-  if (!conversationId || !fileName) {
-    return res.status(400).json({ ok: false, error: "MISSING_FIELDS" });
-  }
+  let input;
+  try { input = readUpload(req); }
+  catch (error) { return attachmentFailure(res, error, "UPLOAD_FAILED"); }
+  let { buffer } = input;
+  const { fileName, conversationId, skipResize } = input;
   if (!isParticipant(conversationId, uid)) {
     return res.status(403).json({ ok: false, error: "FORBIDDEN" });
   }
-
-  const settings = await getAppSettings();
+  let settings;
+  try { settings = await getAppSettings(); }
+  catch (error) { return attachmentFailure(res, error, "UPLOAD_FAILED"); }
   const maxFileMB = settings.maxFileUploadMB || 20;
   if (buffer.length > maxFileMB * 1024 * 1024) {
     return res.status(413).json({ ok: false, error: "FILE_TOO_LARGE", maxSize: `${maxFileMB}MB` });
@@ -758,6 +810,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     return res.status(400).json({ ok: false, error: "FILE_TYPE_NOT_ALLOWED" });
   }
 
+  let receipt, hasStoredObject = false;
   try {
     // ── Per-user storage quota check ──────────────────────────────────────
     const usedBytes = getUserStorageUsed(uid);
@@ -793,23 +846,36 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     // ── Store file ────────────────────────────────────────────────────────
-    const fileId = crypto.randomUUID();
-    const storedName = fileId + ext;
-    let downloadUrl;
+    receipt = attachments.reserve({
+      uid, conversationId, ext: STORAGE_EXTENSION_PATTERN.test(ext) ? ext : "",
+      fileName, fileSize: buffer.length, contentType,
+    }, limitBytes);
 
     if (useBlob) {
-      await uploadBlob(storedName, buffer, contentType, fileName);
-      downloadUrl = `blob:${storedName}`;
+      await uploadBlob(receipt.object_key, buffer, contentType, fileName);
     } else {
-      downloadUrl = uploadLocal(storedName, buffer, UPLOAD_DIR);
+      uploadLocal(receipt.object_key, buffer, UPLOAD_DIR);
     }
+    hasStoredObject = true;
 
-    // Resolve to SAS URL for the response, keep blob ref for storage
-    const clientUrl = await resolveMediaUrl(downloadUrl);
-    return res.json({ ok: true, downloadUrl, signedUrl: clientUrl, fileSize: buffer.length, resized });
-  } catch (e) {
-    console.error("[chat/upload] failed", e);
-    return res.status(500).json({ ok: false, error: "UPLOAD_FAILED" });
+    const record = attachments.complete(receipt.object_key);
+    const clientUrl = await resolveMediaUrl(record, { conversationId, uid });
+    return res.json({ ok: true, downloadUrl: record.media_url, signedUrl: clientUrl, fileSize: record.file_size, resized });
+  } catch (error) {
+    if (receipt) {
+      try {
+        if (hasStoredObject) await deleteAttachment(attachments.failUpload(receipt.object_key));
+        else if (error.code === "STORAGE_OBJECT_EXISTS") attachments.cancelReservation(receipt.object_key);
+        else attachments.markUnverified(receipt.object_key);
+      } catch (recoveryError) {
+        console.error("[chat/upload] Upload recovery failed; receipt remains unavailable");
+        if (recoveryError instanceof AttachmentError && recoveryError.code === "ATTACHMENT_DELETE_FAILED") {
+          return attachmentFailure(res, recoveryError, "UPLOAD_FAILED");
+        }
+      }
+    }
+    // A failed post-storage receipt is never a successful upload, even for access loss.
+    return attachmentFailure(res, receipt ? new AttachmentError("UPLOAD_FAILED", 500) : error, "UPLOAD_FAILED");
   }
 });
 
@@ -852,24 +918,22 @@ router.get("/shared-files", async (req, res) => {
 
   try {
     const rows = db.prepare(`
-      SELECT id, file_name, file_size, sender_uid, sender_name, media_url, type AS msg_type, timestamp
+      SELECT id, conversation_id, attachment_key, file_name, file_size, sender_uid, sender_name, media_url, type AS msg_type, timestamp
       FROM messages
       WHERE conversation_id = ? AND media_url IS NOT NULL
       ORDER BY timestamp DESC
       LIMIT ? OFFSET ?
     `).all(conversationId, limit + 50, offset); // Fetch extra for client-side type filter
 
-    let files = await Promise.all(rows.map(async r => ({
-      id: r.id,
-      fileName: r.file_name,
-      fileSize: r.file_size,
-      contentType: r.file_name ? getContentType(path.extname(r.file_name).toLowerCase()) : "application/octet-stream",
-      senderUid: r.sender_uid,
-      senderName: r.sender_name,
-      timestamp: r.timestamp,
-      url: await resolveMediaUrl(r.media_url),
-      fileType: classifyFileType(r.file_name),
-    })));
+    let files = await Promise.all(rows.map(async r => {
+      const media = await messageMedia(r, { conversationId, uid });
+      return {
+        id: r.id, fileName: media.fileName, fileSize: media.fileSize, contentType: media.contentType,
+        senderUid: r.sender_uid, senderName: r.sender_name, timestamp: r.timestamp,
+        url: media.mediaUrl, fileType: classifyFileType(media.fileName),
+        ...(media.attachmentError ? { attachmentError: media.attachmentError } : {}),
+      };
+    }));
 
     // Apply type filter
     if (type !== "all") {
@@ -917,45 +981,34 @@ router.get("/link-preview", async (req, res) => {
 // ── POST /api/chat/cleanup-orphaned-blobs — Delete blobs not referenced by messages ─
 
 router.post("/cleanup-orphaned-blobs", async (req, res) => {
-  if (!useBlob) {
-    return res.json({ ok: true, message: "Blob storage not configured", deleted: 0 });
+  if (req.query.dryRun !== undefined && !["true", "false"].includes(req.query.dryRun)) {
+    return res.status(400).json({ ok: false, error: "INVALID_CLEANUP_QUERY" });
   }
-
   try {
-    // Get all blob names from Azure
-    const allBlobs = await listBlobs();
-
-    // Get all media_url values from messages
-    const rows = db.prepare("SELECT media_url FROM messages WHERE media_url IS NOT NULL").all();
-    const referencedNames = new Set();
-    for (const r of rows) {
-      const url = r.media_url;
-      if (url.startsWith("blob:")) {
-        referencedNames.add(url.slice(5));
-      } else if (url.includes("/api/chat/files/")) {
-        referencedNames.add(url.split("/api/chat/files/").pop());
-      }
-    }
-
-    // Find orphans
-    const orphans = allBlobs.filter(name => !referencedNames.has(name));
+    const records = attachments.cleanupRecords(req.uid);
+    const candidates = records.filter(record => !record.is_referenced);
     const dryRun = req.query.dryRun === "true";
-
+    let deleted = 0;
     if (!dryRun) {
-      for (const name of orphans) {
-        await deleteBlob(name);
+      for (const candidate of candidates) {
+        // Recheck after each awaited delete: messages/membership can change meanwhile.
+        const claimed = db.transaction(() => attachments.canCleanup(candidate, req.uid)
+          ? attachments.claimDeletion(candidate.object_key) : null).immediate();
+        if (!claimed) continue;
+        await deleteAttachment(claimed);
+        deleted += 1;
       }
     }
-
-    console.log(`[cleanup] Found ${orphans.length} orphaned blobs (${dryRun ? "dry run" : "deleted"})`);
-    return res.json({ ok: true, total: allBlobs.length, referenced: referencedNames.size, orphans: orphans.length, deleted: dryRun ? 0 : orphans.length, dryRun, orphanNames: orphans });
-  } catch (e) {
-    console.error("[cleanup] failed", e);
-    return res.status(500).json({ ok: false, error: e.message });
+    return res.json({
+      ok: true, total: records.length, referenced: records.length - candidates.length, orphans: candidates.length,
+      deleted, dryRun, orphanNames: candidates.map(record => record.object_key),
+    });
+  } catch (error) {
+    return attachmentFailure(res, error, "ATTACHMENT_CLEANUP_FAILED");
   }
 });
 
-// Kept in router but skips auth — handled by unguessable UUID filenames
+// Local file serving is mounted separately, using registry-backed bearer capabilities.
 export { UPLOAD_DIR };
 
 export default router;

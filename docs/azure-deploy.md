@@ -2,8 +2,9 @@
 
 - **Status:** only current deployment guide
 - **Owner:** repository owner
-- **Deployed server/web source:** `79ae007e22aa1b1f0bbefd29d729f4e1df7a740a`
-- **Deployment verification:** 2026-11-07 EST (2026-11-08 00:22 UTC)
+- **Deployed server source:** `a9e7d466605b154745dc0e08c9e1965d52cac043`
+- **Deployed web application baseline:** `aa201067df114b2f84d5b99aeee9d02fce4f06ff`; web source unchanged at the server commit above
+- **Deployment verification:** 2026-11-13 UTC; server UAT passed with the documented legacy-attachment limitation; client UAT passed including new attachments
 - **Environment:** personal-use deployment under active development;
   intentionally not production-ready
 
@@ -30,13 +31,56 @@ authorization.
 | Surface | Repository-verified role | Live/configuration status |
 |---|---|---|
 | Azure Static Web Apps | Hosts `web/dist` | Reviewed prebuilt source above deployed; production Ready and public hashes verified |
-| Azure App Service | Runs `node index.js` from `server` | Reviewed source above deployed; tracked RuntimeSuccessful on Node 20.20.2; source and protocol verified |
+| Azure App Service | Runs `node index.js` from `server` | Node 24.22.3 / ABI 137; same-ID RuntimeSuccessful and fresh native/inventory/protocol proof accepted |
 | Firebase Auth | Authenticated application identity | Project `fp-video-calls`; provider settings are not verified |
 | Firestore | Profiles, contacts, histories, location, private device data | Project `fp-video-calls`, database `(default)`, `nam5`; location authorization deployed |
 | FCM | Android call notifications | Delivery health is unknown |
 | Azure Blob Storage | Preferred server attachment store when configured | Active mode is unknown |
 | Local filesystem | Attachment fallback and SQLite | Persistence/backup behavior is operator-dependent |
 | coturn VM | STUN/TURN/TURNS and media relay | Listener, DNS, TLS, NSG, host firewall, relay range, and revision are unknown |
+
+## Accepted server and compatible web rollout (2026-11-13)
+
+App Service deployment `a5441274-2e4b-443b-9830-89ff441ebaf3` reached
+`RuntimeSuccessful` with one successful instance, zero failed/in-progress, and
+fresh same-ID startup proof. Final acceptance completed within 542 seconds of
+the one tracked publication. The new actual application process qualified all
+11,442 managed files, safe types/content hashes, native mappings and operations,
+and safe HTTP/WSS protocol checks: Node 24.22.3 / ABI 137, SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7.
+
+The accepted mode is `WEBSITE_RUN_FROM_PACKAGE=1` with build automation disabled.
+The explicitly approved `mounted-content-runtime-v1` contract verifies actual
+read-only mounted content and runtime, independently owned ZIP/file versions and
+request-bound provider association. It **does not prove physical compressed-ZIP
+backing**: `exactBackingObjectVerified=false`. The old exact-backing profile and
+failed attempt history were not rewritten. The qualifier adds
+`MALLOC_ARENA_MAX=2` only to its native child, retaining the 1 GiB address-space,
+64 MiB heap, CPU/file/time/output limits; it changes neither the application
+environment nor recovery authority. An arena limit is not a RAM hard cap.
+
+One publication was used, with no restore PUT, file deletion, directory
+creation/removal or manual restart. HTTPS, startup, data and additive attachment
+metadata remain preserved. Server UAT and four bounded post-UAT reviews passed;
+this is not whole-project security or production-readiness certification.
+
+The compatible prebuilt web ZIP
+`4c737b4fad0bb36680d2e89d565d6f194d3b9a9a3043539bb9334a6734efeff5`
+was published once to existing `swa-voice-video` production as deployment
+`5408096a-b278-4fa1-8cbb-abe3b584e93a`. Official CLI/native exits were zero,
+production was `Ready`, and all five public file hashes matched. Public
+`config.js` remained
+`711c539535c6ecfb51888e22a1536f329465344f5dc47260d1283006d2db748b`;
+no rebuild followed the preserved-config overlay. `/app` and missing-asset
+routing were checked. The accepted backend remained unchanged and healthy.
+
+Old attachments without trusted upload receipts remain unavailable and require
+re-upload; no ownership backfill or legacy-object deletion was performed. The
+deployed web now explains this limitation. The user reported physical-device
+APK 219 and updated-web calls/chat, reconnects and new image/file attachment UAT
+passed. This is user-reported acceptance, not
+comprehensive device certification; no agent installation or public APK release
+occurred. Git publication and final client-release approval remain separate.
 
 ## Safe targeting prerequisites
 
@@ -103,7 +147,7 @@ Record:
 
 - source commit and clean-tree status;
 - web/server lockfile hashes;
-- Node 22.x and npm versions;
+- actual Node 24.x patch, npm, native ABI, SQLite and `sharp.versions`;
 - exact test/build commands and results;
 - candidate server package entry list and validator result;
 - previous web/server deployment identities;
@@ -118,7 +162,7 @@ delivered notifications.
 
 ## Server source packaging and App Service
 
-The supported package boundary is the contents of `server/`, excluding
+The **source-only** package boundary is the contents of `server/`, excluding
 dependencies, databases/WAL files, uploads, credentials, local certificates,
 logs, and nested archives. `server-deploy.zip` is not accepted as current
 deployable evidence.
@@ -140,17 +184,34 @@ The validator opens the ZIP central directory, requires local runtime modules,
 and rejects prohibited entries. The package should contain `package.json` and
 `package-lock.json`; it should not contain `node_modules`.
 
-App Service deployment remains a source/Oryx boundary:
+The following source/Oryx guidance describes the earlier preparation boundary;
+the current accepted mounted ready-mode deployment is recorded above:
 
-**Existing approved target:** `app-voice-video-server` uses `NODE|20-lts`.
-Preserve that runtime, its startup command, WebSockets/AlwaysOn and settings;
-qualify the actual candidate and current-source rollback on Linux Node 20.
-The Node 22 guidance below is for development or separately approved new
-deployments, not authorization to change this existing target's runtime.
+**Historical pre-upgrade snapshot:** `app-voice-video-server` was then
+verified on `NODE|20-lts` / Node 20.20.2. The approved candidate selects
+`NODE|24-lts`, supported by Azure through 2028-04-30. Local qualification uses
+official Node 24.22.2 (Krypton), npm 11.19.1, ABI 137. Verify official release
+checksums; keep tools/caches isolated. Node alone does not remediate the old
+Sharp decoder: integrate the separately owned Sharp 0.35.5 graph and attachment
+authorization before the one combined rollout. `[CUSTOM]`
+
+Any new live mutation requires the applicable gate and explicit
+release authorization. Warn users of call interruption/downtime; no new paid
+resources or slots are approved. Preserve startup
+`mkdir -p /home/data && node index.js`, WebSockets/AlwaysOn, secrets, data,
+selected-location rules and `httpsOnly=true`. SWA has only the separately
+approved compatible rollout above; Firebase Storage remains unchanged because
+no bucket/rules release target was established.
 Require synchronous `--track-status true` startup tracking
-with `RuntimeSuccessful`, followed by fresh protocol/native checks. Preserve the
-current fd/e74 source plus lockfile and text-v2 telemetry for source-based Oryx
-rollback; never use a pre-PR20 archive or restore data/uploads/logs/secrets.
+with `RuntimeSuccessful`, followed by actual process/native version evidence and
+fresh safe HTTP/WSS protocol checks; Kudu hashes plus `/health` alone do not
+qualify the runtime. Preserve the current reviewed source plus lockfile,
+Node 20 configuration and text-v2 telemetry for source-based Oryx rollback.
+Capture only allowlisted JavaScript/package files, never broad `wwwroot`,
+databases, uploads, logs, archives or secrets. Restore runtime and app together,
+preserving additive attachment metadata/schema; explicitly report
+reopened authorization and native-decoder vulnerabilities if rollback is needed.
+This is source-based recovery, not reproduction of an old native container.
 The independent HTTPS-only change is deployed; `httpsOnly=true` is the authorized
 baseline. Application-code rollback must not revert it. A separate flag rollback
 requires explicit authorization for a flag-attributable compatibility failure.
@@ -166,17 +227,23 @@ checked behavior only, not comprehensive hardware or lifecycle certification.
 Final post-UAT review remains separate from publication/merge authorization.
 See [verification records](validation-status.md#call-ownership-azure-deployment-2026-11-07-est).
 
-1. select a Linux App Service stack supporting Node 22;
-2. enable WebSockets;
+1. verify the approved subscription/resource identity and configuration drift;
+2. qualify the combined source on Linux Node 24, including full server tests,
+   SQLite/image operations and safe synthetic protocol checks;
 3. set `SCM_DO_BUILD_DURING_DEPLOYMENT=true` and `ENABLE_ORYX_BUILD=true`
    in the Linux App Service application settings, and verify those values before
    upload; ZIP deployment does not restore dependencies by default;
-4. configure runtime settings without printing secrets;
-5. deploy the validated source ZIP;
-6. confirm in deployment logs that Oryx used Node 22 and restored dependencies;
-7. record the resulting deployment ID and platform logs;
-8. verify process start, liveness, CORS, WebSocket upgrade, authentication, and
-   synthetic API behavior.
+4. after release authorization, select `NODE|24-lts` and deploy the validated
+   source ZIP as one maintenance release; never run old Node 20 native artifacts
+   under Node 24;
+5. confirm in build logs that Oryx selected Node 24 from `engines.node` and
+   restored native dependencies; qualify a separate `npm ci --omit=dev`
+   installation/start without dev test dependencies;
+6. record actual Oryx/runtime patch, ABI and native versions, deployment ID,
+   `RuntimeSuccessful` and bounded redacted native errors if any;
+7. verify process start, liveness, CORS, WebSocket upgrade, authentication,
+   room/call ownership and telemetry contracts using synthetic fixtures only;
+8. conduct approved Azure live UAT, then the final post-UAT review gate.
 
 See [App Service ZIP build automation](https://learn.microsoft.com/azure/app-service/deploy-zip#enable-build-automation-for-zip-deploy)
 for the platform's source-deployment behavior.
@@ -184,6 +251,78 @@ for the platform's source-deployment behavior.
 The repository start contract is `npm start` → `node index.js`. A successful
 source ZIP upload is not a build-once attestation because platform restore/build
 occurs after packaging.
+
+### Explicit ready-artifact mode
+
+**Approved preparation, not deployment:** the ready contract packages the
+reviewed application plus freshly locked Linux production dependencies. It
+bypasses the failed Oryx SDK acquisition; it does not repair it or claim a cloud
+Oryx build. The last verified live service remains the original Node 20 source.
+All application/package/lock/pin bytes must equal reviewed `aa201067` (original
+rollback profile equals `b8b0c7b`). Packaging/documentation commits change Git
+count, so final Android provenance must be rebuilt from the exact clean SHA.
+
+The producer and separate ready validator are documented in
+[build instructions](../BUILD_INSTRUCTIONS.md#explicit-ready-artifact-preparation).
+The forward root is the exact 20 reviewed runtime/package/pin files, including
+`attachment-registry.js`, plus the locked production `node_modules` tree. The
+original rollback profile is its reviewed 18-file root plus independently
+restored Node20 production dependencies. Neither contains a Node executable,
+custom serving runtime, evidence manifest, app tests, dev dependencies, private
+configuration, data or caches. Preserve published dependency licenses/payloads;
+do not blindly delete vendor fixtures or archives. `[CUSTOM]`
+
+**Preparation must establish, not assume:**
+
+- Both final ZIPs pass complete content/inventory/graph/path/mode/resource checks
+  and real native execution on the actual App Service OS, not just another Linux.
+- One temporary native probe at a time: maximum 60 seconds; numeric CPU, memory,
+  scratch and disk reserves enforced before and during execution. Approved Node24
+  probe executable/license may exist only in the uniquely owned temporary
+  qualification directory and must be removed, never in the deployment artifact,
+  system SDK cache, app root or serving runtime.
+- Inventory only exact deployment-managed Oryx manifest/archive/bootstrap names
+  and actual startup resolution. Unknown ownership is blocking. Quarantine only
+  proven managed paths under the stopped boundary; no broad `wwwroot` cleanup.
+- Replace the complete owned dependency tree, not a timestamp-based merge;
+  otherwise equal timestamps or stale native files can silently retain Node20
+  artifacts. Verify all extracted file hashes/modes before start.
+- Prove old bootstrap artifacts cannot unpack over ready dependencies and prove
+  rollback build-flag restoration does not rebuild or re-extract stale content.
+  Stopped staging and the exact deployment's runtime tracking remain conditional
+  platform prerequisites, not capabilities inferred from documentation.
+
+Only a **separate maintenance decision** authorizes writes. The proposed forward
+transition keeps the app stopped, selects `NODE|24-lts`, and sets only
+`SCM_DO_BUILD_DURING_DEPLOYMENT=false` / `ENABLE_ORYX_BUILD=false`. Capture old
+presence and values first; unexpected drift stops execution. Those false flags
+are the intentional successful ready-mode baseline. Do not change
+`FRAMEWORK_VERSION`, `NODE_VERSION`, providers, registries, credentials or other
+settings. Preserve HTTPS/startup/data and every unrelated reviewed flag.
+
+After one qualified stopped ready stage, verify exact payload/native hashes,
+then start the matched Azure-managed runtime. Require the **same deployment's**
+ARM `RuntimeSuccessful`, success ≥1, failed/in-progress 0 within 15 minutes,
+actual fresh application PID/executable/ABI/native mappings and isolated memory
+SQLite/generated-image operations, followed by safe HTTP/WSS readiness. Do not
+accept Kudu 4, missing fields, SCM Node metadata, old `/health` or CLI fallback
+build polling. Only then may the preserved compatible web artifact proceed;
+overlay the exact captured public config without rebuilding afterward.
+
+Rollback keeps both build flags false through the prequalified ready Node20
+stage, preserves data/additive attachment metadata, and restores original flags
+while stopped before the matched start **only after that ordering is proven
+not to rebuild or unpack stale content**. Otherwise maintenance is blocked.
+Use presence-aware restoration; do not silently retain changed flags. Recovery
+explicitly restores Node20 EOL/attachment authorization/old decoder risks.
+The retained five public web files are not a complete site backup; actual live
+routing and the full runtime asset graph remain unverified. `[CUSTOM]`
+
+Azure commands must use literal argument arrays (on Windows, the existing
+Python `-m azure.cli`, not `cmd.exe` interpretation of `NODE|24-lts`). Capture
+bounded native exit/error details separately from structured success output.
+Distinguish inactive failed deployment IDs from the active serving deployment;
+no repeated deploys or build-only green status are allowed as a recovery shortcut.
 
 ## Web validation and SWA deployment
 
@@ -229,22 +368,30 @@ Use `--only firestore:rules` for a rules-only change and verify the active sourc
 after deployment. Do not infer the target from a personal default or deploy
 Storage, indexes, functions, or hosting as part of this command.
 
-Firebase Storage rules still allow broad authenticated reads and writes to chat objects.
-The location policy does not change those Storage permissions or the
-Blob/local attachment access described below.
+Firebase Storage has a source-only deny-all rule for direct client access.
+No bucket/rules release target was established; no provisioning or Storage rules
+deployment is authorized. This is separate from the deployed location policy
+and does not claim a live Firebase remediation.
 
 ## Blob and local attachment storage
 
 At server startup, a non-empty `AZURE_STORAGE_CONNECTION_STRING` selects Blob
-mode; otherwise the local filesystem is used. Blob message references are
-resolved to time-limited SAS URLs. Local mode serves
-`/api/chat/files/:name` without authentication.
+mode; otherwise the local filesystem is used. The integrated source authorizes
+attachment references against its authoritative SQLite registry and current
+conversation membership before issuing read links, accepting messages or
+performing deletion/cleanup. Blob uses time-limited SAS URLs; filesystem reads
+require an expiring per-object signed capability and a ready binding. Old
+unbound objects fail closed and remain untouched; affected clients must re-upload.
+These controls are pending the coordinated release, not established live facts.
+Retain additive attachment metadata/schema on rollback and explicitly report
+the reopened authorization vulnerability. See [attachment policy](../SECURITY.md#attachment-access-by-storage-mode).
 
 Verify:
 
 1. active mode from bounded startup evidence without secret values;
 2. container/directory existence and write permissions;
-3. synthetic upload, download, delete, and quota behavior;
+3. synthetic authorized upload/download/delete/quota behavior and forged,
+   cross-conversation, missing/unbound object denials;
 4. object deletion separately from message/reference deletion;
 5. backup/restore ownership and retention;
 6. restart behavior and URL compatibility when mode changes.

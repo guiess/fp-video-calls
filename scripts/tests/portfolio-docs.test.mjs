@@ -119,7 +119,7 @@ test("authorization docs reflect deployed fixes without claiming remaining gaps 
   assert.match(security, /exactly one recorded call/);
   assert.match(security, /account ownership is not established by guest IDs/);
   const readme = await readFile(path.join(REPOSITORY_ROOT, "README.md"), "utf8");
-  assert.match(readme, /releases\/download\/mobile-v1\.0\.0\.201\/M2Calls-1\.0\.0\.201-debug\.apk/);
+  assert.match(readme, /Download an Android prerelease.*github\.com\/guiess\/fp-video-calls\/releases/);
   assert.doesNotMatch(readme + security, /updated Android client has not been installed or published|Authenticated call-flow and device lifecycle UAT remain pending/);
   assert.doesNotMatch(readme, /StaticSitesClient|native exit|working directory.*artifact|rollback upload/i);
 });
@@ -132,7 +132,7 @@ test("known risk areas are explicit bullets separate from detailed authorization
     /account-free guest identity limitations/i,
     /attachment-sharing policy/i,
     /dependency\/supply-chain/i,
-    /Node 20/i,
+    /supported-runtime maintenance/i,
     /configuration drift/i,
     /guest\/TURN.*abuse/i,
     /logging.*notification metadata/i,
@@ -154,19 +154,25 @@ test("known gaps visibly list current missing protections without reviving deplo
   for (const protection of [
     /end-to-end encryption/i,
     /guest.*account ownership/i,
-    /Firebase Storage.*membership/i,
-    /filesystem.*login.*expiry/i,
+    /Legacy attachments.*re-upload/i,
+    /possession of an issued read link.*expiry/i,
     /location.*server-enforced expiry/i,
-    /dependency.*Node 20/i,
+    /dependencies\/runtime.*remaining.*triage/i,
   ]) {
     assert.ok(bullets.some((line) => protection.test(line)), `gap must be a bullet: ${protection}`);
   }
-  assert.match(gaps.replace(/\s+/g, " "), /live (?:Storage )?deployment[^.]*not established/i);
-  assert.match(gaps, /if (?:selected|enabled|used)/i);
+  assert.match(security, /Firebase Storage rules \| Deny all direct client/);
+  assert.match(security, /hardened \*\*source\*\*, not a claim of deployment/);
+  assert.match(security, /unsigned\/unbound UUID paths are denied/);
   assert.doesNotMatch(
     gaps,
     /broad location reads|unauthenticated private sockets|unchecked room controls|missing call ownership|HTTP-only transport/i,
   );
+  assert.doesNotMatch(gaps, /Node 20|Attachment rollout.*coordinated server rollout/i);
+  assert.match(security, /Node 24\.22\.3.*ABI 137/);
+  assert.match(security, /Sharp 0\.35\.5.*libvips 8\.18\.7/);
+  assert.match(security, /same-ID.*RuntimeSuccessful/);
+  assert.match(security, /physical compressed-ZIP backing/i);
 });
 
 test("security reference preserves policy limits and separates them from deployment history", async () => {
@@ -215,12 +221,14 @@ test("setup and security guidance retain the corrected implementation boundaries
   assert.doesNotMatch(build + android, /Use simulated coordinates only|only with synthetic data/i);
   assert.match(security, /private vulnerability reporting is not enabled/i);
   assert.doesNotMatch(security, /security\/advisories\/new/);
-  assert.match(security, /bearer-link design/);
+  assert.match(security, /possession remains an intentional bearer capability/);
   assert.match(security, /supporting guest calling/);
   assert.doesNotMatch(deployment, /historical deployment automation/i);
   assert.match(deployment, /SCM_DO_BUILD_DURING_DEPLOYMENT=true/);
   assert.match(deployment, /ENABLE_ORYX_BUILD=true/);
   assert.match(deployment, /Base64-encoded service-account JSON, not raw JSON/);
+  assert.match(deployment, /source-only deny-all/);
+  assert.doesNotMatch(deployment, /Local mode serves[\s\S]{0,80}without authentication/);
   assert.match(releases, /original build-source commit and build process remain unknown/i);
   assert.doesNotMatch(releases, /signer, installed package metadata, and\s+device validation remain unknown/i);
 });

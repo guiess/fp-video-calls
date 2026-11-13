@@ -170,6 +170,7 @@
     <string name="chat_photo">Photo</string>
     <string name="chat_file">File</string>
     <string name="chat_download">Download</string>
+    <string name="chat_attachment_unavailable">Attachment unavailable. Please upload it again.</string>
     <string name="chat_reply">Reply</string>
     <string name="chat_delete">Delete</string>
     <string name="notification_channel_chat">Chat Messages</string>

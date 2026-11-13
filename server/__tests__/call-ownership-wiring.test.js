@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const state = vi.hoisted(() => ({
   verifyIdToken: vi.fn(), getUser: vi.fn(), getToken: vi.fn(), send: vi.fn(),
+  serveLocalAttachment: vi.fn((_req, res) => res.sendStatus(403)),
   io: null, server: null, app: null,
 }));
 vi.mock("firebase-admin", () => ({
@@ -22,7 +23,7 @@ vi.mock("../chat-db.js", () => ({
 }));
 vi.mock("../chat-routes.js", async () => {
   const { Router } = await import("express");
-  return { default: Router(), UPLOAD_DIR: "." };
+  return { default: Router(), serveLocalAttachment: state.serveLocalAttachment };
 });
 vi.mock("socket.io", async importOriginal => {
   const original = await importOriginal();
@@ -43,6 +44,12 @@ let listeners;
 let logs;
 let sequence = 0;
 const nextRoom = () => `ownership-${++sequence}`;
+
+it("mounts the registry-checked local download handler without a raw filesystem bypass", () => {
+  const route = state.app._router.stack.find(layer => layer.route?.path === "/api/chat/files/:name").route;
+  expect(route.stack).toHaveLength(1);
+  expect(route.stack[0].handle).toBe(state.serveLocalAttachment);
+});
 
 function deferred() {
   let resolve;

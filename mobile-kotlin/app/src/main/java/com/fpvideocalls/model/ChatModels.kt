@@ -35,8 +35,15 @@ data class ChatMessage(
     // Decrypted content (populated client-side after decryption)
     val decryptedText: String? = null,
     // True while message is being sent to server
-    val pending: Boolean = false
-)
+    val pending: Boolean = false,
+    val attachmentError: String? = null
+) {
+    val isAttachmentUnavailable: Boolean
+        get() = attachmentError == "ATTACHMENT_UNAVAILABLE"
+
+    val hasDownloadableMedia: Boolean
+        get() = !isAttachmentUnavailable && !mediaUrl.isNullOrBlank() && mediaUrl != "null"
+}
 
 data class NotificationSettings(
     val calls: String = "always",           // "always", "when_inactive", "never"

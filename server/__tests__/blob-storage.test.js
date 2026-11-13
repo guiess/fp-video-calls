@@ -55,6 +55,13 @@ describe("blob-storage", () => {
       expect(content.equals(buffer)).toBe(true);
     });
 
+    it("uploadLocal never overwrites an existing object, including unverified legacy files", () => {
+      const filePath = path.join(tempDir, "collision.txt");
+      fs.writeFileSync(filePath, "legacy untouched");
+      expect(() => uploadLocal("collision.txt", Buffer.from("new"), tempDir)).toThrow();
+      expect(fs.readFileSync(filePath, "utf8")).toBe("legacy untouched");
+    });
+
     it("downloadLocal returns a readable stream for existing files", async () => {
       const buffer = Buffer.from("test content");
       fs.writeFileSync(path.join(tempDir, "exists.txt"), buffer);

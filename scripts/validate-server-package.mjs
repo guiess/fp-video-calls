@@ -15,6 +15,7 @@ const REQUIRED_FILES = [
   "call-delivery.js",
   "chat-db.js",
   "chat-routes.js",
+  "attachment-registry.js",
   "blob-storage.js",
   "app-config.js",
   "image-processor.js",

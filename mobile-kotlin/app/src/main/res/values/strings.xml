@@ -170,6 +170,7 @@
     <string name="chat_photo">Фото</string>
     <string name="chat_file">Файл</string>
     <string name="chat_download">Скачать</string>
+    <string name="chat_attachment_unavailable">Вложение недоступно. Загрузите его заново.</string>
     <string name="chat_reply">Ответить</string>
     <string name="chat_delete">Удалить</string>
     <string name="notification_channel_chat">Сообщения чата</string>

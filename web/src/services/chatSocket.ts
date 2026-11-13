@@ -17,9 +17,10 @@ export type ChatMessageEvent = {
   iv: string;
   encryptedKeys: Record<string, string>;
   plaintext?: string;
-  mediaUrl?: string;
-  fileName?: string;
-  fileSize?: number;
+  mediaUrl?: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
+  attachmentError?: string | null;
   replyToId?: string;
   timestamp: number;
 };

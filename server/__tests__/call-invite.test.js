@@ -40,7 +40,7 @@ vi.mock("firebase-admin", () => ({
 }));
 vi.mock("../chat-routes.js", () => ({
   default: (_req, _res, next) => next(),
-  UPLOAD_DIR: "unused-test-uploads",
+  serveLocalAttachment: (_req, res) => res.sendStatus(403),
 }));
 vi.mock("../chat-db.js", () => ({ default: {} }));
 vi.mock("../blob-storage.js", () => ({ isBlobStorageConfigured: vi.fn() }));

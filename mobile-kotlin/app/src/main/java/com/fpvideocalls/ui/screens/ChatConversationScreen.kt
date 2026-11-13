@@ -642,7 +642,7 @@ private fun MessageBubble(
         if (message.timestamp == 0L) ""
         else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
-    val hasMedia = message.mediaUrl != null && message.mediaUrl.isNotEmpty()
+    val hasMedia = message.hasDownloadableMedia
     var showMenu by remember { mutableStateOf(false) }
 
     Column(
@@ -719,6 +719,18 @@ private fun MessageBubble(
                 }
 
                 when {
+                    message.isAttachmentUnavailable -> {
+                        val caption = message.fileName ?: message.decryptedText
+                        if (!caption.isNullOrBlank()) {
+                            Text(caption, color = if (isMine) OnPrimary else OnBackground, fontSize = 14.sp)
+                            Spacer(Modifier.height(2.dp))
+                        }
+                        Text(
+                            stringResource(R.string.chat_attachment_unavailable),
+                            color = if (isMine) OnPrimary.copy(alpha = 0.8f) else TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
                     message.type == "image" && hasMedia -> {
                         // Image preview with loading indicator
                         SubcomposeAsyncImage(

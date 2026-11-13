@@ -7,14 +7,18 @@ They do not require production credentials.
 ## Supported toolchain
 
 - Git
-- Node.js 22.x and npm with lockfile support
+- Node.js 24.22.2 and its bundled npm 11.19.1 for the server
 - JDK 17 for Android; JDK 21 or newer for the Firestore emulator
 - Android SDK 34 with Android build tools required by AGP 8.2.2
 - Bash or PowerShell
 
-Node 22 is the supported baseline because locked web/server dependencies
-include packages requiring Node 20 or newer. Earlier Node 18 deployment advice
-is superseded.
+The server selects Node 24.x; `server/.nvmrc` pins the qualification patch.
+Use an isolated official Node distribution verified against its release
+`SHASUMS256.txt`, or `nvm use` from `server`. Do not reuse native dependencies
+installed under Node 20, 22, or 26. The producer pin is distinct from the
+accepted Azure serving patch, Node 24.22.3 / ABI 137; source metadata alone is
+not deployment proof. See the [deployment guide](docs/azure-deploy.md).
+Existing web/Firestore Node 22 qualification remains historical evidence.
 
 ## Clone
 
@@ -87,16 +91,79 @@ non-secret endpoints/settings.
 
 ```bash
 cd server
+node --version
 npm ci
 node node_modules/vitest/vitest.mjs run
 npm run test:turn
 npm run test:telemetry
 ```
 
-The default server suite currently executes 41 tests with one known mismatch:
+Before the Sharp upgrade, the baseline server suite had one known mismatch:
 the small-WebP test expects JPEG conversion while the current implementation
-preserves the original WebP when no resize is needed. The implementation and
-test expectation should be reconciled separately.
+preserves the original WebP when no resize is needed. The integrated Sharp
+tests now assert this preserved behavior correctly.
+
+There is no server transpilation step. A production source build is a clean
+Linux Node 24 `npm ci --omit=dev`, including optional native packages and install
+scripts, followed by `npm start`. Run tests in a separate development restore;
+do not copy Windows `node_modules` or rely on Vitest/socket.io-client being
+installed in production. Record actual Node/ABI, SQLite and `sharp.versions`
+along with synthetic image and HTTP/Socket.IO readiness results.
+
+### Explicit ready-artifact preparation
+
+The approved ready mode prepares dependencies locally rather than relying on
+Azure Oryx SDK acquisition. It does **not** change application/package/lock/pin
+bytes or the Azure-managed serving executable. Existing Linux x64 Python 3.10+
+standard-library tooling, Git and the checksum-verified Node/npm distributions
+are required; no new dependency or tool installation is performed.
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_ready*.py'
+python3 scripts/produce-ready-server.py --repo <checkout> --commit <full-commit> --profile forward --node <qualified-node24-bin> --output <owned-artifacts>/forward.zip
+python3 scripts/validate-ready-server.py --repo <checkout> --commit <full-commit> --profile forward --zip <owned-artifacts>/forward.zip --receipt <owned-artifacts>/forward.zip.receipt.json
+```
+
+Use the reviewed original `b8b0c7bc5157f1f6676cc8ce165486d14067102c`,
+`--profile rollback` and qualified Node 20.20.2 for the independent recovery
+artifact. Forward producer Node is 24.22.2 / ABI 137; rollback is 20.20.2 / ABI 115.
+Windows-hosted worktrees can use the existing Windows Git executable via
+`--git` from WSL and its Windows checkout path with `--repo`; do not read the
+shared main checkout. Artifact preparation requires network access to unchanged
+lock URLs, but does not inherit author credentials or registry configuration.
+
+Each invocation creates a new isolated production restore, ZIP, external receipt
+and owned local evidence directory. A failed operation does not produce a valid
+receipt; never use its partial ZIP. Successful receipts inventory every payload,
+mode/hash, actual graph, OS/libc and native execution result. Published production
+files and licenses are retained. Only npm-generated contained `.bin` symlinks are
+excluded and inventoried; their published targets remain. Other links fail
+closed rather than relying on unproven Azure ZIP link behavior. `[CUSTOM]`
+
+The separate validator accepts only explicit forward/original-rollback profiles.
+The existing JavaScript source-only validator still rejects `node_modules`.
+Validation measures the full actual ZIP stream through DEFLATE EOS and CRC,
+not declared sizes alone; local/central header contradictions are rejected before
+extraction. ELF structural checks are separate from required real native execution.
+Every package's platform classification and every final native-report field must
+agree with the qualified profile. Executed tool digests must match committed bytes
+or the explicitly derived CRLF variant, not an arbitrary normalized fingerprint.
+
+For read-only CLI regressions against an existing qualified artifact, set
+`M2_READY_TEST_ZIP` and `M2_READY_TEST_RECEIPT`; optionally set
+`M2_READY_TEST_REPO`/`M2_READY_TEST_GIT` for a Windows worktree bridge. These tests
+mutate only temporary receipts and never restore dependencies or deploy.
+Command failures retain bounded redacted stage/exit/code/stdout/stderr JSON at
+the actual owned evidence path, including Git, npm-ls and native load failures.
+Ready processing caps are 500 MiB compressed, 1 GiB expanded, 20,000 entries and
+depth 20; original source-mode limits are unchanged. Producer/validator usage
+errors return 2 (argparse); validation/restore failures return 2 with stderr
+diagnostics; successful JSON goes to stdout. No script here deploys anything.
+
+Final artifact qualification on the actual worker, bounded temporary-path
+cleanup, managed bootstrap ownership, dependency replacement and safe build-flag
+restoration remain release prerequisites; local packaging does not establish
+them. See [ready deployment](docs/azure-deploy.md#explicit-ready-artifact-mode).
 
 Start without production integrations:
 

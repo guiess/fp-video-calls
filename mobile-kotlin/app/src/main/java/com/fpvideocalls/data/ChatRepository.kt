@@ -314,13 +314,16 @@ class ChatRepository @Inject constructor(
         )
     }
 
-    private fun parseMessage(json: JSONObject): ChatMessage {
+    internal fun parseMessage(json: JSONObject): ChatMessage {
         val encKeysJson = json.optJSONObject("encryptedKeys")
             ?: json.optString("encrypted_keys", "{}").let {
                 try { JSONObject(it) } catch (_: Exception) { JSONObject() }
             }
         val encryptedKeys = mutableMapOf<String, String>()
         encKeysJson.keys().forEach { key -> encryptedKeys[key] = encKeysJson.getString(key) }
+        val attachmentError = nullableMessageString(json, "attachmentError")
+        val mediaUrl = nullableMessageString(json, "mediaUrl", "media_url")
+            ?.takeUnless { it.isBlank() || it == "null" }
 
         return ChatMessage(
             id = json.getString("id"),
@@ -331,14 +334,22 @@ class ChatRepository @Inject constructor(
             ciphertext = json.optString("ciphertext", ""),
             iv = json.optString("iv", ""),
             encryptedKeys = encryptedKeys,
-            mediaUrl = json.optString("mediaUrl", json.optString("media_url", null))?.let { url ->
+            mediaUrl = mediaUrl?.takeUnless { attachmentError == "ATTACHMENT_UNAVAILABLE" }?.let { url ->
                 if (url.startsWith("/")) "${com.fpvideocalls.util.Constants.SIGNALING_URL}$url" else url
             },
-            fileName = json.optString("fileName", json.optString("file_name", null)),
+            fileName = nullableMessageString(json, "fileName", "file_name"),
             fileSize = json.optLong("fileSize", json.optLong("file_size", 0)).takeIf { it > 0 },
             timestamp = json.optLong("timestamp", 0),
             replyToId = json.optString("replyToId", json.optString("reply_to_id", null))?.takeIf { it.isNotEmpty() },
-            decryptedText = null
+            decryptedText = null,
+            attachmentError = attachmentError
         )
+    }
+
+    private fun nullableMessageString(json: JSONObject, primary: String, legacy: String = primary): String? {
+        // An explicit camelCase null must not revive a stale legacy URL.
+        val field = if (json.has(primary)) primary else legacy
+        if (json.isNull(field)) return null
+        return json.opt(field) as? String
     }
 }

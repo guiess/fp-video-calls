@@ -1,7 +1,40 @@
 # M² Calls build and verification records
 
-- **Source baseline:** `482a83a83db50d75792610fc009f0fb87d24971d`
-- **Recorded:** 2026-11-06
+- **Latest accepted server source:** `a9e7d466605b154745dc0e08c9e1965d52cac043`
+- **Latest rollout recorded:** 2026-11-13; older sections retain their original validation context
+
+## Accepted Node 24 and compatible web rollout (2026-11-13)
+
+Server deployment `a5441274-2e4b-443b-9830-89ff441ebaf3` passed same-ID
+`RuntimeSuccessful` and fresh startup/application proof within 542 seconds of
+one tracked publication. Actual Node 24.22.3 / ABI 137, SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7, all 11,442 managed files/types/hashes, native
+operations and safe HTTP/WSS protocol checks passed. The approved read-only
+mounted-content/runtime contract does not claim physical compressed-ZIP backing.
+No restore/deletion was needed; old deadlines/history and data were preserved.
+
+Server user UAT passed with the explicit limitation that pre-update attachments
+without trusted upload receipts require re-upload. Four bounded final
+post-UAT reviews passed with no actionable findings; they were not a new
+whole-project audit. Missing optional linters and unchanged style warnings
+remain limitations, not new code defects.
+
+Compatible web deployment `5408096a-b278-4fa1-8cbb-abe3b584e93a` used the
+previously reviewed, unchanged prebuilt artifact. Official CLI/native exits
+were zero; production was `Ready`; all five public file hashes, preserved
+`config.js`, `/app` and missing-asset routing matched. The web now includes
+localized unavailable/re-upload guidance. Nineteen focused attachment/display
+tests passed before rollout; existing duplicate translation-key warnings remain.
+The accepted backend still reported same-ID `RuntimeSuccessful` and health 200
+after this web-only deployment. The user subsequently reported physical-device
+APK 219 and updated-web calls/chat, reconnects and new image/file attachment UAT
+passed; individual device models and exhaustive case results
+were not reported. Final client review and public APK/Git release approval remain
+separate. See the
+[current release record](azure-deploy.md#accepted-server-and-compatible-web-rollout-2026-11-13).
+
+The following sections are historical results, not current Node 20 or
+not-yet-deployed status claims.
 
 ## Test and documentation checks
 
@@ -26,6 +59,136 @@ Locked installs reported existing dependency findings:
 - server: 40 total, including 19 high and 5 critical.
 
 These package/advisory counts require separate dependency triage.
+
+## Node 24 qualification (local, 2026-11-08)
+
+The approved runtime work starts from reviewed `main`
+`b8b0c7bc5157f1f6676cc8ce165486d14067102c`. Official
+[Node 24.22.2](https://nodejs.org/dist/v24.22.2/) distributions were checked
+against that release's `SHASUMS256.txt`, without changing the host's global tools.
+Linux x64 archive SHA-256:
+`48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75`.
+Windows x64 ZIP SHA-256:
+`ca1bff5d8ead13c9f2ea404a176db46bd430704d5b5113734049fa365e7799e2`.
+Both actual processes report Node 24.22.2 / ABI 137; bundled npm is 11.19.1.
+
+Isolated Linux development and `npm ci --omit=dev` production restores of the
+existing lock both loaded real SQLite 3.51.2 and Sharp 0.33.5 / libvips 8.15.3.
+In-memory SQLite queries, bcrypt, and synthetic PNG-to-WebP resize passed.
+Production excludes Vitest and socket.io-client; loopback clients are supplied
+from the separate development restore. No real Firebase identities, user data,
+objects or notifications were used.
+
+| Area | Command / scope | Result |
+|---|---|---|
+| Metadata/docs/package regressions | `node --test scripts/tests/*.test.mjs` | 34 passed; the two new toolchain checks first failed against the old metadata/guidance |
+| Full Linux server suite | `CHAT_DB_PATH=:memory: node node_modules/vitest/vitest.mjs run --hookTimeout=60000` | 237 passed, 1 unchanged small-WebP/JPEG expectation failure |
+| TURN and telemetry | `npm run test:turn` and `npm run test:telemetry` equivalent combined Node test invocation | 30 passed |
+| Native production startup/protocol | Actual Express/Socket.IO plus isolated SQLite; source and production-only restores | Passed guest password/namespace/member/stale-socket isolation and synthetic authenticated call ownership/delivery/failure probes |
+
+The full suite, 30 contracts and both startup/protocol probes were repeated
+after applying the Node 24 engine metadata, with identical outcomes and no
+native dependency changes. These are pre-integration results, not vulnerability
+closure or deployment evidence. The old Sharp graph remains vulnerable until the separately owned
+0.35.5 change is integrated and qualified. Attachment authorization integration,
+combined gates, Oryx/runtime proof and Azure live UAT remain pending. The
+last verified live server remains Node 20.20.2; its known gap is not removed.
+The [release guide](azure-deploy.md#server-source-packaging-and-app-service)
+requires a paired app/runtime release and source-based rollback. `[CUSTOM]`
+
+### Combined server qualification (local, 2026-11-08)
+
+The Node 24 integration branch imports Sharp source `232c44f` and attachment
+source `9dfe3b8` sequentially as `65594df` and `4b224a9`. The engine remains
+`24.x`, the development pin `24.22.2`, and Sharp's package-manager-generated
+`^0.35.5` graph is retained. No runtime/protocol changes were added to integrate.
+
+Fresh Linux x64 restores used an empty environment, isolated home/cache, and
+distinct empty npm user/global configuration files. No author credentials,
+private registry settings or TLS exceptions were copied. Locked downloads
+succeeded anonymously, including the public mirror URLs in the Sharp graph;
+this is not independent npm attestation or proof of public npm endpoint
+availability. The Sharp owner separately verified every packed source/generated
+file and actual native payloads against official maintainer release workspaces.
+
+| Area | Result |
+|---|---|
+| Actual runtime/native graph | Node 24.22.2, npm 11.19.1, ABI 137, SQLite 3.51.2, Sharp 0.35.5, libvips 8.18.7, TIFF 4.7.2 |
+| Fresh restores | Development: 392 packages; production-only: 332 packages, without Vitest/socket.io-client |
+| Full server suite | `CHAT_DB_PATH=:memory: npm test -- --hookTimeout=60000`: 346/346 passed, including registry/routes and image regressions; old WebP expectation corrected without changing image production behavior |
+| Native contract tests | `npm run test:turn`: 9 passed; `npm run test:telemetry`: 21 passed |
+| Real native operations | In-memory SQLite/bcrypt and safe generated JPEG/PNG/WebP/TIFF/GIF decode/resize passed in both restores |
+| Safe production readiness | Actual source and production-only HTTP/Socket.IO startup, guest/member/namespace isolation, plus synthetic authenticated call ownership/delivery/failure probes passed |
+| Documentation/package contracts | 34 passed after reconciling obsolete attachment-policy expectations; source package requires `attachment-registry.js` |
+
+This qualifies combined **server source locally**, not Azure or client UAT.
+Minimum web/Android unavailable/re-upload labels remain a separate pending
+integration; no final integrated APK is claimed. Combined predeploy review,
+explicit release approval, Oryx/runtime native readback, live UAT and final
+post-UAT review remain required. Live Node 20 and older attachment behavior are
+not claimed remediated. Firebase Storage deny-all remains source-only; no bucket
+is provisioned and no rules are deployed. `[CUSTOM]`
+
+## Ready-artifact preparation (local and isolated worker, 2026-11-08)
+
+The approved packaging amendment preserves every application/package/lock/pin
+byte from `aa201067` and the original rollback's 18-file `b8b0c7b` source.
+New Python-standard-library producer/validation tools have separate explicit
+forward and original-rollback profiles; the source-only JavaScript validator
+still rejects dependencies. Packaging tests were written red first, including
+inventory tampering, private paths, links/modes, resource limits, locked-graph
+ownership, CLI argument preservation and stopped/rollback/runtime-status guards.
+
+Fresh independent credential-free Linux production restores yielded a forward
+ZIP with 11,442 entries / 114,483,032 expanded bytes and an original rollback
+with 11,443 / 128,167,798. Both retained published dependency content/licenses
+and inventoried exclusion of npm-generated contained bin symlinks. No vendor
+files were blindly pruned. These figures are preparation evidence, not Azure
+deployment evidence.
+
+Both ZIPs were extracted and every hash/mode checked in uniquely owned temporary
+paths on the **actual** existing App Service worker (glibc 2.36). Forward:
+verified temporary official Node 24.22.2 / ABI 137, SQLite 3.51.2,
+Sharp 0.35.5 / libvips 8.18.7. Original rollback: existing worker Node 20.20.2 /
+ABI 115, SQLite 3.51.2, Sharp 0.33.5 / libvips 8.15.3. Memory-only SQLite and
+tiny generated JPEG/PNG/WebP/TIFF/GIF operations passed; no app/Firebase/data
+module was imported and no real objects or notifications were accessed.
+
+One probe ran at a time: 60-second wall/20-second CPU bounds, 1 GiB address
+space, 192 MiB monitored RSS ceiling, 64 MiB V8 heap, 512 MiB aggregate scratch
+and 2 GiB free-disk reserve. Observed peak RSS was approximately 66/58 MB and
+scratch 333,570,242 bytes. Initial available memory was 524 MB and free disk
+14.66 GB. All owned temporary files and tunnels were removed; a prior interrupted
+transfer's partial owned file was also explicitly removed. Node24 was never
+copied into the app root, system SDK cache or production ZIP. `[CUSTOM]`
+
+Bounded bootstrap inventory found only the known `node_modules.tar.zst`
+(29,556,533 bytes) among the approved root archive/manifest names. The current
+289-byte generated startup script uses the exact custom startup/cwd and contains
+no archive extraction or Oryx-manifest references. This is **current Node20**
+evidence; it does not establish future Node24 bootstrap ownership/disposition, complete
+deployment replacement or safe flag-restoration ordering. These technical
+release prerequisites, stopped staging and same-deployment RuntimeSuccessful
+remain blocked pending a reviewed qualified procedure; no preparation result
+authorizes maintenance.
+
+The prior source/Oryx attempt failed deployment `57a35227-3edc-4c12-8045-93b348269b3d`
+at its Node24.22.1 SDK cache/installer handoff. Original runtime/source availability
+was restored; this amendment bypasses, not repairs, that SDK path. The live
+Node20 EOL, old attachment authorization and Sharp decoder gaps remain. No ready
+deployment, SWA change, APK installation/publication or new resource is claimed.
+
+Scoped packaging QA subsequently exposed validator-only fail-closed gaps, not
+defective artifact bytes: actual-versus-declared ZIP expansion, incomplete ELF
+structure, optional platform classification, contradictory/malformed final native
+evidence, executed tool fingerprints and enumeration/diagnostic failures.
+The tightly coupled follow-up uses coherent resealed negative archives, public
+CLI controls on real qualified artifacts and hermetic filesystem/command faults.
+Full stream EOS/CRC/local-header consistency, complete structural ELF checks and
+typed provenance/native/platform checks are required before extraction/acceptance.
+All application/package/lock/pin bytes and the source-only validator remain
+unchanged. Operational destination permissions, data/mount boundaries, bootstrap/
+replacement and rollback flag/startup behavior remain separate release blockers.
 
 ## Current Android source build
 

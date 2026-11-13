@@ -17,9 +17,10 @@ compatibility are preserved; remaining limitations are described below.
 ## Availability
 
 - **Web app:** [Open M² Calls](https://thankful-moss-0611ddf0f.3.azurestaticapps.net)
-- **Android:** [Download version 1.0.0.201](https://github.com/guiess/fp-video-calls/releases/download/mobile-v1.0.0.201/M2Calls-1.0.0.201-debug.apk)
-  for Android 8.0 or later. See the [release notes](https://github.com/guiess/fp-video-calls/releases/tag/mobile-v1.0.0.201)
-  or [build from source](BUILD_INSTRUCTIONS.md).
+- **Android:** [Download an Android prerelease](https://github.com/guiess/fp-video-calls/releases)
+  for Android 8.0 or later. The release includes its APK, checksum and build-source
+  notes; these are debug-signed development builds. You can also
+  [build from source](BUILD_INSTRUCTIONS.md).
 - **Server status:** [`/health`](https://app-voice-video-server.azurewebsites.net/health)
   reports process liveness only.
 
@@ -168,12 +169,15 @@ Implementation:
 - Source now requires verified private Socket.IO identity, binds room controls
   to the current joined socket, and derives invitation identity from Firebase.
   Bounded call answer/cancel/decline ownership checks and the updated web client
-  are deployed on Azure. APK 201 was delivered for user testing; the user reported
-  "looks good" for checked behavior, not exhaustive device/scenario coverage.
-  APK 201 is the owner-approved debug-signed development prerelease. Account-free guest
+  are deployed on Azure. The coordinated Node 24.22.3 server release also enforces
+  trusted attachment upload records and uses Sharp 0.35.5 / libvips 8.18.7.
+  APK 219 and the updated web client passed user UAT, including new attachments;
+  this is checked behavior, not exhaustive device/scenario coverage.
+  Public APKs remain debug-signed development prereleases. Account-free guest
   participant IDs do not establish account ownership.
   Attachment access depends on the storage
-  mode. Account-free guest calling, temporary download links, and guest TURN
+  mode; pre-update attachments without trusted records require re-upload.
+  Account-free guest calling, temporary download links, and guest TURN
   credentials are design choices, with access and abuse controls described in
   [SECURITY.md](SECURITY.md).
 - The signaling service uses in-memory active call/roster/telemetry state and a
